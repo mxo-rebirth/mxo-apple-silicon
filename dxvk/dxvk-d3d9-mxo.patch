@@ -1,0 +1,1746 @@
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/d3d9/d3d9_device.cpp b/src/d3d9/d3d9_device.cpp
+--- a/src/d3d9/d3d9_device.cpp	2026-07-15 12:37:28
++++ b/src/d3d9/d3d9_device.cpp	2026-11-16 20:41:13
+@@ -1,5 +1,8 @@
++#include "d3d9_mxo_fastmath.h"
+ #include "d3d9_device.h"
+ 
++#include "../dxvk/dxvk_debug_counters.h"
++
+ #include "d3d9_annotation.h"
+ #include "d3d9_interface.h"
+ #include "d3d9_swapchain.h"
+@@ -79,8 +82,16 @@
+     if (!(BehaviorFlags & D3DCREATE_FPU_PRESERVE))
+       SetupFPU();
+ 
++    ApplyMxoFastMath();
++
+     m_dxsoOptions = DxsoOptions(this, m_d3d9Options);
+ 
++    // MoltenVK cannot have several image variables of different types on one binding
++    m_dxsoOptions.staticSamplers = env::getEnvVar("DXVK_STATIC_SAMPLERS") != "0"
++      && (env::getEnvVar("DXVK_STATIC_SAMPLERS") == "1"
++       || m_dxvkDevice->adapter()->matchesDriver(DxvkGpuVendor(0), VK_DRIVER_ID_MOLTENVK, 0, 0));
++    Logger::info(str::format("D3D9: static sampler variants ", m_dxsoOptions.staticSamplers ? "on" : "off"));
++
+     const bool supportsRobustness2 = m_dxvkDevice->features().extRobustness2.robustBufferAccess2;
+     bool useRobustConstantAccess = supportsRobustness2;
+     if (useRobustConstantAccess) {
+@@ -864,6 +875,7 @@
+   HRESULT STDMETHODCALLTYPE D3D9DeviceEx::GetRenderTargetData(
+           IDirect3DSurface9* pRenderTarget,
+           IDirect3DSurface9* pDestSurface) {
++    DxvkDebugCounters::add(DxvkDebugCounter::GetRenderTargetData);
+     D3D9DeviceLock lock = LockDevice();
+ 
+     D3D9Surface* src = static_cast<D3D9Surface*>(pRenderTarget);
+@@ -936,6 +948,7 @@
+           IDirect3DSurface9*   pDestSurface,
+     const RECT*                pDestRect,
+           D3DTEXTUREFILTERTYPE Filter) {
++    DxvkDebugCounters::add(DxvkDebugCounter::StretchRect);
+     D3D9DeviceLock lock = LockDevice();
+ 
+     D3D9Surface* dst = static_cast<D3D9Surface*>(pDestSurface);
+@@ -1145,6 +1158,7 @@
+           IDirect3DSurface9* pSurface,
+     const RECT*              pRect,
+           D3DCOLOR           Color) {
++    DxvkDebugCounters::add(DxvkDebugCounter::ColorFill);
+     D3D9DeviceLock lock = LockDevice();
+ 
+     D3D9Surface* dst = static_cast<D3D9Surface*>(pSurface);
+@@ -1237,6 +1251,7 @@
+   HRESULT STDMETHODCALLTYPE D3D9DeviceEx::SetRenderTarget(
+           DWORD              RenderTargetIndex,
+           IDirect3DSurface9* pRenderTarget) {
++    DxvkDebugCounters::add(DxvkDebugCounter::SetRenderTarget);
+     D3D9DeviceLock lock = LockDevice();
+ 
+     if (unlikely(RenderTargetIndex >= caps::MaxSimultaneousRenderTargets
+@@ -1406,6 +1421,7 @@
+ 
+ 
+   HRESULT STDMETHODCALLTYPE D3D9DeviceEx::EndScene() {
++    DxvkDebugCounters::add(DxvkDebugCounter::EndScene);
+     D3D9DeviceLock lock = LockDevice();
+ 
+     if (unlikely(!m_flags.test(D3D9DeviceFlag::InScene)))
+@@ -1426,6 +1442,7 @@
+           D3DCOLOR Color,
+           float    Z,
+           DWORD    Stencil) {
++    DxvkDebugCounters::add(DxvkDebugCounter::Clear);
+     if (unlikely(!Count && pRects))
+       return D3D_OK;
+ 
+@@ -4151,6 +4168,7 @@
+             D3DLOCKED_BOX*          pLockedBox,
+       const D3DBOX*                 pBox,
+             DWORD                   Flags) {
++    DxvkDebugCounters::add(DxvkDebugCounter::TextureLock);
+     D3D9DeviceLock lock = LockDevice();
+ 
+     UINT Subresource = pResource->CalcSubresource(Face, MipLevel);
+@@ -4442,6 +4460,7 @@
+   HRESULT D3D9DeviceEx::FlushImage(
+         D3D9CommonTexture*      pResource,
+         UINT                    Subresource) {
++    DxvkDebugCounters::add(DxvkDebugCounter::TextureUpload);
+ 
+     const Rc<DxvkImage> image = pResource->GetImage();
+     auto formatInfo  = imageFormatInfo(image->info().format);
+@@ -4705,7 +4724,31 @@
+       const bool usesStagingBuffer = pResource->DoesStagingBufferUploads();
+       const bool directMapping = pResource->GetMapMode() == D3D9_COMMON_BUFFER_MAP_MODE_DIRECT;
+       const bool skipWait = (!needsReadback && (usesStagingBuffer || readOnly || (noOverlap && !directMapping))) || noOverwrite;
+-      if (!skipWait) {
++
++      // A directly mapped buffer locked without DISCARD or NOOVERWRITE would have to wait until the GPU
++      // is done with every draw that still uses it: a flush, a new render pass and a stall per lock.
++      // Give the application a fresh backing slice that already holds the current contents instead.
++      // Draws that are already queued keep the old slice, exactly as with DISCARD.
++      const bool renameWithCopy = !skipWait && directMapping && !needsReadback && m_d3d9Options.lockRenameCopy;
++
++      if (renameWithCopy) {
++        DxvkDebugCounters::add(DxvkDebugCounter::BufferRename);
++        const DxvkBufferSliceHandle oldSlice = physSlice;
++        physSlice = pResource->DiscardMapSlice();
++
++        if (physSlice.mapPtr != oldSlice.mapPtr)
++          std::memcpy(physSlice.mapPtr, oldSlice.mapPtr, std::min(physSlice.length, oldSlice.length));
++
++        EmitCs([
++          cBuffer      = std::move(mappingBuffer),
++          cBufferSlice = physSlice
++        ] (DxvkContext* ctx) {
++          ctx->invalidateBuffer(cBuffer, cBufferSlice);
++        });
++
++        pResource->GPUReadingRange().Clear();
++      }
++      else if (!skipWait) {
+         if (unlikely(needsReadback)) {
+           Logger::warn("Buffer readback is unimplemented.");
+           // Remember to update the sequence number when implementing buffer readback.
+@@ -4742,6 +4785,7 @@
+ 
+   HRESULT D3D9DeviceEx::FlushBuffer(
+         D3D9CommonBuffer*       pResource) {
++    DxvkDebugCounters::add(DxvkDebugCounter::BufferUpload);
+     auto dstBuffer = pResource->GetBufferSlice<D3D9_COMMON_BUFFER_TYPE_REAL>();
+     auto srcSlice = pResource->GetMappedSlice();
+ 
+@@ -6252,6 +6296,9 @@
+     if (depthTextureMask != m_lastSamplerDepthMode)
+       UpdateSamplerDepthModeSpecConstant(depthTextureMask);
+ 
++    if (m_dxsoOptions.staticSamplers)
++      BindStaticSamplerVariants(usedTextureMask);
++
+     if (m_flags.test(D3D9DeviceFlag::DirtySharedPixelShaderData)) {
+       m_flags.clr(D3D9DeviceFlag::DirtySharedPixelShaderData);
+ 
+@@ -6302,11 +6349,73 @@
+   void D3D9DeviceEx::BindShader(
+   const D3D9CommonShader*                 pShaderModule,
+         D3D9ShaderPermutation             Permutation) {
++    // The default variant (2D, non-depth samplers) is now bound for this stage
++    const uint32_t slot = ShaderStage == DxsoProgramTypes::PixelShader ? 1u : 0u;
++    m_variantShader[slot] = pShaderModule;
++    m_variantKey[slot]    = 0;
++    m_variantPerm[slot]   = Permutation;
++
+     EmitCs([
+       cShader = pShaderModule->GetShader(Permutation)
+     ] (DxvkContext* ctx) {
+       ctx->bindShader(GetShaderStage(ShaderStage), cShader);
+     });
++  }
++
++
++  void D3D9DeviceEx::BindStaticSamplerVariants(uint32_t UsedTextureMask) {
++    auto bind = [this] (
++            uint32_t              slot,
++            VkShaderStageFlagBits stage,
++      const D3D9CommonShader*     shader,
++            D3D9ShaderPermutation permutation,
++            uint32_t              types,
++            uint32_t              depth) {
++      const uint64_t key = uint64_t(types) | (uint64_t(depth) << 32);
++
++      if (m_variantShader[slot] == shader && m_variantKey[slot] == key && m_variantPerm[slot] == permutation)
++        return;
++
++      m_variantShader[slot] = shader;
++      m_variantKey[slot]    = key;
++      m_variantPerm[slot]   = permutation;
++
++      EmitCs([
++        cStage  = stage,
++        cShader = shader->GetStaticSamplerVariant(this, permutation, types, depth)
++      ] (DxvkContext* ctx) {
++        ctx->bindShader(cStage, cShader);
++      });
++    };
++
++    const uint32_t psMask = UsedTextureMask &  ((1u << caps::MaxTexturesPS) - 1u);
++    const uint32_t vsMask = UsedTextureMask & ~((1u << (caps::MaxTexturesPS + 1)) - 1u);
++
++    if (UseProgrammablePS()) {
++      const D3D9CommonShader* shader = GetCommonShader(m_state.pixelShader);
++      const auto& info = shader->GetInfo();
++
++      // Only shader model 1 leaves the image type of a sampler to the bound texture
++      uint32_t types = 0;
++
++      if (info.majorVersion() < 2 || m_d3d9Options.forceSamplerTypeSpecConstants) {
++        for (uint32_t i = 0; i < caps::MaxTexturesPS; i++) {
++          if (psMask & (1u << i))
++            types |= m_textureTypes & (3u << (2 * i));
++        }
++      }
++
++      bind(1, VK_SHADER_STAGE_FRAGMENT_BIT, shader, GetPixelShaderPermutation(), types, m_depthTextures & psMask);
++    } else {
++      m_variantShader[1] = nullptr;
++    }
++
++    if (UseProgrammableVS()) {
++      bind(0, VK_SHADER_STAGE_VERTEX_BIT, GetCommonShader(m_state.vertexShader),
++        GetVertexShaderPermutation(), 0, m_depthTextures & vsMask);
++    } else {
++      m_variantShader[0] = nullptr;
++    }
+   }
+ 
+ 
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/d3d9/d3d9_device.h b/src/d3d9/d3d9_device.h
+--- a/src/d3d9/d3d9_device.h	2026-07-15 12:37:28
++++ b/src/d3d9/d3d9_device.h	2026-11-16 14:57:21
+@@ -1132,6 +1132,8 @@
+ 
+     void UpdateSamplerDepthModeSpecConstant(uint32_t value);
+ 
++    void BindStaticSamplerVariants(uint32_t UsedTextureMask);
++
+     void TrackBufferMappingBufferSequenceNumber(
+       D3D9CommonBuffer* pResource);
+ 
+@@ -1225,6 +1227,11 @@
+     uint32_t                        m_lastBoolSpecConstantVertex = 0;
+     uint32_t                        m_lastBoolSpecConstantPixel  = 0;
+     uint32_t                        m_lastSamplerDepthMode = 0;
++
++    // Shader variants bound for the current sampler image types ([0] = VS, [1] = PS)
++    const D3D9CommonShader*         m_variantShader[2] = { nullptr, nullptr };
++    uint64_t                        m_variantKey[2]    = { 0, 0 };
++    D3D9ShaderPermutation           m_variantPerm[2]   = { D3D9ShaderPermutations::None, D3D9ShaderPermutations::None };
+     uint32_t                        m_lastProjectionBitfield = 0;
+     uint32_t                        m_lastSamplerTypes = 0;
+     uint32_t                        m_lastPointMode = 0;
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/d3d9/d3d9_fixed_function.cpp b/src/d3d9/d3d9_fixed_function.cpp
+--- a/src/d3d9/d3d9_fixed_function.cpp	2026-07-15 12:37:28
++++ b/src/d3d9/d3d9_fixed_function.cpp	2026-11-16 14:57:21
+@@ -721,7 +721,7 @@
+     info.inputMask = m_inputMask;
+     info.outputMask = m_outputMask;
+     info.pushConstOffset = m_pushConstOffset;
+-    info.pushConstSize = m_pushConstOffset;
++    info.pushConstSize = m_pushConstSize;
+ 
+     return new DxvkShader(info, m_module.compile());
+   }
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/d3d9/d3d9_include.h b/src/d3d9/d3d9_include.h
+--- a/src/d3d9/d3d9_include.h	2026-07-15 12:37:28
++++ b/src/d3d9/d3d9_include.h	2026-11-16 14:57:21
+@@ -79,10 +79,7 @@
+ 
+ // MinGW headers are broken. Who'dve guessed?
+ #ifndef _MSC_VER
+-typedef struct _D3DDEVINFO_RESOURCEMANAGER
+-{
+-  char dummy;
+-} D3DDEVINFO_RESOURCEMANAGER, * LPD3DDEVINFO_RESOURCEMANAGER;
++// (removed: current mingw-w64 headers define D3DDEVINFO_RESOURCEMANAGER themselves)
+ 
+ #ifndef __WINE__
+ extern "C" WINUSERAPI WINBOOL WINAPI SetProcessDPIAware(VOID);
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/d3d9/d3d9_mxo_fastmath.cpp b/src/d3d9/d3d9_mxo_fastmath.cpp
+--- a/src/d3d9/d3d9_mxo_fastmath.cpp	1970-01-01 01:00:00
++++ b/src/d3d9/d3d9_mxo_fastmath.cpp	2026-11-16 21:18:18
+@@ -0,0 +1,321 @@
++#include <windows.h>
++#include <tlhelp32.h>
++
++#include <atomic>
++#include <cstdint>
++#include <cstdio>
++#include <cstring>
++#include <vector>
++
++#include "../util/log/log.h"
++#include "../util/util_env.h"
++#include "../util/util_string.h"
++
++#include "d3d9_mxo_fastmath.h"
++
++#include "d3d9_mxo_fastmath_asm.inc"
++
++// x87 routines of the client translated to SSE2 by xlat.py
++#include "d3d9_mxo_x87.h"
++#include "d3d9_mxo_x87.inc"
++
++extern "C" {
++  extern uint32_t MxoX_funcs[], MxoX_absfix[], MxoX_relfix[], MxoX_deps[];
++  extern uint8_t  MxoX_code_begin[], MxoX_code_end[];
++  extern uint32_t MxoX_tid, MxoX_imagebase;
++}
++
++namespace dxvk {
++
++  static uint32_t s_x87Thread = 0;
++
++  static bool RedirectFunction(uint8_t* target, void* replacement) {
++    DWORD oldProtect = 0;
++
++    if (!::VirtualProtect(target, 5, PAGE_EXECUTE_READWRITE, &oldProtect))
++      return false;
++
++    const int32_t rel = int32_t(intptr_t(replacement) - intptr_t(target + 5));
++    target[0] = 0xE9; // jmp rel32
++    std::memcpy(target + 1, &rel, sizeof(rel));
++
++    ::VirtualProtect(target, 5, oldProtect, &oldProtect);
++    ::FlushInstructionCache(::GetCurrentProcess(), target, 5);
++    return true;
++  }
++
++
++  // Writes the entry jumps of all given routines while every other thread of the process is
++  // suspended, and leaves out any routine a thread is just entering. Nothing in the suspended
++  // section allocates or takes locks.
++  static uint32_t InstallRedirects(uint8_t* base, const std::vector<const MxoXFunc*>& funcs) {
++    std::vector<DWORD> oldProtect(funcs.size(), 0);
++    std::vector<uint8_t> writable(funcs.size(), 0);
++
++    for (size_t i = 0; i < funcs.size(); i++)
++      writable[i] = ::VirtualProtect(base + funcs[i]->rva, 5, PAGE_EXECUTE_READWRITE, &oldProtect[i]) ? 1 : 0;
++
++    std::vector<HANDLE> threads;
++    HANDLE snapshot = ::CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
++
++    if (snapshot != INVALID_HANDLE_VALUE) {
++      THREADENTRY32 entry = { };
++      entry.dwSize = sizeof(entry);
++
++      for (BOOL more = ::Thread32First(snapshot, &entry); more; more = ::Thread32Next(snapshot, &entry)) {
++        if (entry.th32OwnerProcessID != ::GetCurrentProcessId() || entry.th32ThreadID == ::GetCurrentThreadId())
++          continue;
++
++        if (HANDLE thread = ::OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT, FALSE, entry.th32ThreadID))
++          threads.push_back(thread);
++      }
++
++      ::CloseHandle(snapshot);
++    }
++
++    std::vector<uint32_t> eips(threads.size(), 0);
++    uint32_t installed = 0;
++
++    // ---- no allocation, logging or locking from here ...
++    for (size_t t = 0; t < threads.size(); t++) {
++      if (::SuspendThread(threads[t]) == DWORD(-1))
++        continue;
++
++      CONTEXT context;
++      context.ContextFlags = CONTEXT_CONTROL;
++
++      if (::GetThreadContext(threads[t], &context))
++        eips[t] = uint32_t(context.Eip);
++    }
++
++    for (size_t i = 0; i < funcs.size(); i++) {
++      if (!writable[i])
++        continue;
++
++      uint8_t* target = base + funcs[i]->rva;
++      const uint32_t address = uint32_t(uintptr_t(target));
++      bool busy = false;
++
++      for (size_t t = 0; t < eips.size() && !busy; t++)
++        busy = eips[t] > address && eips[t] < address + 5;
++
++      if (busy)
++        continue;
++
++      const int32_t rel = int32_t(intptr_t(funcs[i]->replacement) - intptr_t(target + 5));
++      target[0] = 0xE9; // jmp rel32
++      std::memcpy(target + 1, &rel, sizeof(rel));
++      installed++;
++    }
++
++    for (size_t t = 0; t < threads.size(); t++)
++      ::ResumeThread(threads[t]);
++    // ---- ... to here
++
++    for (HANDLE thread : threads)
++      ::CloseHandle(thread);
++
++    for (size_t i = 0; i < funcs.size(); i++) {
++      if (writable[i]) {
++        DWORD ignored = 0;
++        ::VirtualProtect(base + funcs[i]->rva, 5, oldProtect[i], &ignored);
++        ::FlushInstructionCache(::GetCurrentProcess(), base + funcs[i]->rva, 5);
++      }
++    }
++
++    return installed;
++  }
++
++
++  void ApplyMxoFastMath() {
++    static std::atomic<bool> s_done = { false };
++
++    if (s_done.exchange(true))
++      return;
++
++    if (env::getEnvVar("DXVK_MXO_FASTMATH") == "0")
++      return;
++
++    HMODULE client = ::GetModuleHandleA("client.dll");
++
++    if (!client)
++      return;
++
++    auto base = reinterpret_cast<uint8_t*>(client);
++    auto dos  = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
++
++    if (dos->e_magic != IMAGE_DOS_SIGNATURE)
++      return;
++
++    auto nt = reinterpret_cast<const IMAGE_NT_HEADERS32*>(base + dos->e_lfanew);
++
++    if (nt->Signature != IMAGE_NT_SIGNATURE)
++      return;
++
++    const uint32_t imageSize = nt->OptionalHeader.SizeOfImage;
++
++    // Two hand-written replacements. The originals are recognised by position, length and a hash of
++    // their code (address fields excluded), so no game code is carried in this file.
++    struct HandWritten {
++      uint32_t    rva;
++      uint32_t    size;
++      uint64_t    hash;
++      uint32_t    refCount;       // address fields inside the routine; each must point at the float 1.0
++      uint32_t    refs[3];
++      void*       replacement;
++    };
++
++    const HandWritten handWritten[2] = {
++      { 0x45e10, 554, 0xb89ece1419908b6bull, 0, { 0, 0, 0 },       reinterpret_cast<void*>(&MxoMatMulSSE)    },
++      { 0x46510, 214, 0x4b661a4a028dab20ull, 3, { 118, 159, 201 }, reinterpret_cast<void*>(&MxoQuatToMatSSE) },
++    };
++
++    bool replaced[2] = { false, false };
++
++    for (uint32_t r = 0; r < 2; r++) {
++      const HandWritten& h = handWritten[r];
++
++      if (h.rva > imageSize || h.size > imageSize - h.rva)
++        continue;
++
++      const uint8_t* code = base + h.rva;
++      uint64_t hash = 0xcbf29ce484222325ull;   // FNV-1a
++      bool same = true;
++
++      for (uint32_t i = 0; i < h.size; ) {
++        bool isRef = false;
++
++        for (uint32_t k = 0; k < h.refCount; k++)
++          isRef = isRef || h.refs[k] == i;
++
++        if (isRef) {
++          uint32_t address;
++          std::memcpy(&address, code + i, sizeof(address));
++
++          const uint32_t imageBase = uint32_t(uintptr_t(base));
++          float one = 0.0f;
++
++          if (address >= imageBase && address <= imageBase + imageSize - sizeof(float))
++            std::memcpy(&one, reinterpret_cast<const void*>(uintptr_t(address)), sizeof(one));
++
++          same = same && one == 1.0f;
++          i += 4;
++        } else {
++          hash = (hash ^ code[i]) * 0x100000001b3ull;
++          i += 1;
++        }
++      }
++
++      replaced[r] = same && hash == h.hash && RedirectFunction(base + h.rva, h.replacement);
++    }
++
++    Logger::info(str::format("MxO fast math: matrix multiply ", replaced[0] ? "replaced" : "left alone",
++      ", quaternion to matrix ", replaced[1] ? "replaced" : "left alone"));
++
++    if (env::getEnvVar("DXVK_MXO_X87") == "0")
++      return;
++
++    // Translated routines. They assume the FPU setup of the thread that owns the device (24-bit
++    // precision, round to nearest) and send every other thread back into the original code.
++    // C:\Games\dxvk\x87max.txt may hold a number to install only the first N (for bisecting).
++    uint32_t limit = ~0u;
++
++    if (FILE* file = std::fopen("C:\\Games\\dxvk\\x87max.txt", "r")) {
++      if (std::fscanf(file, "%u", &limit) != 1)
++        limit = ~0u;
++      std::fclose(file);
++    }
++
++    uint32_t total = 0, matching = 0, installed = 0;
++
++    if (MxoXFixups(base, MxoX_imagebase, MxoX_absfix, MxoX_relfix, MxoX_code_begin, MxoX_code_end)) {
++      s_x87Thread = ::GetCurrentThreadId();
++      MxoX_tid    = s_x87Thread;
++
++      // code the translations rely on without replacing it
++      bool depsIntact = true;
++
++      for (auto f = reinterpret_cast<const MxoXFunc*>(MxoX_deps); f->size; f++)
++        depsIntact = depsIntact && MxoXMatches(base, imageSize, MxoX_imagebase, *f);
++
++      std::vector<const MxoXFunc*> todo;
++      std::string differing;
++
++      for (auto f = reinterpret_cast<const MxoXFunc*>(MxoX_funcs); f->size; f++) {
++        if (total++ >= limit)
++          continue;
++
++        if ((f->flags & 1) && !depsIntact)
++          continue;
++
++        if (MxoXMatches(base, imageSize, MxoX_imagebase, *f))
++          todo.push_back(f);
++        else if (differing.size() < 80)
++          differing += str::format(" ", std::hex, f->rva);
++      }
++
++      matching  = uint32_t(todo.size());
++      installed = InstallRedirects(base, todo);
++
++      if (!differing.empty())
++        Logger::info(str::format("MxO fast math: left alone because the code in memory differs (rva):", differing));
++    }
++
++    Logger::info(str::format("MxO fast math: ", installed, " of ", total, " translated x87 routines installed (",
++      matching, " match this client.dll)"));
++  }
++
++
++  float GetMxoRenderThrottle() {
++    // The client keeps its render throttle (1 = full draw distance, down to 0.25) at [[client+0x9f84e8]+0x14].
++    // Only trusted if the throttle routine at client+0x28e0 really loads that pointer where expected.
++    static const uint8_t* s_client = [] () -> const uint8_t* {
++      auto base = reinterpret_cast<const uint8_t*>(::GetModuleHandleA("client.dll"));
++
++      if (!base)
++        return nullptr;
++
++      auto nt = reinterpret_cast<const IMAGE_NT_HEADERS32*>(base + reinterpret_cast<const IMAGE_DOS_HEADER*>(base)->e_lfanew);
++
++      if (nt->OptionalHeader.SizeOfImage < 0xa00000)
++        return nullptr;
++
++      const uint32_t global = uint32_t(uintptr_t(base)) + 0x9f84e8;
++      uint64_t hash = 0xcbf29ce484222325ull;   // FNV-1a of the store's code around its address, which has to name the global
++      for (uint32_t i : { 0u, 1u, 6u, 7u, 8u }) hash = (hash ^ base[0x2900 + i]) * 0x100000001b3ull;
++      return hash != 0xb7258c7ae11ecf31ull || std::memcmp(base + 0x2900 + 2, &global, 4) ? nullptr : base;
++    }();
++
++    if (!s_client)
++      return -1.0f;
++
++    uint32_t object = 0;
++    std::memcpy(&object, s_client + 0x9f84e8, 4);
++
++    if (!object)
++      return -1.0f;
++
++    float throttle = -1.0f;
++    std::memcpy(&throttle, reinterpret_cast<const void*>(uintptr_t(object + 0x14)), 4);
++    return throttle;
++  }
++
++
++  void CheckMxoFastMathFpu() {
++    if (!s_x87Thread || ::GetCurrentThreadId() != s_x87Thread)
++      return;
++
++    // precision control (bits 8-9) must be 24-bit and rounding control (bits 10-11) nearest
++    uint16_t control = 0;
++    __asm__ __volatile__("fnstcw %0" : "=m" (*&control));
++
++    const bool usable = !(control & 0x0f00);
++
++    if (usable != (MxoX_tid != 0)) {
++      MxoX_tid = usable ? s_x87Thread : 0;
++      Logger::warn(str::format("MxO fast math: FPU control word ", std::hex, control,
++        usable ? ", translated routines back on" : ", translated routines off"));
++    }
++  }
++
++}
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/d3d9/d3d9_mxo_fastmath.h b/src/d3d9/d3d9_mxo_fastmath.h
+--- a/src/d3d9/d3d9_mxo_fastmath.h	1970-01-01 01:00:00
++++ b/src/d3d9/d3d9_mxo_fastmath.h	2026-11-16 19:21:35
+@@ -0,0 +1,32 @@
++#pragma once
++
++namespace dxvk {
++
++  /**
++   * \brief Faster math routines for The Matrix Online
++   *
++   * The game's client.dll does its vector and matrix math on the x87 FPU, which
++   * Rosetta 2 emulates in software. If the loaded client.dll contains two specific,
++   * byte-identical hot routines (4x4 matrix multiply, quaternion to matrix), they
++   * are redirected in memory to SSE implementations. Nothing on disk is changed
++   * and other programs are not affected. Set DXVK_MXO_FASTMATH=0 to disable.
++   *
++   * A further set of the client's hot x87 routines is replaced by SSE2 code that
++   * xlat.py generated from them (d3d9_mxo_x87.inc); each is installed only if the
++   * loaded client.dll holds exactly the code it was generated from. Set
++   * DXVK_MXO_X87=0 to disable just those.
++   */
++  void ApplyMxoFastMath();
++
++  /**
++   * \brief Checks once per frame that the FPU is still set up the way the
++   *        translated routines assume, and switches them off otherwise
++   */
++  void CheckMxoFastMathFpu();
++
++  /**
++   * \brief The game's current render throttle (1 = full draw distance), or -1 if unknown
++   */
++  float GetMxoRenderThrottle();
++
++}
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/d3d9/d3d9_mxo_fastmath_asm.inc b/src/d3d9/d3d9_mxo_fastmath_asm.inc
+--- a/src/d3d9/d3d9_mxo_fastmath_asm.inc	1970-01-01 01:00:00
++++ b/src/d3d9/d3d9_mxo_fastmath_asm.inc	2026-11-16 15:36:05
+@@ -0,0 +1,81 @@
++// SSE replacements for two x87 math routines of The Matrix Online client (see d3d9_mxo_fastmath.cpp).
++//
++// MxoMatMulSSE      thiscall  Matrix4* Matrix4::Multiply(Matrix4* out, const Matrix4* b)   out = this * b
++// MxoQuatToMatSSE   thiscall  void     Matrix::FromQuaternion(const float q[4])            rotation part of this
++//
++// Both compute everything before writing the result, like the originals, so out may alias the inputs.
++#define MXO_ROW(off) \
++  "movss  xmm0, dword ptr [ecx+" #off "]\n"      "shufps xmm0, xmm0, 0\n" "mulps xmm0, xmm4\n" \
++  "movss  xmm1, dword ptr [ecx+" #off "+4]\n"    "shufps xmm1, xmm1, 0\n" "mulps xmm1, xmm5\n" "addps xmm0, xmm1\n" \
++  "movss  xmm1, dword ptr [ecx+" #off "+8]\n"    "shufps xmm1, xmm1, 0\n" "mulps xmm1, xmm6\n" "addps xmm0, xmm1\n" \
++  "movss  xmm1, dword ptr [ecx+" #off "+12]\n"   "shufps xmm1, xmm1, 0\n" "mulps xmm1, xmm7\n" "addps xmm0, xmm1\n" \
++  "movups xmmword ptr [esp+" #off "], xmm0\n"
++
++__asm__(
++  ".intel_syntax noprefix\n"
++  ".text\n"
++  ".p2align 4\n"
++  ".globl _MxoMatMulSSE\n"
++  "_MxoMatMulSSE:\n"
++  "mov    eax, dword ptr [esp+8]\n"          // b
++  "mov    edx, dword ptr [esp+4]\n"          // out
++  "sub    esp, 64\n"
++  "movups xmm4, xmmword ptr [eax]\n"
++  "movups xmm5, xmmword ptr [eax+16]\n"
++  "movups xmm6, xmmword ptr [eax+32]\n"
++  "movups xmm7, xmmword ptr [eax+48]\n"
++  MXO_ROW(0)
++  MXO_ROW(16)
++  MXO_ROW(32)
++  MXO_ROW(48)
++  "movups xmm0, xmmword ptr [esp]\n"
++  "movups xmm1, xmmword ptr [esp+16]\n"
++  "movups xmm2, xmmword ptr [esp+32]\n"
++  "movups xmm3, xmmword ptr [esp+48]\n"
++  "movups xmmword ptr [edx], xmm0\n"
++  "movups xmmword ptr [edx+16], xmm1\n"
++  "movups xmmword ptr [edx+32], xmm2\n"
++  "movups xmmword ptr [edx+48], xmm3\n"
++  "add    esp, 64\n"
++  "mov    eax, edx\n"
++  "ret    8\n"
++
++  ".p2align 4\n"
++  ".globl _MxoQuatToMatSSE\n"
++  "_MxoQuatToMatSSE:\n"
++  "mov    eax, dword ptr [esp+4]\n"          // q = { x, y, z, w }
++  "sub    esp, 40\n"
++  "mov    dword ptr [esp+36], 0x3f800000\n"  // 1.0f
++  "movss  xmm0, dword ptr [eax]\n"           // x
++  "movss  xmm1, dword ptr [eax+4]\n"         // y
++  "movss  xmm2, dword ptr [eax+8]\n"         // z
++  "movss  xmm3, dword ptr [eax+12]\n"        // w
++  "movaps xmm4, xmm0\n" "addss xmm4, xmm4\n" // x2
++  "movaps xmm5, xmm1\n" "addss xmm5, xmm5\n" // y2
++  "movaps xmm6, xmm2\n" "addss xmm6, xmm6\n" // z2
++  "movaps xmm7, xmm4\n" "mulss xmm7, xmm3\n" "movss dword ptr [esp],    xmm7\n"   // wx
++  "movaps xmm7, xmm5\n" "mulss xmm7, xmm3\n" "movss dword ptr [esp+4],  xmm7\n"   // wy
++  "movaps xmm7, xmm6\n" "mulss xmm7, xmm3\n" "movss dword ptr [esp+8],  xmm7\n"   // wz
++  "movaps xmm7, xmm4\n" "mulss xmm7, xmm0\n" "movss dword ptr [esp+12], xmm7\n"   // xx
++  "movaps xmm7, xmm5\n" "mulss xmm7, xmm0\n" "movss dword ptr [esp+16], xmm7\n"   // xy
++  "movaps xmm7, xmm6\n" "mulss xmm7, xmm0\n" "movss dword ptr [esp+20], xmm7\n"   // xz
++  "movaps xmm7, xmm5\n" "mulss xmm7, xmm1\n" "movss dword ptr [esp+24], xmm7\n"   // yy
++  "movaps xmm7, xmm6\n" "mulss xmm7, xmm1\n" "movss dword ptr [esp+28], xmm7\n"   // yz
++  "mulss  xmm6, xmm2\n"                      "movss dword ptr [esp+32], xmm6\n"   // zz
++  "movss  xmm7, dword ptr [esp+36]\n"        // 1.0
++  "movss  xmm0, dword ptr [esp+32]\n" "addss xmm0, dword ptr [esp+24]\n" "movaps xmm1, xmm7\n" "subss xmm1, xmm0\n" "movss dword ptr [ecx],      xmm1\n"  // 1 - (zz + yy)
++  "movss  xmm0, dword ptr [esp+16]\n" "addss xmm0, dword ptr [esp+8]\n"                                             "movss dword ptr [ecx+4],    xmm0\n"  // xy + wz
++  "movss  xmm0, dword ptr [esp+20]\n" "subss xmm0, dword ptr [esp+4]\n"                                             "movss dword ptr [ecx+8],    xmm0\n"  // xz - wy
++  "movss  xmm0, dword ptr [esp+16]\n" "subss xmm0, dword ptr [esp+8]\n"                                             "movss dword ptr [ecx+0x10], xmm0\n"  // xy - wz
++  "movss  xmm0, dword ptr [esp+32]\n" "addss xmm0, dword ptr [esp+12]\n" "movaps xmm1, xmm7\n" "subss xmm1, xmm0\n" "movss dword ptr [ecx+0x14], xmm1\n"  // 1 - (zz + xx)
++  "movss  xmm0, dword ptr [esp+28]\n" "addss xmm0, dword ptr [esp]\n"                                               "movss dword ptr [ecx+0x18], xmm0\n"  // yz + wx
++  "movss  xmm0, dword ptr [esp+20]\n" "addss xmm0, dword ptr [esp+4]\n"                                             "movss dword ptr [ecx+0x20], xmm0\n"  // xz + wy
++  "movss  xmm0, dword ptr [esp+28]\n" "subss xmm0, dword ptr [esp]\n"                                               "movss dword ptr [ecx+0x24], xmm0\n"  // yz - wx
++  "movss  xmm0, dword ptr [esp+24]\n" "addss xmm0, dword ptr [esp+12]\n" "movaps xmm1, xmm7\n" "subss xmm1, xmm0\n" "movss dword ptr [ecx+0x28], xmm1\n"  // 1 - (yy + xx)
++  "add    esp, 40\n"
++  "ret    4\n"
++  ".att_syntax prefix\n"
++);
++
++extern "C" void MxoMatMulSSE();
++extern "C" void MxoQuatToMatSSE();
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/d3d9/d3d9_mxo_x87.h b/src/d3d9/d3d9_mxo_x87.h
+--- a/src/d3d9/d3d9_mxo_x87.h	1970-01-01 01:00:00
++++ b/src/d3d9/d3d9_mxo_x87.h	2026-11-16 19:15:37
+@@ -0,0 +1,71 @@
++// Runtime side of the x87 -> SSE2 translations generated by xlat.py.
++#pragma once
++
++#include <windows.h>
++#include <cstdint>
++#include <cstring>
++
++struct MxoXFunc {
++  uint32_t        rva;          // function start in the image
++  uint32_t        size;         // length of the original code
++  void*           replacement;  // translated code
++  const uint8_t*  orig;         // original bytes, as linked at the preferred base
++  const uint32_t* relocs;       // ascending offsets of relocated dwords, ends with 0xffffffff
++  uint32_t        flags;        // 1: relies on every entry of the dependency table being intact
++};
++
++// Points the translated code at an image loaded at 'base'. Call once.
++static inline bool MxoXFixups(const uint8_t* base, uint32_t prefBase, const uint32_t* absfix,
++                              const uint32_t* relfix, uint8_t* codeBegin, uint8_t* codeEnd) {
++  DWORD oldProtect = 0;
++
++  if (!::VirtualProtect(codeBegin, codeEnd - codeBegin, PAGE_EXECUTE_READWRITE, &oldProtect))
++    return false;
++
++  const uint32_t imageBase = uint32_t(uintptr_t(base));
++  const uint32_t delta = imageBase - prefBase;
++
++  for (const uint32_t* p = absfix; *p; p++) {
++    uint32_t value;
++    std::memcpy(&value, reinterpret_cast<void*>(uintptr_t(*p)), 4);
++    value += delta;
++    std::memcpy(reinterpret_cast<void*>(uintptr_t(*p)), &value, 4);
++  }
++
++  for (const uint32_t* p = relfix; p[0]; p += 2) {
++    const int32_t rel = int32_t(imageBase + p[1] - (p[0] + 4));
++    std::memcpy(reinterpret_cast<void*>(uintptr_t(p[0])), &rel, 4);
++  }
++
++  ::VirtualProtect(codeBegin, codeEnd - codeBegin, oldProtect, &oldProtect);
++  ::FlushInstructionCache(::GetCurrentProcess(), codeBegin, codeEnd - codeBegin);
++  return true;
++}
++
++// True if the image loaded at 'base' holds exactly the code the translation was made from.
++static inline bool MxoXMatches(const uint8_t* base, uint32_t imageSize, uint32_t prefBase, const MxoXFunc& f) {
++  if (f.rva > imageSize || f.size > imageSize - f.rva)
++    return false;
++
++  const uint32_t delta = uint32_t(uintptr_t(base)) - prefBase;
++  const uint8_t* code = base + f.rva;
++  const uint32_t* reloc = f.relocs;
++
++  for (uint32_t i = 0; i < f.size; ) {
++    if (*reloc == i) {
++      uint32_t a, b;
++      std::memcpy(&a, code + i, 4);
++      std::memcpy(&b, f.orig + i, 4);
++      if (a != b + delta)
++        return false;
++      i += 4;
++      reloc++;
++    } else {
++      if (code[i] != f.orig[i])
++        return false;
++      i++;
++    }
++  }
++
++  return true;
++}
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/d3d9/d3d9_options.cpp b/src/d3d9/d3d9_options.cpp
+--- a/src/d3d9/d3d9_options.cpp	2026-07-15 12:37:28
++++ b/src/d3d9/d3d9_options.cpp	2026-11-16 20:24:01
+@@ -1,5 +1,7 @@
+ #include "d3d9_options.h"
+ 
++#include "../util/util_env.h"
++
+ #include "d3d9_caps.h"
+ 
+ namespace dxvk {
+@@ -73,6 +75,8 @@
+     this->apitraceMode                  = config.getOption<bool>        ("d3d9.apitraceMode",                  false);
+     this->deviceLocalConstantBuffers    = config.getOption<bool>        ("d3d9.deviceLocalConstantBuffers",    false);
+     this->allowDirectBufferMapping      = config.getOption<bool>        ("d3d9.allowDirectBufferMapping",      true);
++    this->lockRenameCopy                = config.getOption<bool>        ("d3d9.lockRenameCopy",                true)
++                                       && env::getEnvVar("DXVK_LOCK_RENAME_COPY") != "0";
+     this->seamlessCubes                 = config.getOption<bool>        ("d3d9.seamlessCubes",                 false);
+ 
+     // If we are not Nvidia, enable general hazards.
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/d3d9/d3d9_options.h b/src/d3d9/d3d9_options.h
+--- a/src/d3d9/d3d9_options.h	2026-07-15 12:37:28
++++ b/src/d3d9/d3d9_options.h	2026-11-16 20:24:01
+@@ -158,6 +158,10 @@
+     /// Disable direct buffer mapping
+     bool allowDirectBufferMapping;
+ 
++    /// Locks of directly mapped buffers without DISCARD or NOOVERWRITE get a
++    /// fresh copy of the buffer instead of waiting for the GPU to finish with it.
++    bool lockRenameCopy;
++
+     /// Don't use non seamless cube maps
+     bool seamlessCubes;
+   };
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/d3d9/d3d9_shader.cpp b/src/d3d9/d3d9_shader.cpp
+--- a/src/d3d9/d3d9_shader.cpp	2026-07-15 12:37:28
++++ b/src/d3d9/d3d9_shader.cpp	2026-11-16 14:57:21
+@@ -16,6 +16,11 @@
+       const void*                 pShaderBytecode,
+       const DxsoAnalysisInfo&     AnalysisInfo,
+             DxsoModule*           pModule) {
++    m_stage      = ShaderStage;
++    m_key        = Key;
++    m_moduleInfo = *pDxsoModuleInfo;
++    m_variants   = std::make_shared<VariantCache>();
++
+     const uint32_t bytecodeLength = AnalysisInfo.bytecodeByteLength;
+     m_bytecode.resize(bytecodeLength);
+     std::memcpy(m_bytecode.data(), pShaderBytecode, bytecodeLength);
+@@ -92,6 +97,58 @@
+ 
+     if (m_shaders[1] != nullptr)
+       pDevice->GetDXVKDevice()->registerShader(m_shaders[1]);
++  }
++
++
++  Rc<DxvkShader> D3D9CommonShader::GetStaticSamplerVariant(
++          D3D9DeviceEx*         pDevice,
++          D3D9ShaderPermutation Permutation,
++          uint32_t              Types,
++          uint32_t              Depth) const {
++    if ((!Types && !Depth) || m_variants == nullptr)
++      return m_shaders[Permutation];
++
++    const uint64_t variantKey = uint64_t(Types) | (uint64_t(Depth) << 32);
++
++    std::lock_guard<dxvk::mutex> lock(m_variants->mutex);
++
++    auto entry = m_variants->shaders.find(variantKey);
++
++    if (entry == m_variants->shaders.end()) {
++      DxsoReader reader(reinterpret_cast<const char*>(m_bytecode.data()));
++      DxsoModule module(reader);
++
++      DxsoAnalysisInfo analysis = module.analyze();
++
++      DxsoModuleInfo moduleInfo = m_moduleInfo;
++      moduleInfo.options.staticSamplerTypes = Types;
++      moduleInfo.options.staticSamplerDepth = Depth;
++
++      // Give the variant its own identity for the pipeline and state caches
++      std::array<uint32_t, 7> keyData = {{
++        m_key.sha1().dword(0), m_key.sha1().dword(1), m_key.sha1().dword(2),
++        m_key.sha1().dword(3), m_key.sha1().dword(4), Types, Depth }};
++
++      DxvkShaderKey key(m_stage, Sha1Hash::compute(keyData.data(), sizeof(keyData)));
++
++      const D3D9ConstantLayout& constantLayout = m_stage == VK_SHADER_STAGE_VERTEX_BIT
++        ? pDevice->GetVertexConstantLayout()
++        : pDevice->GetPixelConstantLayout();
++
++      DxsoPermutations shaders = module.compile(moduleInfo, key.toString(), analysis, constantLayout);
++
++      shaders[0]->setShaderKey(key);
++      pDevice->GetDXVKDevice()->registerShader(shaders[0]);
++
++      if (shaders[1] != nullptr) {
++        shaders[1]->setShaderKey({ VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT, key.sha1() });
++        pDevice->GetDXVKDevice()->registerShader(shaders[1]);
++      }
++
++      entry = m_variants->shaders.insert({ variantKey, shaders }).first;
++    }
++
++    return entry->second[Permutation];
+   }
+ 
+ 
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/d3d9/d3d9_shader.h b/src/d3d9/d3d9_shader.h
+--- a/src/d3d9/d3d9_shader.h	2026-07-15 12:37:28
++++ b/src/d3d9/d3d9_shader.h	2026-11-16 14:57:21
+@@ -1,5 +1,7 @@
+ #pragma once
+ 
++#include <memory>
++#include <unordered_map>
+ #include "d3d9_resource.h"
+ #include "../dxso/dxso_module.h"
+ #include "d3d9_shader_permutations.h"
+@@ -37,6 +39,18 @@
+       return m_shaders[Permutation];
+     }
+ 
++    /**
++     * \brief Shader compiled for a fixed set of sampler image types
++     *
++     * Types and Depth use the layout of DxsoOptions::staticSamplerTypes
++     * and staticSamplerDepth. Variants are compiled on first use.
++     */
++    Rc<DxvkShader> GetStaticSamplerVariant(
++            D3D9DeviceEx*         pDevice,
++            D3D9ShaderPermutation Permutation,
++            uint32_t              Types,
++            uint32_t              Depth) const;
++
+     std::string GetName() const {
+       return m_shaders[D3D9ShaderPermutations::None]->debugName();
+     }
+@@ -72,6 +86,16 @@
+     DxsoPermutations      m_shaders;
+ 
+     std::vector<uint8_t>  m_bytecode;
++
++    struct VariantCache {
++      dxvk::mutex                                    mutex;
++      std::unordered_map<uint64_t, DxsoPermutations> shaders;
++    };
++
++    VkShaderStageFlagBits         m_stage = VK_SHADER_STAGE_FRAGMENT_BIT;
++    DxvkShaderKey                 m_key;
++    DxsoModuleInfo                m_moduleInfo;
++    std::shared_ptr<VariantCache> m_variants;
+ 
+   };
+ 
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/d3d9/d3d9_swapchain.cpp b/src/d3d9/d3d9_swapchain.cpp
+--- a/src/d3d9/d3d9_swapchain.cpp	2026-07-15 12:37:28
++++ b/src/d3d9/d3d9_swapchain.cpp	2026-11-16 21:10:22
+@@ -1,4 +1,11 @@
++#include <cstdio>
++#include <windows.h>
++#include <tlhelp32.h>
++#include <vector>
++#include <cstring>
+ #include "d3d9_swapchain.h"
++#include "d3d9_mxo_fastmath.h"
++#include "../dxvk/dxvk_debug_counters.h"
+ #include "d3d9_surface.h"
+ #include "d3d9_monitor.h"
+ 
+@@ -184,6 +191,292 @@
+   };
+ 
+ 
++  // Optional sampling profiler, enabled by creating the file C:\\Games\\dxvk\\sample.flag before the game starts.
++  // A helper thread looks at every thread of the process every few milliseconds: where it is executing, and
++  // the nearest return addresses on its stack that lie in this DLL, in the game's client.dll and in
++  // winevulkan.dll (so that time spent waiting or inside Vulkan can be attributed to its caller). Samples are
++  // appended to C:\\Games\\dxvk\\samples.bin every ten seconds; translator/profile.py reads the file.
++  struct SampleRecord {
++    uint32_t tid, eip, retSelf[3], retClient, retVulkan;
++  };
++
++  // A stack value is taken for a return address only if a call instruction ends right before it
++  static bool FollowsCall(uint32_t address) {
++    auto p = reinterpret_cast<const uint8_t*>(uintptr_t(address));
++    return p[-5] == 0xE8
++        || (p[-2] == 0xFF && (p[-1] & 0x38) == 0x10)
++        || (p[-3] == 0xFF && (p[-2] & 0x38) == 0x10)
++        || (p[-6] == 0xFF && (p[-5] & 0x38) == 0x10)
++        || (p[-7] == 0xFF && (p[-6] & 0x38) == 0x10);
++  }
++
++  static DWORD s_presentThreadId = 0;
++
++  static void SamplerMarker() { }
++
++  static uint32_t ImageSize(HMODULE module) {
++    if (!module)
++      return 0;
++
++    auto base = reinterpret_cast<const uint8_t*>(module);
++    auto nt   = reinterpret_cast<const IMAGE_NT_HEADERS32*>(base + reinterpret_cast<const IMAGE_DOS_HEADER*>(base)->e_lfanew);
++    return nt->OptionalHeader.SizeOfImage;
++  }
++
++  static DWORD WINAPI SamplerThreadProc(void*) {
++    static const uint32_t MaxSamples = 60000;
++    static SampleRecord samples[MaxSamples];
++    struct Thread { DWORD tid; HANDLE handle; };
++    static Thread threads[64];
++    uint32_t threadCount = 0;
++    uint32_t count = 0;
++    DWORD lastFlush = ::GetTickCount();
++    DWORD lastScan  = lastFlush - 10000;
++
++    HMODULE self = nullptr;
++    ::GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
++      reinterpret_cast<LPCSTR>(&SamplerMarker), &self);
++
++    uint32_t range[3][2] = { };   // [this DLL, client.dll, winevulkan.dll] x [base, end)
++    range[0][0] = uint32_t(uintptr_t(self));
++    range[0][1] = range[0][0] + ImageSize(self);
++
++    for (;;) {
++      ::Sleep(5);
++      const DWORD now = ::GetTickCount();
++
++      if (now - lastScan >= 2000) {
++        lastScan = now;
++
++        HMODULE client = ::GetModuleHandleA("client.dll");
++        HMODULE vulkan = ::GetModuleHandleA("winevulkan.dll");
++        range[1][0] = uint32_t(uintptr_t(client)); range[1][1] = range[1][0] + ImageSize(client);
++        range[2][0] = uint32_t(uintptr_t(vulkan)); range[2][1] = range[2][0] + ImageSize(vulkan);
++
++        HANDLE snapshot = ::CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
++
++        if (snapshot != INVALID_HANDLE_VALUE) {
++          THREADENTRY32 entry = { };
++          entry.dwSize = sizeof(entry);
++
++          for (BOOL more = ::Thread32First(snapshot, &entry); more; more = ::Thread32Next(snapshot, &entry)) {
++            if (entry.th32OwnerProcessID != ::GetCurrentProcessId() || entry.th32ThreadID == ::GetCurrentThreadId())
++              continue;
++
++            bool known = false;
++
++            for (uint32_t i = 0; i < threadCount && !known; i++)
++              known = threads[i].tid == entry.th32ThreadID;
++
++            if (known || threadCount >= 64)
++              continue;
++
++            if (HANDLE handle = ::OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION, FALSE, entry.th32ThreadID))
++              threads[threadCount++] = { entry.th32ThreadID, handle };
++          }
++
++          ::CloseHandle(snapshot);
++        }
++      }
++
++      for (uint32_t i = 0; i < threadCount && count < MaxSamples; i++) {
++        if (::SuspendThread(threads[i].handle) == DWORD(-1))
++          continue;
++
++        CONTEXT context;
++        context.ContextFlags = CONTEXT_CONTROL;
++
++        if (::GetThreadContext(threads[i].handle, &context)) {
++          SampleRecord record = { threads[i].tid, uint32_t(context.Eip), { 0, 0, 0 }, 0, 0 };
++          uint32_t selfCount = 0;
++          auto stack = reinterpret_cast<const uint32_t*>(uintptr_t(context.Esp));
++
++          if (context.Esp && !::IsBadReadPtr(stack, 4 * 192)) {
++            for (uint32_t k = 0; k < 192; k++) {
++              const uint32_t value = stack[k];
++
++              if (value >= range[0][0] + 0x1000 && value < range[0][1]) {
++                if (selfCount < 3 && FollowsCall(value)) record.retSelf[selfCount++] = value;
++              } else if (value >= range[1][0] + 0x1000 && value < range[1][1]) {
++                if (!record.retClient && FollowsCall(value)) record.retClient = value;
++              } else if (value >= range[2][0] + 0x1000 && value < range[2][1]) {
++                if (!record.retVulkan && FollowsCall(value)) record.retVulkan = value;
++              }
++            }
++          }
++
++          samples[count++] = record;
++        }
++
++        ::ResumeThread(threads[i].handle);
++      }
++
++      if (now - lastFlush < 10000)
++        continue;
++
++      lastFlush = now;
++
++      if (FILE* file = std::fopen("C:\\Games\\dxvk\\samples.bin", "ab")) {
++        const env::ThreadNameEntry* names = nullptr;
++        const uint32_t nameCount = env::getThreadNames(&names);
++        const uint32_t head[10] = { 0x33504d53u /* SMP3 */, count, range[1][0], range[0][0], range[0][1] - range[0][0],
++          range[2][0], range[2][1] - range[2][0], uint32_t(s_presentThreadId), nameCount, 0 };
++        std::fwrite(head, 4, 10, file);
++        std::fwrite(names, sizeof(env::ThreadNameEntry), nameCount, file);
++        std::fwrite(samples, sizeof(SampleRecord), count, file);
++        std::fclose(file);
++      }
++
++      count = 0;
++    }
++  }
++
++  static void StartSamplerOnce() {
++    static const bool s_started = [] {
++      if (::GetFileAttributesA("C:\\Games\\dxvk\\sample.flag") == INVALID_FILE_ATTRIBUTES)
++        return false;
++
++      s_presentThreadId = ::GetCurrentThreadId();
++
++      HANDLE thread = ::CreateThread(nullptr, 0, SamplerThreadProc, nullptr, 0, nullptr);
++
++      if (thread)
++        ::CloseHandle(thread);
++
++      return thread != nullptr;
++    }();
++    (void) s_started;
++  }
++
++
++  // Optional diagnostics, enabled by creating the file C:\Games\dxvk\debug.flag before the game starts:
++  //  - logs the number of presented frames every five seconds
++  //  - saves the back buffer to C:\Games\dxvk\shot.bmp whenever C:\Games\dxvk\shot.req appears
++  static void DebugFrameTools(D3D9DeviceEx* device, IDirect3DSurface9* backBuffer) {
++    static const bool s_enabled = ::GetFileAttributesA("C:\\Games\\dxvk\\debug.flag") != INVALID_FILE_ATTRIBUTES;
++
++    if (likely(!s_enabled))
++      return;
++
++    static uint64_t s_frames = 0, s_lastLog = 0, s_lastCheck = 0;
++
++    LARGE_INTEGER counter, frequency;
++    ::QueryPerformanceCounter(&counter);
++    ::QueryPerformanceFrequency(&frequency);
++
++    const uint64_t now = uint64_t(counter.QuadPart);
++    const uint64_t second = uint64_t(frequency.QuadPart);
++
++    s_frames += 1;
++
++    if (!s_lastLog)
++      s_lastLog = now;
++
++    if (now - s_lastLog >= 5 * second) {
++      // what the graphics layer did per frame, and how long this thread sat waiting for it
++      static DxvkStatCounters s_lastCounters;
++      const DxvkStatCounters counters = device->GetDXVKDevice()->getStatCounters();
++      auto delta = [&] (DxvkStatCounter c) { return counters.getCtr(c) - s_lastCounters.getCtr(c); };
++      const uint64_t frames = std::max<uint64_t>(s_frames, 1);
++      const uint64_t spanUs = std::max<uint64_t>((now - s_lastLog) * 1000000 / second, 1);
++
++      const float throttle = GetMxoRenderThrottle();
++      Logger::info(str::format("FPS ", s_frames, " frames in ", (now - s_lastLog) * 1000 / second, " ms",
++        throttle >= 0.0f ? str::format(", render throttle ", int(throttle * 100.0f + 0.5f), "%") : std::string(),
++        "; per frame: draws ", delta(DxvkStatCounter::CmdDrawCalls) / frames,
++        ", render passes ", delta(DxvkStatCounter::CmdRenderPassCount) / frames,
++        ", submissions ", delta(DxvkStatCounter::QueueSubmitCount) * 10 / frames, "/10",
++        ", waits for render thread ", delta(DxvkStatCounter::CsSyncCount) * 10 / frames, "/10 = ", delta(DxvkStatCounter::CsSyncTicks) / frames, " us",
++        ", waits for GPU ", delta(DxvkStatCounter::GpuSyncCount) * 10 / frames, "/10 = ", delta(DxvkStatCounter::GpuSyncTicks) / frames, " us",
++        "; GPU idle ", delta(DxvkStatCounter::GpuIdleTicks) * 100 / spanUs, "%"));
++      s_lastCounters = counters;
++
++      // what the game asked for, and where render passes were broken up (callers by offset in this DLL)
++      static const char* const names[] = { "SetRenderTarget", "Clear", "EndScene", "StretchRect", "texture locks",
++        "texture uploads", "buffer uploads", "buffer renames", "ColorFill", "GetRenderTargetData" };
++      std::string calls;
++
++      for (uint32_t i = 0; i < uint32_t(DxvkDebugCounter::Count); i++) {
++        const uint32_t n = DxvkDebugCounters::s_value[i].exchange(0);
++        if (n)
++          calls += str::format(" ", names[i], " ", n * 10 / frames, "/10");
++      }
++
++      HMODULE self = nullptr;
++      ::GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
++        reinterpret_cast<LPCSTR>(&SamplerMarker), &self);
++      std::string spills;
++
++      for (uint32_t i = 0; i < DxvkSpillStats::Max; i++) {
++        const uint32_t n = DxvkSpillStats::s_count[i].exchange(0);
++        if (n)
++          spills += str::format(" +", std::hex, DxvkSpillStats::s_caller[i].load() - uintptr_t(self), std::dec, ":", n * 10 / frames, "/10");
++      }
++
++      Logger::info(str::format("FRAME calls per frame:", calls, "; render pass breaks by caller:", spills));
++      s_frames  = 0;
++      s_lastLog = now;
++    }
++
++    if (now - s_lastCheck < second / 2)
++      return;
++
++    s_lastCheck = now;
++
++    if (::GetFileAttributesA("C:\\Games\\dxvk\\shot.req") == INVALID_FILE_ATTRIBUTES)
++      return;
++
++    ::DeleteFileA("C:\\Games\\dxvk\\shot.req");
++
++    D3DSURFACE_DESC desc;
++
++    if (!backBuffer || FAILED(backBuffer->GetDesc(&desc)))
++      return;
++
++    Com<IDirect3DSurface9> dst;
++    HRESULT hr = device->CreateOffscreenPlainSurface(desc.Width, desc.Height, desc.Format, D3DPOOL_SYSTEMMEM, &dst, nullptr);
++
++    if (SUCCEEDED(hr))
++      hr = device->GetRenderTargetData(backBuffer, dst.ptr());
++
++    D3DLOCKED_RECT lr = { };
++
++    if (SUCCEEDED(hr))
++      hr = dst->LockRect(&lr, nullptr, D3DLOCK_READONLY);
++
++    if (FAILED(hr)) {
++      Logger::info(str::format("SHOT failed hr=0x", std::hex, uint32_t(hr)));
++      return;
++    }
++
++    const uint32_t w = desc.Width, h = desc.Height, stride = (w * 3 + 3) & ~3u, size = stride * h;
++    std::vector<uint8_t> out(54 + size, 0);
++    uint8_t* hd = out.data();
++    hd[0] = 'B'; hd[1] = 'M';
++    auto put32 = [&] (uint32_t off, uint32_t v) { std::memcpy(hd + off, &v, 4); };
++    put32(2, 54 + size); put32(10, 54); put32(14, 40); put32(18, w); put32(22, h);
++    hd[26] = 1; hd[28] = 24; put32(34, size);
++
++    for (uint32_t y = 0; y < h; y++) {
++      const uint8_t* src = reinterpret_cast<const uint8_t*>(lr.pBits) + size_t(lr.Pitch) * y;
++      uint8_t* row = hd + 54 + size_t(stride) * (h - 1 - y);
++      for (uint32_t x = 0; x < w; x++) { row[x * 3] = src[x * 4]; row[x * 3 + 1] = src[x * 4 + 1]; row[x * 3 + 2] = src[x * 4 + 2]; }
++    }
++
++    dst->UnlockRect();
++
++    HANDLE f = ::CreateFileA("C:\\Games\\dxvk\\shot.bmp", GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
++
++    if (f != INVALID_HANDLE_VALUE) {
++      DWORD written = 0;
++      ::WriteFile(f, out.data(), DWORD(out.size()), &written, nullptr);
++      ::CloseHandle(f);
++    }
++
++    Logger::info(str::format("SHOT saved ", w, "x", h));
++  }
++
++
+   D3D9SwapChainEx::D3D9SwapChainEx(
+           D3D9DeviceEx*          pDevice,
+           D3DPRESENT_PARAMETERS* pPresentParams,
+@@ -255,6 +548,10 @@
+           HWND     hDestWindowOverride,
+     const RGNDATA* pDirtyRegion,
+           DWORD    dwFlags) {
++    DebugFrameTools(m_parent, m_backBuffers.empty() ? nullptr : m_backBuffers[0].ptr());
++    StartSamplerOnce();
++    CheckMxoFastMathFpu();
++
+     D3D9DeviceLock lock = m_parent->LockDevice();
+ 
+     uint32_t presentInterval = m_presentParams.PresentationInterval;
+@@ -851,6 +1148,22 @@
+       VkRect2D dstRect = {
+         {  int32_t(m_dstRect.left),                    int32_t(m_dstRect.top)                    },
+         { uint32_t(m_dstRect.right - m_dstRect.left), uint32_t(m_dstRect.bottom - m_dstRect.top) } };
++
++      // The destination is in window client coordinates, and the swap chain was asked to have that
++      // size. The surface can insist on another one: under CrossOver a fullscreen 800x600 mode may
++      // come with a surface of the display's native size. Scale the destination to the swap chain
++      // then, otherwise the picture sits unscaled in the top left corner.
++      const VkExtent2D asked = GetPresentExtent();
++
++      if (info.imageExtent.width != asked.width || info.imageExtent.height != asked.height) {
++        const float sx = float(info.imageExtent.width)  / float(asked.width);
++        const float sy = float(info.imageExtent.height) / float(asked.height);
++
++        dstRect.offset.x      =  int32_t(float(dstRect.offset.x) * sx + 0.5f);
++        dstRect.offset.y      =  int32_t(float(dstRect.offset.y) * sy + 0.5f);
++        dstRect.extent.width  = uint32_t(float(dstRect.extent.width)  * sx + 0.5f);
++        dstRect.extent.height = uint32_t(float(dstRect.extent.height) * sy + 0.5f);
++      }
+ 
+       m_blitter->presentImage(m_context.ptr(),
+         m_imageViews.at(imageIndex), dstRect,
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/d3d9/meson.build b/src/d3d9/meson.build
+--- a/src/d3d9/meson.build	2026-07-15 12:37:28
++++ b/src/d3d9/meson.build	2026-11-16 15:36:05
+@@ -11,6 +11,7 @@
+ 
+ d3d9_src = [
+   'd3d9_main.cpp',
++  'd3d9_mxo_fastmath.cpp',
+   'd3d9_interface.cpp',
+   'd3d9_adapter.cpp',
+   'd3d9_monitor.cpp',
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/dxso/dxso_compiler.cpp b/src/dxso/dxso_compiler.cpp
+--- a/src/dxso/dxso_compiler.cpp	2026-07-15 12:37:28
++++ b/src/dxso/dxso_compiler.cpp	2026-11-16 14:57:21
+@@ -253,7 +253,7 @@
+     info.inputMask = m_inputMask;
+     info.outputMask = m_outputMask;
+     info.pushConstOffset = m_pushConstOffset;
+-    info.pushConstSize = m_pushConstOffset;
++    info.pushConstSize = m_pushConstSize;
+ 
+     return new DxvkShader(info, m_module.compile());
+   }
+@@ -820,7 +820,24 @@
+ 
+     const bool implicit = m_programInfo.majorVersion() < 2 || m_moduleInfo.options.forceSamplerTypeSpecConstants;
+ 
+-    if (!implicit) {
++    const bool staticSamplers = m_moduleInfo.options.staticSamplers;
++
++    if (staticSamplers) {
++      // Exactly one image variable per binding, chosen at compile time
++      DxsoSamplerType samplerType = implicit
++        ? DxsoSamplerType((m_moduleInfo.options.staticSamplerTypes >> (2 * idx)) & 3u)
++        : SamplerTypeFromTextureType(type);
++
++      if (samplerType >= SamplerTypeCount)
++        samplerType = SamplerTypeTexture2D;
++
++      const uint32_t depthBit = m_programInfo.type() == DxsoProgramTypes::VertexShader ? idx + 17 : idx;
++      const bool depth = samplerType != SamplerTypeTexture3D
++                      && ((m_moduleInfo.options.staticSamplerDepth >> depthBit) & 1u);
++
++      DclSampler(idx, binding, samplerType, depth, implicit);
++    }
++    else if (!implicit) {
+       DxsoSamplerType samplerType = 
+         SamplerTypeFromTextureType(type);
+ 
+@@ -855,7 +872,7 @@
+     DxvkResourceSlot resource;
+     resource.slot   = binding;
+     resource.type   = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+-    resource.view   = implicit ? VK_IMAGE_VIEW_TYPE_MAX_ENUM : viewType;
++    resource.view   = (implicit && !staticSamplers) ? VK_IMAGE_VIEW_TYPE_MAX_ENUM : viewType;
+     resource.access = VK_ACCESS_SHADER_READ_BIT;
+     m_resourceSlots.push_back(resource);
+   }
+@@ -2885,7 +2902,7 @@
+     }
+ 
+     // SM < 1.x does not have dcl sampler type.
+-    if (m_programInfo.majorVersion() < 2 && m_samplers[samplerIdx].color[SamplerTypeTexture2D].varId == 0)
++    if (m_programInfo.majorVersion() < 2 && !(m_usedSamplers & (1u << samplerIdx)))
+       emitDclSampler(samplerIdx, DxsoTextureType::Texture2D);
+ 
+     DxsoSampler sampler = m_samplers.at(samplerIdx);
+@@ -3084,7 +3101,27 @@
+         SampleImage(texcoordVar, sampler.color[samplerType], false, samplerType, sampler.boundConst);
+     };
+ 
+-    if (m_programInfo.majorVersion() >= 2 && !m_moduleInfo.options.forceSamplerTypeSpecConstants) {
++    if (m_moduleInfo.options.staticSamplers) {
++      // Same choice as in emitDclSampler: only that one variable exists
++      const bool implicitType = m_programInfo.majorVersion() < 2 || m_moduleInfo.options.forceSamplerTypeSpecConstants;
++
++      DxsoSamplerType samplerType = implicitType
++        ? DxsoSamplerType((m_moduleInfo.options.staticSamplerTypes >> (2 * samplerIdx)) & 3u)
++        : SamplerTypeFromTextureType(sampler.type);
++
++      if (samplerType >= SamplerTypeCount)
++        samplerType = SamplerTypeTexture2D;
++
++      const uint32_t depthBit = m_programInfo.type() == DxsoProgramTypes::VertexShader ? samplerIdx + 17 : samplerIdx;
++      const bool depth = samplerType != SamplerTypeTexture3D
++                      && ((m_moduleInfo.options.staticSamplerDepth >> depthBit) & 1u);
++
++      if (depth)
++        SampleImage(texcoordVar, sampler.depth[samplerType], true, samplerType, 0);
++      else
++        SampleImage(texcoordVar, sampler.color[samplerType], false, samplerType, sampler.boundConst);
++    }
++    else if (m_programInfo.majorVersion() >= 2 && !m_moduleInfo.options.forceSamplerTypeSpecConstants) {
+       DxsoSamplerType samplerType =
+         SamplerTypeFromTextureType(sampler.type);
+ 
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/dxso/dxso_options.h b/src/dxso/dxso_options.h
+--- a/src/dxso/dxso_options.h	2026-07-15 12:37:28
++++ b/src/dxso/dxso_options.h	2026-11-16 14:57:21
+@@ -57,6 +57,13 @@
+ 
+     /// Whether or not we can rely on robustness2 to handle oob constant access
+     bool robustness2Supported;
++
++    /// Fix sampler image types and depth-compare modes at compile time instead of
++    /// declaring several image variables on one binding and picking one through
++    /// specialization constants. Needed for MoltenVK, which cannot alias bindings.
++    bool     staticSamplers     = false;
++    uint32_t staticSamplerTypes = 0;   ///< 2 bits per pixel shader sampler (DxsoSamplerType)
++    uint32_t staticSamplerDepth = 0;   ///< 1 bit per sampler (PS: index, VS: index + 17)
+   };
+ 
+ }
+\ No newline at end of file
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/dxvk/dxvk_context.cpp b/src/dxvk/dxvk_context.cpp
+--- a/src/dxvk/dxvk_context.cpp	2026-07-15 12:37:28
++++ b/src/dxvk/dxvk_context.cpp	2026-11-16 20:47:03
+@@ -3,7 +3,11 @@
+ #include <utility>
+ 
+ #include "dxvk_device.h"
++#include <atomic>
++
+ #include "dxvk_context.h"
++#include "../util/util_env.h"
++#include "dxvk_debug_counters.h"
+ 
+ namespace dxvk {
+   
+@@ -34,7 +38,20 @@
+   }
+   
+   
++  // Uploads to resources that nothing recorded so far touches can run in the init command buffer,
++  // ahead of everything else in the submission, instead of interrupting the render pass. On a
++  // tile-based GPU every interrupted pass costs a full store and reload of the render targets.
++  // DXVK_HOIST_UPLOADS=0 turns this off.
++  static bool earlyUploadsEnabled() {
++    static const bool s_enabled = env::getEnvVar("DXVK_HOIST_UPLOADS") != "0";
++    return s_enabled;
++  }
++
++
+   void DxvkContext::beginRecording(const Rc<DxvkCommandList>& cmdList) {
++    static std::atomic<uint64_t> s_epoch = { 0ull };
++    m_earlyUploadEpoch = ++s_epoch;
++
+     m_cmd = cmdList;
+     m_cmd->beginRecording();
+ 
+@@ -535,6 +552,21 @@
+     auto srcSlice = srcBuffer->getSliceHandle(srcOffset, numBytes);
+     auto dstSlice = dstBuffer->getSliceHandle(dstOffset, numBytes);
+ 
++    // The destination is idle (apart from earlier uploads of this kind) and the GPU does not
++    // write the source: the copy can go first without changing what anything else sees.
++    if (!replaceBuffer
++     && earlyUploadsEnabled()
++     && m_flags.test(DxvkContextFlag::GpRenderPassBound)
++     && dstBuffer->isIdleForEarlyUpload(m_earlyUploadEpoch)
++     && !srcBuffer->isInUse(DxvkAccess::Write)) {
++      if (m_initBarriers.isBufferDirty(srcSlice, DxvkAccess::Read)
++       || m_initBarriers.isBufferDirty(dstSlice, DxvkAccess::Write))
++        m_initBarriers.recordCommands(m_cmd);
++
++      dstBuffer->countEarlyUpload(m_earlyUploadEpoch);
++      replaceBuffer = true;
++    }
++
+     if (!replaceBuffer) {
+       this->spillRenderPass(true);
+ 
+@@ -615,6 +647,66 @@
+           VkDeviceSize          srcOffset,
+           VkDeviceSize          rowAlignment,
+           VkDeviceSize          sliceAlignment) {
++    if (earlyUploadsEnabled()
++     && m_flags.test(DxvkContextFlag::GpRenderPassBound)
++     && !(dstImage->info().usage & (VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT))
++     && dstImage->isIdleForEarlyUpload(m_earlyUploadEpoch)
++     && !srcBuffer->isInUse(DxvkAccess::Write)) {
++      // Texture upload to an image that nothing recorded so far uses (a texture that was just
++      // streamed in or changed, uploaded right before its first draw): record it in the init
++      // command buffer and leave the render pass alone.
++      auto earlySrcSlice = srcBuffer->getSliceHandle(srcOffset, 0);
++
++      auto earlyRange = vk::makeSubresourceRange(dstSubresource);
++      earlyRange.aspectMask = dstImage->formatInfo()->aspectMask;
++
++      if (m_initBarriers.isImageDirty(dstImage, earlyRange, DxvkAccess::Write)
++       || m_initBarriers.isBufferDirty(earlySrcSlice, DxvkAccess::Read))
++        m_initBarriers.recordCommands(m_cmd);
++
++      VkImageLayout layoutInitial  = dstImage->info().layout;
++      VkImageLayout layoutTransfer = dstImage->pickLayout(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
++
++      if (dstImage->isFullSubresource(dstSubresource, dstExtent))
++        layoutInitial = VK_IMAGE_LAYOUT_UNDEFINED;
++
++      if (layoutTransfer != layoutInitial) {
++        m_initBarriers.accessImage(
++          dstImage, earlyRange,
++          layoutInitial,
++          VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
++          layoutTransfer,
++          VK_PIPELINE_STAGE_TRANSFER_BIT,
++          VK_ACCESS_TRANSFER_WRITE_BIT);
++
++        // the transition has to come before the copy
++        m_initBarriers.recordCommands(m_cmd);
++      }
++
++      this->copyImageBufferData<true>(DxvkCmdBuffer::InitBuffer, dstImage, dstSubresource,
++        dstOffset, dstExtent, layoutTransfer, earlySrcSlice, rowAlignment, sliceAlignment);
++
++      m_initBarriers.accessImage(
++        dstImage, earlyRange,
++        layoutTransfer,
++        VK_PIPELINE_STAGE_TRANSFER_BIT,
++        VK_ACCESS_TRANSFER_WRITE_BIT,
++        dstImage->info().layout,
++        dstImage->info().stages,
++        dstImage->info().access);
++
++      m_initBarriers.accessBuffer(earlySrcSlice,
++        VK_PIPELINE_STAGE_TRANSFER_BIT,
++        VK_ACCESS_TRANSFER_READ_BIT,
++        srcBuffer->info().stages,
++        srcBuffer->info().access);
++
++      dstImage->countEarlyUpload(m_earlyUploadEpoch);
++      m_cmd->trackResource<DxvkAccess::Write>(dstImage);
++      m_cmd->trackResource<DxvkAccess::Read>(srcBuffer);
++      return;
++    }
++
+     this->spillRenderPass(true);
+     this->prepareImage(m_execBarriers, dstImage, vk::makeSubresourceRange(dstSubresource));
+ 
+@@ -3863,8 +3955,10 @@
+   }
+   
+   
++  __attribute__((noinline))
+   void DxvkContext::spillRenderPass(bool suspend) {
+     if (m_flags.test(DxvkContextFlag::GpRenderPassBound)) {
++      DxvkSpillStats::add(__builtin_return_address(0));
+       m_flags.clr(DxvkContextFlag::GpRenderPassBound);
+ 
+       this->pauseTransformFeedback();
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/dxvk/dxvk_context.h b/src/dxvk/dxvk_context.h
+--- a/src/dxvk/dxvk_context.h	2026-07-15 12:37:28
++++ b/src/dxvk/dxvk_context.h	2026-11-16 20:47:03
+@@ -1067,6 +1067,8 @@
+     DxvkBarrierSet          m_initBarriers;
+     DxvkBarrierSet          m_execAcquires;
+     DxvkBarrierSet          m_execBarriers;
++
++    uint64_t                m_earlyUploadEpoch = 0;   ///< identifies the command list being recorded
+     DxvkBarrierSet          m_gfxBarriers;
+     DxvkBarrierControlFlags m_barrierControl;
+     
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/dxvk/dxvk_debug_counters.h b/src/dxvk/dxvk_debug_counters.h
+--- a/src/dxvk/dxvk_debug_counters.h	1970-01-01 01:00:00
++++ b/src/dxvk/dxvk_debug_counters.h	2026-11-16 20:41:13
+@@ -0,0 +1,48 @@
++#pragma once
++
++// Diagnostic counters read by the D3D9 front end's optional frame log (C:\Games\dxvk\debug.flag).
++// Written from the rendering threads without locking; the values are statistics, not state.
++
++#include <atomic>
++#include <cstdint>
++
++namespace dxvk {
++
++  /// Where render passes get interrupted: callers of DxvkContext::spillRenderPass that found a pass open
++  struct DxvkSpillStats {
++    static constexpr uint32_t Max = 24;
++
++    static inline std::atomic<uintptr_t> s_caller[Max] = { };
++    static inline std::atomic<uint32_t>  s_count[Max]  = { };
++
++    static void add(void* caller) {
++      const uintptr_t address = reinterpret_cast<uintptr_t>(caller);
++
++      for (uint32_t i = 0; i < Max; i++) {
++        uintptr_t current = s_caller[i].load();
++
++        if (!current) {
++          s_caller[i].compare_exchange_strong(current, address);
++          current = s_caller[i].load();
++        }
++
++        if (current == address) {
++          s_count[i]++;
++          return;
++        }
++      }
++    }
++  };
++
++  /// Calls the application made, per kind
++  enum class DxvkDebugCounter : uint32_t {
++    SetRenderTarget, Clear, EndScene, StretchRect, TextureLock, TextureUpload, BufferUpload, BufferRename,
++    ColorFill, GetRenderTargetData, Count
++  };
++
++  struct DxvkDebugCounters {
++    static inline std::atomic<uint32_t> s_value[uint32_t(DxvkDebugCounter::Count)] = { };
++    static void add(DxvkDebugCounter c) { s_value[uint32_t(c)]++; }
++  };
++
++}
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/dxvk/dxvk_memory.cpp b/src/dxvk/dxvk_memory.cpp
+--- a/src/dxvk/dxvk_memory.cpp	2026-07-15 12:37:28
++++ b/src/dxvk/dxvk_memory.cpp	2026-11-16 14:57:21
+@@ -389,6 +389,23 @@
+   }
+   
+   
++  // Executables that are not marked NX-compatible (most games from before ~2008) make Wine
++  // map all readable memory as executable. Under CrossOver on Apple Silicon the first write
++  // to each fresh page of such memory, once it is shared with Metal as a mapped Vulkan
++  // allocation, takes about 1.2 seconds. Having the kernel fault the pages in up front
++  // (lock, then unlock) avoids that; it costs a few milliseconds per allocation.
++  // Set DXVK_PREFAULT_MAPPED_MEMORY=0 to disable.
++  static void PrefaultMappedMemory(void* ptr, VkDeviceSize size) {
++    static const bool s_enabled = env::getEnvVar("DXVK_PREFAULT_MAPPED_MEMORY") != "0";
++
++    if (!s_enabled || !ptr || !size)
++      return;
++
++    if (::VirtualLock(ptr, SIZE_T(size)))
++      ::VirtualUnlock(ptr, SIZE_T(size));
++  }
++
++
+   DxvkDeviceMemory DxvkMemoryAllocator::tryAllocDeviceMemory(
+           DxvkMemoryType*                   type,
+           VkMemoryPropertyFlags             flags,
+@@ -435,6 +452,8 @@
+         m_vkd->vkFreeMemory(m_vkd->device(), result.memHandle, nullptr);
+         return DxvkDeviceMemory();
+       }
++
++      PrefaultMappedMemory(result.memPointer, size);
+     }
+ 
+     type->heap->stats.memoryAllocated += size;
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/dxvk/dxvk_resource.h b/src/dxvk/dxvk_resource.h
+--- a/src/dxvk/dxvk_resource.h	2026-07-15 12:37:28
++++ b/src/dxvk/dxvk_resource.h	2026-11-16 20:46:11
+@@ -41,6 +41,29 @@
+         result |= m_useCountR.load() != 0;
+       return result;
+     }
++
++    /**
++     * \brief Checks whether the only pending accesses are early uploads of one command list
++     *
++     * Uploads that the context moved into the init command buffer of the command list it
++     * is recording are counted per resource. As long as nothing else uses the resource,
++     * further uploads to it can go the same way.
++     * \param [in] epoch Identifies the command list being recorded
++     * \returns \c true if the resource is idle apart from such uploads
++     */
++    bool isIdleForEarlyUpload(uint64_t epoch) const {
++      const uint32_t early = m_earlyUploadEpoch == epoch ? m_earlyUploadCount : 0u;
++      return m_useCountR.load() == 0 && m_useCountW.load() == early;
++    }
++
++    void countEarlyUpload(uint64_t epoch) {
++      if (m_earlyUploadEpoch != epoch) {
++        m_earlyUploadEpoch = epoch;
++        m_earlyUploadCount = 0;
++      }
++
++      m_earlyUploadCount += 1;
++    }
+     
+     /**
+      * \brief Acquires resource
+@@ -87,6 +110,8 @@
+     
+     std::atomic<uint32_t> m_useCountR = { 0u };
+     std::atomic<uint32_t> m_useCountW = { 0u };
++    uint64_t              m_earlyUploadEpoch = 0;   // only touched by the context thread
++    uint32_t              m_earlyUploadCount = 0;
+ 
+   };
+   
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/util/util_env.cpp b/src/util/util_env.cpp
+--- a/src/util/util_env.cpp	2026-07-15 12:37:28
++++ b/src/util/util_env.cpp	2026-11-16 20:18:38
+@@ -8,6 +8,9 @@
+ #include <limits.h>
+ #endif
+ 
++#include <atomic>
++#include <algorithm>
++
+ #include "util_env.h"
+ 
+ #include "./com/com_include.h"
+@@ -89,8 +92,25 @@
+   }
+   
+   
++  static ThreadNameEntry      s_threadNames[32];
++  static std::atomic<uint32_t> s_threadNameCount = { 0u };
++
++  uint32_t getThreadNames(const ThreadNameEntry** table) {
++    *table = s_threadNames;
++    return std::min<uint32_t>(s_threadNameCount.load(), 32u);
++  }
++
++
+   void setThreadName(const std::string& name) {
+ #ifdef _WIN32
++    // remembered for the sampling profiler, which labels its samples with thread names
++    const uint32_t slot = s_threadNameCount++;
++
++    if (slot < 32) {
++      s_threadNames[slot].tid = ::GetCurrentThreadId();
++      dxvk::str::strlcpy(s_threadNames[slot].name, name.c_str(), sizeof(s_threadNames[slot].name));
++    }
++
+     using SetThreadDescriptionProc = HRESULT (WINAPI *) (HANDLE, PCWSTR);
+ 
+     static auto proc = reinterpret_cast<SetThreadDescriptionProc>(
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/util/util_env.h b/src/util/util_env.h
+--- a/src/util/util_env.h	2026-07-15 12:37:28
++++ b/src/util/util_env.h	2026-11-16 20:18:38
+@@ -1,5 +1,7 @@
+ #pragma once
+ 
++#include <cstdint>
++
+ #include "util_string.h"
+ 
+ namespace dxvk::env {
+@@ -67,6 +69,16 @@
+    * \param [in] name Thread name
+    */
+   void setThreadName(const std::string& name);
++
++  /**
++   * \brief Names given to threads with setThreadName
++   */
++  struct ThreadNameEntry {
++    uint32_t tid;
++    char     name[28];
++  };
++
++  uint32_t getThreadNames(const ThreadNameEntry** table);
+ 
+   /**
+    * \brief Creates a directory
