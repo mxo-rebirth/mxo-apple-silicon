@@ -6,7 +6,7 @@ the next step, in [BUILD.md](BUILD.md).
 
 Out of the box the game does not work in CrossOver: you get an error box about pixel shaders,
 then a black screen, then a "Music System Failed to Initialize" error. Each has a specific fix,
-listed below.
+listed below. After step 1, `scripts/setup.sh` can do the rest for you (see BUILD.md).
 
 Paths used here:
 
@@ -133,7 +133,7 @@ its settings, sign in and press PLAY.
 
 At this point the game works but is slow: 8–18 fps in the loading area and around 15 fps in the
 world, with the game quietly cutting the draw distance. [BUILD.md](BUILD.md) describes how to
-build and install the DLL that fixes that, and [README.md](README.md) explains why it is slow.
+build and install the DLL that fixes that, and [HOW-IT-WORKS.md](HOW-IT-WORKS.md) explains why it is slow.
 
 ## Things that still go wrong
 
@@ -142,7 +142,7 @@ build and install the DLL that fixes that, and [README.md](README.md) explains w
 | The "Trace program: running" text in the character-creation intro disappears after a moment | Nothing; it is cosmetic and unsolved. |
 | "Jack out" seems to do nothing | The game counts down a few seconds while you stand still. Otherwise close the window. |
 | The game will not start after an external monitor was unplugged or switched to another input while the launcher was open | CrossOver has lost track of the displays. Quit the launcher and shut the bottle down (`"$WINE" --bottle MatrixOnline -- wineboot.exe --end-session --shutdown`), then start again. |
-| Draw distance changes by itself | That is the game's render throttle; see the README. |
+| Draw distance changes by itself | That is the game's render throttle; see HOW-IT-WORKS.md. |
 | The game crashes after about a minute in the world | It ran out of address space. Add `"WINE_LARGE_ADDRESS_AWARE" = "1"` under `[EnvironmentVariables]` in `$BOTTLE/cxbottle.conf`. |
 | Low frame rate at high resolution with Rejacked | Untick "Use the new glow shader for 'Screen Filter: Over-Bright' (BETA)" in the Rejacked launcher; it halves the frame rate at 3440×1440. |
 

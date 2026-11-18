@@ -379,7 +379,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      uint32_t                        m_psFloatConstsCount = 0;
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_fixed_function.cpp b/src/d3d9/d3d9_fixed_function.cpp
 --- a/src/d3d9/d3d9_fixed_function.cpp	2026-07-15 12:37:28
-+++ b/src/d3d9/d3d9_fixed_function.cpp	2026-11-18 17:35:52
++++ b/src/d3d9/d3d9_fixed_function.cpp	2026-11-18 17:48:36
 @@ -203,7 +203,7 @@
      uint32_t floatType = spvModule.defFloatType(32);
      uint32_t vec3Type  = spvModule.defVectorType(floatType, 3);
@@ -432,7 +432,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
  extern "C" WINUSERAPI WINBOOL WINAPI SetProcessDPIAware(VOID);
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_initializer.cpp b/src/d3d9/d3d9_initializer.cpp
 --- a/src/d3d9/d3d9_initializer.cpp	2026-07-15 12:37:28
-+++ b/src/d3d9/d3d9_initializer.cpp	2026-11-18 17:35:52
++++ b/src/d3d9/d3d9_initializer.cpp	2026-11-18 17:48:36
 @@ -1,6 +1,7 @@
  #include <cstring>
  
@@ -453,7 +453,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
        Slice.length());
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_mxo_fastmath.cpp b/src/d3d9/d3d9_mxo_fastmath.cpp
 --- a/src/d3d9/d3d9_mxo_fastmath.cpp	1970-01-01 01:00:00
-+++ b/src/d3d9/d3d9_mxo_fastmath.cpp	2026-11-18 17:35:52
++++ b/src/d3d9/d3d9_mxo_fastmath.cpp	2026-11-18 17:48:36
 @@ -0,0 +1,321 @@
 +#include <windows.h>
 +#include <tlhelp32.h>
@@ -778,7 +778,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +}
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_mxo_fastmath.h b/src/d3d9/d3d9_mxo_fastmath.h
 --- a/src/d3d9/d3d9_mxo_fastmath.h	1970-01-01 01:00:00
-+++ b/src/d3d9/d3d9_mxo_fastmath.h	2026-11-18 17:35:52
++++ b/src/d3d9/d3d9_mxo_fastmath.h	2026-11-18 17:48:36
 @@ -0,0 +1,32 @@
 +#pragma once
 +
@@ -814,7 +814,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +}
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_mxo_fastmath_asm.inc b/src/d3d9/d3d9_mxo_fastmath_asm.inc
 --- a/src/d3d9/d3d9_mxo_fastmath_asm.inc	1970-01-01 01:00:00
-+++ b/src/d3d9/d3d9_mxo_fastmath_asm.inc	2026-11-18 17:35:52
++++ b/src/d3d9/d3d9_mxo_fastmath_asm.inc	2026-11-18 17:48:36
 @@ -0,0 +1,81 @@
 +// SSE replacements for two x87 math routines of The Matrix Online client (see d3d9_mxo_fastmath.cpp).
 +//
@@ -974,7 +974,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +}
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_options.cpp b/src/d3d9/d3d9_options.cpp
 --- a/src/d3d9/d3d9_options.cpp	2026-07-15 12:37:28
-+++ b/src/d3d9/d3d9_options.cpp	2026-11-18 17:35:52
++++ b/src/d3d9/d3d9_options.cpp	2026-11-18 17:48:36
 @@ -1,5 +1,7 @@
  #include "d3d9_options.h"
  
@@ -994,7 +994,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      // If we are not Nvidia, enable general hazards.
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_options.h b/src/d3d9/d3d9_options.h
 --- a/src/d3d9/d3d9_options.h	2026-07-15 12:37:28
-+++ b/src/d3d9/d3d9_options.h	2026-11-18 17:35:52
++++ b/src/d3d9/d3d9_options.h	2026-11-18 17:48:36
 @@ -158,6 +158,10 @@
      /// Disable direct buffer mapping
      bool allowDirectBufferMapping;
@@ -1129,7 +1129,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
  
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_state.h b/src/d3d9/d3d9_state.h
 --- a/src/d3d9/d3d9_state.h	2026-07-15 12:37:28
-+++ b/src/d3d9/d3d9_state.h	2026-11-18 17:35:52
++++ b/src/d3d9/d3d9_state.h	2026-11-18 17:48:36
 @@ -44,6 +44,9 @@
      float pointScaleA  = 1.0f;
      float pointScaleB  = 0.0f;
@@ -1159,7 +1159,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
  #include "d3d9_surface.h"
  #include "d3d9_monitor.h"
  
-@@ -184,6 +195,445 @@
+@@ -184,6 +195,454 @@
    };
  
  
@@ -1352,9 +1352,18 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +        }
 +      }
 +
++      // light mode: the presenting thread plus DXVK's own threads (render, submit, queue)
++      const env::ThreadNameEntry* lightNames = nullptr;
++      const uint32_t lightNameCount = light ? env::getThreadNames(&lightNames) : 0;
++
 +      for (uint32_t i = 0; i < threadCount && count < MaxSamples; i++) {
-+        if (light && threads[i].tid != s_presentThreadId)
-+          continue;
++        if (light && threads[i].tid != s_presentThreadId) {
++          bool dxvkThread = false;
++          for (uint32_t k = 0; k < lightNameCount && !dxvkThread; k++)
++            dxvkThread = lightNames[k].tid == threads[i].tid && !std::strncmp(lightNames[k].name, "dxvk-", 5);
++          if (!dxvkThread)
++            continue;
++        }
 +
 +        if (::SuspendThread(threads[i].handle) == DWORD(-1))
 +          continue;
@@ -1605,7 +1614,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
    D3D9SwapChainEx::D3D9SwapChainEx(
            D3D9DeviceEx*          pDevice,
            D3DPRESENT_PARAMETERS* pPresentParams,
-@@ -255,6 +705,11 @@
+@@ -255,6 +714,11 @@
            HWND     hDestWindowOverride,
      const RGNDATA* pDirtyRegion,
            DWORD    dwFlags) {
@@ -1617,7 +1626,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      D3D9DeviceLock lock = m_parent->LockDevice();
  
      uint32_t presentInterval = m_presentParams.PresentationInterval;
-@@ -852,11 +1307,27 @@
+@@ -852,11 +1316,27 @@
          {  int32_t(m_dstRect.left),                    int32_t(m_dstRect.top)                    },
          { uint32_t(m_dstRect.right - m_dstRect.left), uint32_t(m_dstRect.bottom - m_dstRect.top) } };
  
@@ -1801,7 +1810,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      m_rsBlock = SetupRenderStateBlock(m_module, count);
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/dxso/dxso_options.cpp b/src/dxso/dxso_options.cpp
 --- a/src/dxso/dxso_options.cpp	2026-07-15 12:37:28
-+++ b/src/dxso/dxso_options.cpp	2026-11-18 17:35:52
++++ b/src/dxso/dxso_options.cpp	2026-11-18 17:48:36
 @@ -45,6 +45,9 @@
      alphaTestWiggleRoom = options.alphaTestWiggleRoom;
  
@@ -1815,7 +1824,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 \ No newline at end of file
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/dxso/dxso_options.h b/src/dxso/dxso_options.h
 --- a/src/dxso/dxso_options.h	2026-07-15 12:37:28
-+++ b/src/dxso/dxso_options.h	2026-11-18 17:35:52
++++ b/src/dxso/dxso_options.h	2026-11-18 17:48:36
 @@ -57,6 +57,19 @@
  
      /// Whether or not we can rely on robustness2 to handle oob constant access
@@ -1865,7 +1874,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
    }
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/dxvk/dxvk_context.cpp b/src/dxvk/dxvk_context.cpp
 --- a/src/dxvk/dxvk_context.cpp	2026-07-15 12:37:28
-+++ b/src/dxvk/dxvk_context.cpp	2026-11-18 17:35:52
++++ b/src/dxvk/dxvk_context.cpp	2026-11-18 17:48:36
 @@ -3,7 +3,11 @@
  #include <utility>
  
@@ -2001,7 +2010,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
        this->pauseTransformFeedback();
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/dxvk/dxvk_context.h b/src/dxvk/dxvk_context.h
 --- a/src/dxvk/dxvk_context.h	2026-07-15 12:37:28
-+++ b/src/dxvk/dxvk_context.h	2026-11-18 17:35:52
++++ b/src/dxvk/dxvk_context.h	2026-11-18 17:48:36
 @@ -1067,6 +1067,8 @@
      DxvkBarrierSet          m_initBarriers;
      DxvkBarrierSet          m_execAcquires;
@@ -2013,7 +2022,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/dxvk/dxvk_debug_counters.h b/src/dxvk/dxvk_debug_counters.h
 --- a/src/dxvk/dxvk_debug_counters.h	1970-01-01 01:00:00
-+++ b/src/dxvk/dxvk_debug_counters.h	2026-11-18 17:35:52
++++ b/src/dxvk/dxvk_debug_counters.h	2026-11-18 17:48:36
 @@ -0,0 +1,64 @@
 +#pragma once
 +
@@ -2403,7 +2412,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
    
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/util/util_env.cpp b/src/util/util_env.cpp
 --- a/src/util/util_env.cpp	2026-07-15 12:37:28
-+++ b/src/util/util_env.cpp	2026-11-18 17:35:52
++++ b/src/util/util_env.cpp	2026-11-18 17:48:36
 @@ -8,6 +8,9 @@
  #include <limits.h>
  #endif
@@ -2442,7 +2451,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      static auto proc = reinterpret_cast<SetThreadDescriptionProc>(
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/util/util_env.h b/src/util/util_env.h
 --- a/src/util/util_env.h	2026-07-15 12:37:28
-+++ b/src/util/util_env.h	2026-11-18 17:35:52
++++ b/src/util/util_env.h	2026-11-18 17:48:36
 @@ -1,5 +1,7 @@
  #pragma once
  
