@@ -379,7 +379,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      uint32_t                        m_psFloatConstsCount = 0;
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_fixed_function.cpp b/src/d3d9/d3d9_fixed_function.cpp
 --- a/src/d3d9/d3d9_fixed_function.cpp	2026-07-15 12:37:28
-+++ b/src/d3d9/d3d9_fixed_function.cpp	2026-11-18 17:13:47
++++ b/src/d3d9/d3d9_fixed_function.cpp	2026-11-18 17:35:52
 @@ -203,7 +203,7 @@
      uint32_t floatType = spvModule.defFloatType(32);
      uint32_t vec3Type  = spvModule.defVectorType(floatType, 3);
@@ -432,7 +432,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
  extern "C" WINUSERAPI WINBOOL WINAPI SetProcessDPIAware(VOID);
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_initializer.cpp b/src/d3d9/d3d9_initializer.cpp
 --- a/src/d3d9/d3d9_initializer.cpp	2026-07-15 12:37:28
-+++ b/src/d3d9/d3d9_initializer.cpp	2026-11-18 17:13:47
++++ b/src/d3d9/d3d9_initializer.cpp	2026-11-18 17:35:52
 @@ -1,6 +1,7 @@
  #include <cstring>
  
@@ -453,7 +453,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
        Slice.length());
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_mxo_fastmath.cpp b/src/d3d9/d3d9_mxo_fastmath.cpp
 --- a/src/d3d9/d3d9_mxo_fastmath.cpp	1970-01-01 01:00:00
-+++ b/src/d3d9/d3d9_mxo_fastmath.cpp	2026-11-18 17:13:47
++++ b/src/d3d9/d3d9_mxo_fastmath.cpp	2026-11-18 17:35:52
 @@ -0,0 +1,321 @@
 +#include <windows.h>
 +#include <tlhelp32.h>
@@ -778,7 +778,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +}
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_mxo_fastmath.h b/src/d3d9/d3d9_mxo_fastmath.h
 --- a/src/d3d9/d3d9_mxo_fastmath.h	1970-01-01 01:00:00
-+++ b/src/d3d9/d3d9_mxo_fastmath.h	2026-11-18 17:13:47
++++ b/src/d3d9/d3d9_mxo_fastmath.h	2026-11-18 17:35:52
 @@ -0,0 +1,32 @@
 +#pragma once
 +
@@ -814,7 +814,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +}
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_mxo_fastmath_asm.inc b/src/d3d9/d3d9_mxo_fastmath_asm.inc
 --- a/src/d3d9/d3d9_mxo_fastmath_asm.inc	1970-01-01 01:00:00
-+++ b/src/d3d9/d3d9_mxo_fastmath_asm.inc	2026-11-18 17:13:47
++++ b/src/d3d9/d3d9_mxo_fastmath_asm.inc	2026-11-18 17:35:52
 @@ -0,0 +1,81 @@
 +// SSE replacements for two x87 math routines of The Matrix Online client (see d3d9_mxo_fastmath.cpp).
 +//
@@ -974,7 +974,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +}
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_options.cpp b/src/d3d9/d3d9_options.cpp
 --- a/src/d3d9/d3d9_options.cpp	2026-07-15 12:37:28
-+++ b/src/d3d9/d3d9_options.cpp	2026-11-18 17:13:47
++++ b/src/d3d9/d3d9_options.cpp	2026-11-18 17:35:52
 @@ -1,5 +1,7 @@
  #include "d3d9_options.h"
  
@@ -994,7 +994,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      // If we are not Nvidia, enable general hazards.
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_options.h b/src/d3d9/d3d9_options.h
 --- a/src/d3d9/d3d9_options.h	2026-07-15 12:37:28
-+++ b/src/d3d9/d3d9_options.h	2026-11-18 17:13:47
++++ b/src/d3d9/d3d9_options.h	2026-11-18 17:35:52
 @@ -158,6 +158,10 @@
      /// Disable direct buffer mapping
      bool allowDirectBufferMapping;
@@ -1129,7 +1129,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
  
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_state.h b/src/d3d9/d3d9_state.h
 --- a/src/d3d9/d3d9_state.h	2026-07-15 12:37:28
-+++ b/src/d3d9/d3d9_state.h	2026-11-18 17:13:47
++++ b/src/d3d9/d3d9_state.h	2026-11-18 17:35:52
 @@ -44,6 +44,9 @@
      float pointScaleA  = 1.0f;
      float pointScaleB  = 0.0f;
@@ -1143,11 +1143,15 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_swapchain.cpp b/src/d3d9/d3d9_swapchain.cpp
 --- a/src/d3d9/d3d9_swapchain.cpp	2026-11-18 00:00:00
 +++ b/src/d3d9/d3d9_swapchain.cpp	2026-11-18 00:00:00
-@@ -1,4 +1,11 @@
+@@ -1,4 +1,15 @@
 +#include <cstdio>
 +#include <windows.h>
 +#include <tlhelp32.h>
 +#include <vector>
++#include <unordered_map>
++#include <algorithm>
++#include <atomic>
++#include <string>
 +#include <cstring>
  #include "d3d9_swapchain.h"
 +#include "d3d9_mxo_fastmath.h"
@@ -1155,7 +1159,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
  #include "d3d9_surface.h"
  #include "d3d9_monitor.h"
  
-@@ -184,6 +191,337 @@
+@@ -184,6 +195,445 @@
    };
  
  
@@ -1179,6 +1183,103 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +  }
 +
 +  static DWORD s_presentThreadId = 0;
++
++  // Ctrl+Shift+F shows or hides the DXVK_HUD overlay
++  static std::atomic<bool> s_hudHidden = { false };
++
++  static void UpdateHudToggle() {
++    static bool s_wasDown = false;
++    const bool down = (::GetAsyncKeyState(VK_CONTROL) & 0x8000) && (::GetAsyncKeyState(VK_SHIFT) & 0x8000)
++                   && (::GetAsyncKeyState('F') & 0x8000);
++    if (down && !s_wasDown)
++      s_hudHidden = !s_hudHidden.load();
++    s_wasDown = down;
++  }
++
++  // Stall recorder (with debug.flag): while the thread that presents has not presented for 200 ms,
++  // record where it is every 20 ms, and log the most common places when the frame finally ends.
++  static std::atomic<uint64_t> s_lastPresentMs = { 0 };
++
++  static uint64_t NowMs() {
++    LARGE_INTEGER c, f;
++    ::QueryPerformanceCounter(&c);
++    ::QueryPerformanceFrequency(&f);
++    return uint64_t(c.QuadPart) * 1000 / uint64_t(f.QuadPart);
++  }
++
++  static std::string DescribeAddress(uint32_t address) {
++    HMODULE module = nullptr;
++    char path[MAX_PATH] = "";
++    if (::GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
++          reinterpret_cast<LPCSTR>(uintptr_t(address)), &module) && ::GetModuleFileNameA(module, path, MAX_PATH)) {
++      const char* name = std::strrchr(path, '\\');
++      return str::format(name ? name + 1 : path, "+", std::hex, address - uint32_t(uintptr_t(module)));
++    }
++    return str::format("?", std::hex, address);
++  }
++
++  static DWORD WINAPI StallThreadProc(void*) {
++    HANDLE thread = ::OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT, FALSE, s_presentThreadId);
++    if (!thread)
++      return 0;
++
++    struct Sample { uint32_t eip; uint32_t ret[8]; };
++    std::vector<Sample> samples;
++    uint32_t logged = 0;
++
++    for (;;) {
++      ::Sleep(20);
++      const uint64_t last = s_lastPresentMs.load();
++      const uint64_t now = NowMs();
++
++      if (last && now - last >= 200) {
++        Sample sample = { };
++        if (::SuspendThread(thread) != DWORD(-1)) {
++          CONTEXT context = { };
++          context.ContextFlags = CONTEXT_CONTROL;
++          if (::GetThreadContext(thread, &context)) {
++            sample.eip = uint32_t(context.Eip);
++            auto stack = reinterpret_cast<const uint32_t*>(uintptr_t(context.Esp));
++            uint32_t n = 0;
++            if (context.Esp && !::IsBadReadPtr(stack, 4 * 256)) {
++              for (uint32_t k = 0; k < 256 && n < 8; k++) {
++                const uint32_t v = stack[k];
++                MEMORY_BASIC_INFORMATION mbi;
++                if (v > 0x10000 && ::VirtualQuery(reinterpret_cast<void*>(uintptr_t(v - 8)), &mbi, sizeof(mbi))
++                 && mbi.Type == MEM_IMAGE && (mbi.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY))
++                 && FollowsCall(v))
++                  sample.ret[n++] = v;
++              }
++            }
++          }
++          ::ResumeThread(thread);
++          if (sample.eip)
++            samples.push_back(sample);
++        }
++      } else if (!samples.empty()) {
++        // the stall is over: names are resolved now, with the game thread running again
++        if (logged < 300) {
++          logged++;
++          std::unordered_map<std::string, uint32_t> counts;
++          for (const auto& s : samples) {
++            std::string key = DescribeAddress(s.eip);
++            for (uint32_t r : s.ret)
++              if (r) key += " < " + DescribeAddress(r);
++            counts[key]++;
++          }
++          std::vector<std::pair<uint32_t, std::string>> sorted;
++          for (auto& c : counts)
++            sorted.push_back({ c.second, c.first });
++          std::sort(sorted.begin(), sorted.end(), [] (const auto& a, const auto& b) { return a.first > b.first; });
++          std::string text = str::format("STALL ", 200 + samples.size() * 20, "+ ms, ", samples.size(), " samples:");
++          for (size_t i = 0; i < sorted.size() && i < 3; i++)
++            text += str::format("\n    ", sorted[i].first, "x  ", sorted[i].second);
++          Logger::info(text);
++        }
++        samples.clear();
++      }
++    }
++  }
 +
 +  static void SamplerMarker() { }
 +
@@ -1337,6 +1438,17 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +    static uint64_t s_frames = 0, s_lastLog = 0, s_lastCheck = 0;
 +
++    s_lastPresentMs = NowMs();
++    static const bool s_stallStarted = [] {
++      if (!s_presentThreadId)
++        s_presentThreadId = ::GetCurrentThreadId();
++      HANDLE t = ::CreateThread(nullptr, 0, StallThreadProc, nullptr, 0, nullptr);
++      if (t)
++        ::CloseHandle(t);
++      return t != nullptr;
++    }();
++    (void) s_stallStarted;
++
 +    LARGE_INTEGER counter, frequency;
 +    ::QueryPerformanceCounter(&counter);
 +    ::QueryPerformanceFrequency(&frequency);
@@ -1493,10 +1605,11 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
    D3D9SwapChainEx::D3D9SwapChainEx(
            D3D9DeviceEx*          pDevice,
            D3DPRESENT_PARAMETERS* pPresentParams,
-@@ -255,6 +593,10 @@
+@@ -255,6 +705,11 @@
            HWND     hDestWindowOverride,
      const RGNDATA* pDirtyRegion,
            DWORD    dwFlags) {
++    UpdateHudToggle();
 +    DebugFrameTools(m_parent, m_backBuffers.empty() ? nullptr : m_backBuffers[0].ptr());
 +    StartSamplerOnce();
 +    CheckMxoFastMathFpu();
@@ -1504,11 +1617,10 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      D3D9DeviceLock lock = m_parent->LockDevice();
  
      uint32_t presentInterval = m_presentParams.PresentationInterval;
-@@ -851,6 +1193,22 @@
-       VkRect2D dstRect = {
+@@ -852,11 +1307,27 @@
          {  int32_t(m_dstRect.left),                    int32_t(m_dstRect.top)                    },
          { uint32_t(m_dstRect.right - m_dstRect.left), uint32_t(m_dstRect.bottom - m_dstRect.top) } };
-+
+ 
 +      // The destination is in window client coordinates, and the swap chain was asked to have that
 +      // size. The surface can insist on another one: under CrossOver a fullscreen 800x600 mode may
 +      // come with a surface of the display's native size. Scale the destination to the swap chain
@@ -1524,9 +1636,16 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +        dstRect.extent.width  = uint32_t(float(dstRect.extent.width)  * sx + 0.5f);
 +        dstRect.extent.height = uint32_t(float(dstRect.extent.height) * sy + 0.5f);
 +      }
- 
++
        m_blitter->presentImage(m_context.ptr(),
          m_imageViews.at(imageIndex), dstRect,
+         swapImageView, srcRect);
+ 
+-      if (m_hud != nullptr)
++      if (m_hud != nullptr && !s_hudHidden.load())
+         m_hud->render(m_context, info.format, info.imageExtent);
+ 
+       if (i + 1 >= SyncInterval)
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/meson.build b/src/d3d9/meson.build
 --- a/src/d3d9/meson.build	2026-11-18 00:00:00
 +++ b/src/d3d9/meson.build	2026-11-18 00:00:00
@@ -1682,7 +1801,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      m_rsBlock = SetupRenderStateBlock(m_module, count);
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/dxso/dxso_options.cpp b/src/dxso/dxso_options.cpp
 --- a/src/dxso/dxso_options.cpp	2026-07-15 12:37:28
-+++ b/src/dxso/dxso_options.cpp	2026-11-18 17:13:47
++++ b/src/dxso/dxso_options.cpp	2026-11-18 17:35:52
 @@ -45,6 +45,9 @@
      alphaTestWiggleRoom = options.alphaTestWiggleRoom;
  
@@ -1696,7 +1815,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 \ No newline at end of file
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/dxso/dxso_options.h b/src/dxso/dxso_options.h
 --- a/src/dxso/dxso_options.h	2026-07-15 12:37:28
-+++ b/src/dxso/dxso_options.h	2026-11-18 17:13:47
++++ b/src/dxso/dxso_options.h	2026-11-18 17:35:52
 @@ -57,6 +57,19 @@
  
      /// Whether or not we can rely on robustness2 to handle oob constant access
@@ -1746,7 +1865,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
    }
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/dxvk/dxvk_context.cpp b/src/dxvk/dxvk_context.cpp
 --- a/src/dxvk/dxvk_context.cpp	2026-07-15 12:37:28
-+++ b/src/dxvk/dxvk_context.cpp	2026-11-18 17:13:47
++++ b/src/dxvk/dxvk_context.cpp	2026-11-18 17:35:52
 @@ -3,7 +3,11 @@
  #include <utility>
  
@@ -1882,7 +2001,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
        this->pauseTransformFeedback();
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/dxvk/dxvk_context.h b/src/dxvk/dxvk_context.h
 --- a/src/dxvk/dxvk_context.h	2026-07-15 12:37:28
-+++ b/src/dxvk/dxvk_context.h	2026-11-18 17:13:47
++++ b/src/dxvk/dxvk_context.h	2026-11-18 17:35:52
 @@ -1067,6 +1067,8 @@
      DxvkBarrierSet          m_initBarriers;
      DxvkBarrierSet          m_execAcquires;
@@ -1894,7 +2013,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/dxvk/dxvk_debug_counters.h b/src/dxvk/dxvk_debug_counters.h
 --- a/src/dxvk/dxvk_debug_counters.h	1970-01-01 01:00:00
-+++ b/src/dxvk/dxvk_debug_counters.h	2026-11-18 17:13:47
++++ b/src/dxvk/dxvk_debug_counters.h	2026-11-18 17:35:52
 @@ -0,0 +1,64 @@
 +#pragma once
 +
@@ -2130,7 +2249,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
          for (uint32_t i = 0; i < 6 && (chunkSize >> i) >= size && !devMem.memHandle; i++)
            devMem = tryAllocDeviceMemory(type, flags, chunkSize >> i, hints, nullptr);
  
-@@ -389,6 +508,27 @@
+@@ -389,6 +508,35 @@
    }
    
    
@@ -2140,25 +2259,33 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +  // allocation, takes about 1.2 seconds. Having the kernel fault the pages in up front
 +  // (lock, then unlock) avoids that; it costs a few milliseconds per allocation.
 +  // Set DXVK_PREFAULT_MAPPED_MEMORY=0 to disable.
++  //
++  // The pages also stay locked: when macOS is short of memory it compresses or swaps out pages
++  // the game is not writing to at the moment, and the next write to such a page of GPU-shared
++  // memory again takes about a second. Locked pages are never compressed or swapped. They are
++  // released when the memory is freed. DXVK_LOCK_MAPPED_MEMORY=0 unlocks them right away instead.
 +  static void PrefaultMappedMemory(void* ptr, VkDeviceSize size) {
 +    static const bool s_enabled = env::getEnvVar("DXVK_PREFAULT_MAPPED_MEMORY") != "0";
++    static const bool s_keepLocked = env::getEnvVar("DXVK_LOCK_MAPPED_MEMORY") != "0";
 +
 +    if (!s_enabled || !ptr || !size)
 +      return;
 +
 +    DxvkDebugTimer timer(DxvkDebugCounter::PrefaultUs);
 +
-+    if (::VirtualLock(ptr, SIZE_T(size)))
-+      ::VirtualUnlock(ptr, SIZE_T(size));
-+    else
++    if (::VirtualLock(ptr, SIZE_T(size))) {
++      if (!s_keepLocked)
++        ::VirtualUnlock(ptr, SIZE_T(size));
++    } else {
 +      DxvkDebugCounters::add(DxvkDebugCounter::PrefaultFailed);
++    }
 +  }
 +
 +
    DxvkDeviceMemory DxvkMemoryAllocator::tryAllocDeviceMemory(
            DxvkMemoryType*                   type,
            VkMemoryPropertyFlags             flags,
-@@ -435,6 +575,9 @@
+@@ -435,6 +583,9 @@
          m_vkd->vkFreeMemory(m_vkd->device(), result.memHandle, nullptr);
          return DxvkDeviceMemory();
        }
@@ -2168,7 +2295,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      }
  
      type->heap->stats.memoryAllocated += size;
-@@ -524,6 +667,27 @@
+@@ -524,6 +675,27 @@
      // Under memory pressure, we should start freeing everything.
      if (this->shouldFreeEmptyChunks(type->heap, 0))
        return true;
@@ -2276,7 +2403,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
    
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/util/util_env.cpp b/src/util/util_env.cpp
 --- a/src/util/util_env.cpp	2026-07-15 12:37:28
-+++ b/src/util/util_env.cpp	2026-11-18 17:13:47
++++ b/src/util/util_env.cpp	2026-11-18 17:35:52
 @@ -8,6 +8,9 @@
  #include <limits.h>
  #endif
@@ -2315,7 +2442,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      static auto proc = reinterpret_cast<SetThreadDescriptionProc>(
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/util/util_env.h b/src/util/util_env.h
 --- a/src/util/util_env.h	2026-07-15 12:37:28
-+++ b/src/util/util_env.h	2026-11-18 17:13:47
++++ b/src/util/util_env.h	2026-11-18 17:35:52
 @@ -1,5 +1,7 @@
  #pragma once
  
