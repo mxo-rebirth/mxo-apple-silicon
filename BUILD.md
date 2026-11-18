@@ -25,8 +25,13 @@ scripts/build.sh "/path/to/your/client.dll"
 4. builds `build/d3d9.dll`.
 
 It takes five to ten minutes. `build/translate.log` says what was translated and what was
-skipped and why. With the `client.dll` this was developed on, 468 of 468 routines translate;
-with Revived's, 467.
+skipped and why. With the `client.dll` this was developed on, all 470 routines translate.
+One DLL serves both games: Revived's `client.dll` has the same code at the same addresses for
+all but one of them, and each routine is checked again when the game starts.
+
+The translator rounds with two instructions by default (see the README). For the slower form
+that also matches the FPU outside the range of a `float`, add `--exact-range` to the `xlat.py`
+line in `scripts/build.sh`.
 
 ## Install into a bottle
 
@@ -51,20 +56,28 @@ called `MatrixOnline`. Close the game and its launcher first.
    "$WINE" --bottle MatrixOnline -- reg add 'HKCU\Software\Wine\AppDefaults\matrix.exe\DllOverrides' /v d3d9 /d native,builtin /f
    ```
 
+   For Revived, add the same line with `mxorev.exe`:
+
+   ```sh
+   "$WINE" --bottle MatrixOnline -- reg add 'HKCU\Software\Wine\AppDefaults\mxorev.exe\DllOverrides' /v d3d9 /d native,builtin /f
+   ```
+
    The first line keeps every other program in the bottle, launchers included, on Wine's own
-   Direct3D 9. `matrix.exe` is the Rejacked executable; Revived's is `mxorev.exe` (see the
-   open problem in the README before enabling it there).
+   Direct3D 9. `matrix.exe` is the Rejacked executable, `mxorev.exe` Revived's.
 
 3. Add to `$BOTTLE/cxbottle.conf` under `[EnvironmentVariables]`:
 
    ```
    "MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS" = "1"
+   "WINE_LARGE_ADDRESS_AWARE" = "1"
    "DXVK_LOG_PATH" = "C:/Games/dxvk"
    "DXVK_STATE_CACHE_PATH" = "C:/Games/dxvk"
    ```
 
-   The first one is required: without it DXVK froze in most runs. The test machine also has
-   `"WINEMSYNC" = "1"`.
+   The first two are required: without the first, DXVK froze in most runs; without the second,
+   the game ran out of its 2 GB of address space and crashed after about a minute in the world.
+   The test machine also has `"WINEMSYNC" = "1"`, and `"DXVK_HUD" = "fps,frametimes,gpuload"`
+   puts a frame-rate overlay in the corner.
 
 4. Leave the bottle's Graphics setting in CrossOver on **Auto**, not DXVK.
 
@@ -92,14 +105,19 @@ Environment variables, in `cxbottle.conf` under `[EnvironmentVariables]`:
 | `DXVK_HOIST_UPLOADS=0` | texture and buffer uploads interrupt the render pass again |
 | `DXVK_PREFAULT_MAPPED_MEMORY=0` | no pre-touching of mapped memory |
 | `DXVK_STATIC_SAMPLERS=0` | no per-texture-type shader variants |
+| `DXVK_MXO_SWVP_COUNT=0` | vertex shaders no longer read the uploaded constant count; all 8,192 constants are copied per draw again |
+| `DXVK_MXO_ZERO_CONSTS=0` | registers set to zero count towards the uploaded range again |
+| `DXVK_KEEP_EMPTY_CHUNKS_MB=N` | keep up to N MB of emptied CPU-visible memory per memory type for reuse (default 256; 0 = DXVK's behaviour) |
+| `DXVK_WARM_MEMORY_MB=N` | a background thread prepares N MB of already-touched memory per memory type (default 0 = off; it was never needed once freed memory is kept) |
 
 Files in `C:\Games\dxvk` (`drive_c/Games/dxvk`), read when the game starts:
 
 | File | Effect |
 |---|---|
 | `x87max.txt` | a number N: install only the first N translated routines (0 = none). For finding a misbehaving routine by halving. |
-| `debug.flag` | empty file. Every 5 s the log gets the frame rate, the render throttle, DXVK's per-frame statistics, the game's calls per frame, and which DXVK routine interrupted render passes how often. Creating `shot.req` saves the next frame to `shot.bmp`. |
-| `sample.flag` | empty file. A sampling profiler records where every thread is and who called it, and appends it to `samples.bin` every 10 s. Costs a few percent. |
+| `debug.flag` | empty file. Every 5 s the log gets the frame rate, the render throttle, DXVK's per-frame statistics, the game's calls per frame, memory activity and which DXVK routine interrupted render passes how often. Every frame slower than 40 ms gets a `SPIKE` line saying what happened in it (pipelines built, waits, uploads, new memory). Creating `shot.req` saves the next frame to `shot.bmp`. |
+| `sample.flag` | empty file. A sampling profiler records where every thread is and who called it, and appends it to `samples.bin` every 10 s. It pauses every thread every 5 ms, which makes memory writes in the game much slower than they really are; do not judge frame rates with it. |
+| `sample-light.flag` | empty file. The same profiler, but only for the game's main thread and every 20 ms. Distorts far less. |
 
 The game's own setting, in `options.cfg`:
 
@@ -116,7 +134,7 @@ Stock graphics for the game, one command:
 "$WINE" --bottle MatrixOnline -- reg delete 'HKCU\Software\Wine\AppDefaults\matrix.exe\DllOverrides' /v d3d9 /f
 ```
 
-That is enough. To remove everything: copy `d3d9.dll.wine-builtin-backup` back over `d3d9.dll`,
+(and the same with `mxorev.exe` for Revived). That is enough. To remove everything: copy `d3d9.dll.wine-builtin-backup` back over `d3d9.dll`,
 delete the lines added to `cxbottle.conf`, and delete the `d3d9` value under
 `HKCU\Software\Wine\DllOverrides`.
 

@@ -143,6 +143,8 @@ build and install the DLL that fixes that, and [README.md](README.md) explains w
 | "Jack out" seems to do nothing | The game counts down a few seconds while you stand still. Otherwise close the window. |
 | The game will not start after an external monitor was unplugged or switched to another input while the launcher was open | CrossOver has lost track of the displays. Quit the launcher and shut the bottle down (`"$WINE" --bottle MatrixOnline -- wineboot.exe --end-session --shutdown`), then start again. |
 | Draw distance changes by itself | That is the game's render throttle; see the README. |
+| The game crashes after about a minute in the world | It ran out of address space. Add `"WINE_LARGE_ADDRESS_AWARE" = "1"` under `[EnvironmentVariables]` in `$BOTTLE/cxbottle.conf`. |
+| Low frame rate at high resolution with Rejacked | Untick "Use the new glow shader for 'Screen Filter: Over-Bright' (BETA)" in the Rejacked launcher; it halves the frame rate at 3440×1440. |
 
 ## MxO Revived
 
@@ -154,10 +156,22 @@ Revived was installed into the same bottle. Its launcher needs the .NET 10 Deskt
 ```
 
 Revived keeps its own copy of the game in its own folder. The first two fixes above apply to
-the whole bottle, so it gets them too. The DirectSound line names `matrix.exe`; Revived's
-executable is `mxorev.exe`, and on the test machine it runs without an equivalent line. It
-runs on CrossOver's stock graphics. The DLL from this repository does not work with it yet
-(see Open problems in the README).
+the whole bottle, so it gets them too. For music it needs the DirectSound line as well, with
+its own executable name:
+
+```sh
+"$WINE" --bottle MatrixOnline -- reg add 'HKCU\Software\Wine\AppDefaults\mxorev.exe\DllOverrides' /v dsound /d native,builtin /f
+```
+
+Revived's starter also has a music guard: if its own check of the music system fails (it does
+when the check runs on Wine's DirectSound), it switches the game's music off and writes
+`music = off` into `MxORevived-audio.txt` in the Revived folder. Set that line to `music = on`,
+and `MusicSystemEnable = 1` in Revived's own `options.cfg`.
+
+Without the line above, Wine's DirectSound is used and Revived shows the "Music System Failed
+to Initialize" box. Do not try Wine's own DirectMusic instead: Revived froze at start with it.
+
+The DLL from this repository works with Revived; see BUILD.md.
 
 ## A note on safety
 

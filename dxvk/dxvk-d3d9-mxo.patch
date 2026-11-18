@@ -1,6 +1,6 @@
-diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/d3d9/d3d9_device.cpp b/src/d3d9/d3d9_device.cpp
---- a/src/d3d9/d3d9_device.cpp	2026-07-15 12:37:28
-+++ b/src/d3d9/d3d9_device.cpp	2026-11-16 20:41:13
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_device.cpp b/src/d3d9/d3d9_device.cpp
+--- a/src/d3d9/d3d9_device.cpp	2026-11-18 00:00:00
++++ b/src/d3d9/d3d9_device.cpp	2026-11-18 00:00:00
 @@ -1,5 +1,8 @@
 +#include "d3d9_mxo_fastmath.h"
  #include "d3d9_device.h"
@@ -10,7 +10,17 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
  #include "d3d9_annotation.h"
  #include "d3d9_interface.h"
  #include "d3d9_swapchain.h"
-@@ -79,8 +82,16 @@
+@@ -59,6 +62,9 @@
+     if (canSWVP)
+       Logger::info("D3D9DeviceEx: Using extended constant set for software vertex processing.");
+ 
++    Logger::info(str::format("D3D9DeviceEx: behaviour flags 0x", std::hex, m_behaviorFlags, std::dec,
++      ", vertex shader float constants ", m_vsLayout.floatCount));
++
+     if (m_dxvkDevice->instance()->extensions().extDebugUtils)
+       m_annotation = new D3D9UserDefinedAnnotation(this);
+ 
+@@ -79,8 +85,16 @@
      if (!(BehaviorFlags & D3DCREATE_FPU_PRESERVE))
        SetupFPU();
  
@@ -27,7 +37,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      const bool supportsRobustness2 = m_dxvkDevice->features().extRobustness2.robustBufferAccess2;
      bool useRobustConstantAccess = supportsRobustness2;
      if (useRobustConstantAccess) {
-@@ -864,6 +875,7 @@
+@@ -864,6 +878,7 @@
    HRESULT STDMETHODCALLTYPE D3D9DeviceEx::GetRenderTargetData(
            IDirect3DSurface9* pRenderTarget,
            IDirect3DSurface9* pDestSurface) {
@@ -35,7 +45,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      D3D9DeviceLock lock = LockDevice();
  
      D3D9Surface* src = static_cast<D3D9Surface*>(pRenderTarget);
-@@ -936,6 +948,7 @@
+@@ -936,6 +951,7 @@
            IDirect3DSurface9*   pDestSurface,
      const RECT*                pDestRect,
            D3DTEXTUREFILTERTYPE Filter) {
@@ -43,7 +53,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      D3D9DeviceLock lock = LockDevice();
  
      D3D9Surface* dst = static_cast<D3D9Surface*>(pDestSurface);
-@@ -1145,6 +1158,7 @@
+@@ -1145,6 +1161,7 @@
            IDirect3DSurface9* pSurface,
      const RECT*              pRect,
            D3DCOLOR           Color) {
@@ -51,7 +61,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      D3D9DeviceLock lock = LockDevice();
  
      D3D9Surface* dst = static_cast<D3D9Surface*>(pSurface);
-@@ -1237,6 +1251,7 @@
+@@ -1237,6 +1254,7 @@
    HRESULT STDMETHODCALLTYPE D3D9DeviceEx::SetRenderTarget(
            DWORD              RenderTargetIndex,
            IDirect3DSurface9* pRenderTarget) {
@@ -59,7 +69,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      D3D9DeviceLock lock = LockDevice();
  
      if (unlikely(RenderTargetIndex >= caps::MaxSimultaneousRenderTargets
-@@ -1406,6 +1421,7 @@
+@@ -1406,6 +1424,7 @@
  
  
    HRESULT STDMETHODCALLTYPE D3D9DeviceEx::EndScene() {
@@ -67,7 +77,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      D3D9DeviceLock lock = LockDevice();
  
      if (unlikely(!m_flags.test(D3D9DeviceFlag::InScene)))
-@@ -1426,6 +1442,7 @@
+@@ -1426,6 +1445,7 @@
            D3DCOLOR Color,
            float    Z,
            DWORD    Stencil) {
@@ -75,7 +85,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      if (unlikely(!Count && pRects))
        return D3D_OK;
  
-@@ -4151,6 +4168,7 @@
+@@ -4151,6 +4171,7 @@
              D3DLOCKED_BOX*          pLockedBox,
        const D3DBOX*                 pBox,
              DWORD                   Flags) {
@@ -83,7 +93,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      D3D9DeviceLock lock = LockDevice();
  
      UINT Subresource = pResource->CalcSubresource(Face, MipLevel);
-@@ -4442,6 +4460,7 @@
+@@ -4442,6 +4463,7 @@
    HRESULT D3D9DeviceEx::FlushImage(
          D3D9CommonTexture*      pResource,
          UINT                    Subresource) {
@@ -91,7 +101,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
  
      const Rc<DxvkImage> image = pResource->GetImage();
      auto formatInfo  = imageFormatInfo(image->info().format);
-@@ -4705,7 +4724,31 @@
+@@ -4705,7 +4727,33 @@
        const bool usesStagingBuffer = pResource->DoesStagingBufferUploads();
        const bool directMapping = pResource->GetMapMode() == D3D9_COMMON_BUFFER_MAP_MODE_DIRECT;
        const bool skipWait = (!needsReadback && (usesStagingBuffer || readOnly || (noOverlap && !directMapping))) || noOverwrite;
@@ -108,8 +118,10 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +        const DxvkBufferSliceHandle oldSlice = physSlice;
 +        physSlice = pResource->DiscardMapSlice();
 +
-+        if (physSlice.mapPtr != oldSlice.mapPtr)
++        if (physSlice.mapPtr != oldSlice.mapPtr) {
 +          std::memcpy(physSlice.mapPtr, oldSlice.mapPtr, std::min(physSlice.length, oldSlice.length));
++          DxvkDebugCounters::add(DxvkDebugCounter::RenameCopyKB, uint32_t(std::min(physSlice.length, oldSlice.length) >> 10));
++        }
 +
 +        EmitCs([
 +          cBuffer      = std::move(mappingBuffer),
@@ -124,7 +136,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
          if (unlikely(needsReadback)) {
            Logger::warn("Buffer readback is unimplemented.");
            // Remember to update the sequence number when implementing buffer readback.
-@@ -4742,6 +4785,7 @@
+@@ -4742,6 +4790,7 @@
  
    HRESULT D3D9DeviceEx::FlushBuffer(
          D3D9CommonBuffer*       pResource) {
@@ -132,7 +144,71 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      auto dstBuffer = pResource->GetBufferSlice<D3D9_COMMON_BUFFER_TYPE_REAL>();
      auto srcSlice = pResource->GetMappedSlice();
  
-@@ -6252,6 +6296,9 @@
+@@ -5009,13 +5058,21 @@
+ 
+     constSet.dirty = false;
+ 
+-    uint32_t floatCount = m_vsFloatConstsCount;
++    // Without robustness2 the shaders clamp float constant reads to a count we push
++    // (DxsoOptions::swvpDynamicConstCount), so only the registers the game set are uploaded.
++    const bool dynamicCount = m_dxsoOptions.swvpDynamicConstCount;
++
++    uint32_t floatCount = dynamicCount ? m_swvpFloatHighWater : m_vsFloatConstsCount;
+     if (constSet.meta.needsConstantCopies) {
+       auto shader = GetCommonShader(m_state.vertexShader);
+-      floatCount = std::max(floatCount, shader->GetMaxDefinedConstant());
++      // GetMaxDefinedConstant is an index, not a count
++      floatCount = std::max(floatCount, shader->GetMaxDefinedConstant() + (dynamicCount ? 1u : 0u));
+     }
+     floatCount = std::min(floatCount, constSet.meta.maxConstIndexF);
+ 
++    DxvkDebugCounters::add(DxvkDebugCounter::SwvpConstUploads);
++    DxvkDebugCounters::add(DxvkDebugCounter::SwvpConstVec4, floatCount);
++
+     const uint32_t floatDataSize = floatCount * sizeof(Vector4);
+     const uint32_t intDataSize   = std::min(constSet.meta.maxConstIndexI, m_vsIntConstsCount) * sizeof(Vector4i);
+     const uint32_t boolDataSize  = divCeil(std::min(constSet.meta.maxConstIndexB, m_vsBoolConstsCount), 32u) * uint32_t(sizeof(uint32_t));
+@@ -5036,6 +5093,12 @@
+             data[constant.uboIdx] = *reinterpret_cast<const Vector4*>(constant.float32);
+         }
+       }
++
++      if (dynamicCount && floatCount != m_swvpPushedFloatCount) {
++        m_swvpPushedFloatCount = floatCount;
++        const float value = float(floatCount);
++        UpdatePushConstant<offsetof(D3D9RenderStateInfo, swvpFloatCount), sizeof(float)>(&value);
++      }
+     }
+ 
+     Rc<DxvkBuffer>& intBuffer = constSet.swvpBuffers.intBuffer;
+@@ -5060,7 +5123,15 @@
+ 
+     DxvkBufferSliceHandle slice;
+     if (unlikely(dstBuffer == nullptr || dstBuffer->info().size < size)) {
+-      dstBuffer = CreateConstantBuffer(useSSBO, size, DxsoProgramType::VertexShader, cBufferTarget);
++      // Grow in power-of-two steps of at least 4 KB, up to 64 KB: every new buffer starts
++      // with an empty pool of slices, and new memory is slow to touch under Rosetta.
++      uint32_t bufferSize = std::max(size, 4096u);
++      while (bufferSize & (bufferSize - 1))
++        bufferSize += bufferSize & -bufferSize;
++      if (bufferSize > 65536u)
++        bufferSize = size;
++
++      dstBuffer = CreateConstantBuffer(useSSBO, bufferSize, DxsoProgramType::VertexShader, cBufferTarget);
+       slice = dstBuffer->getSliceHandle();
+     } else {
+       slice = dstBuffer->allocSlice();
+@@ -5097,6 +5168,9 @@
+     }
+     floatCount = std::min(constSet.meta.maxConstIndexF, floatCount);
+ 
++    if (ShaderStage == DxsoProgramType::VertexShader)
++      DxvkDebugCounters::add(DxvkDebugCounter::HwConstUploads);
++
+     const uint32_t intRange = caps::MaxOtherConstants * sizeof(Vector4i);
+     const uint32_t intDataSize = constSet.meta.maxConstIndexI * sizeof(Vector4i);
+     uint32_t floatDataSize = floatCount * sizeof(Vector4);
+@@ -6252,6 +6326,9 @@
      if (depthTextureMask != m_lastSamplerDepthMode)
        UpdateSamplerDepthModeSpecConstant(depthTextureMask);
  
@@ -142,7 +218,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      if (m_flags.test(D3D9DeviceFlag::DirtySharedPixelShaderData)) {
        m_flags.clr(D3D9DeviceFlag::DirtySharedPixelShaderData);
  
-@@ -6302,11 +6349,73 @@
+@@ -6302,6 +6379,12 @@
    void D3D9DeviceEx::BindShader(
    const D3D9CommonShader*                 pShaderModule,
          D3D9ShaderPermutation             Permutation) {
@@ -155,11 +231,10 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      EmitCs([
        cShader = pShaderModule->GetShader(Permutation)
      ] (DxvkContext* ctx) {
-       ctx->bindShader(GetShaderStage(ShaderStage), cShader);
-     });
-+  }
-+
-+
+@@ -6310,6 +6393,62 @@
+   }
+ 
+ 
 +  void D3D9DeviceEx::BindStaticSamplerVariants(uint32_t UsedTextureMask) {
 +    auto bind = [this] (
 +            uint32_t              slot,
@@ -213,12 +288,57 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +    } else {
 +      m_variantShader[0] = nullptr;
 +    }
-   }
++  }
++
++
+   void D3D9DeviceEx::BindInputLayout() {
+     m_flags.clr(D3D9DeviceFlag::DirtyInputLayout);
+ 
+@@ -6551,7 +6690,31 @@
+ 
+     if constexpr (ProgramType == DxsoProgramType::VertexShader) {
+       if constexpr (ConstantType == D3D9ConstantType::Float) {
+-        m_vsFloatConstsCount = std::max(m_vsFloatConstsCount, StartRegister + Count);
++        // Every draw copies the vertex shader constants up to this mark (with software vertex
++        // processing that can be 8192 registers). Registers that hold zero need no copy: reads
++        // past the copied range return zero. So only registers that become nonzero raise it;
++        // a game that clears all 8192 once no longer pays for a 128 KB copy on every draw.
++        uint32_t top = Count;
++
++        if (likely(m_mxoZeroAwareConsts)) {
++          const uint32_t* words = reinterpret_cast<const uint32_t*>(pConstantData);
++
++          while (top && !(words[4 * top - 4] | words[4 * top - 3] | words[4 * top - 2] | words[4 * top - 1]))
++            top--;
++        }
++
++        if (top && StartRegister + top > m_swvpFloatHighWater) {
++          static uint32_t s_logged = 0;
++          if (s_logged < 40) {
++            s_logged++;
++            Logger::info(str::format("MxO: vertex shader constants now reach ", StartRegister + top,
++              " (set ", StartRegister, "..", StartRegister + Count - 1, ")"));
++          }
++          m_swvpFloatHighWater = StartRegister + top;
++        }
++
++        if (top && StartRegister + top > m_vsFloatConstsCount)
++          m_vsFloatConstsCount = StartRegister + top;
+       } else if constexpr (ConstantType == D3D9ConstantType::Int) {
+         m_vsIntConstsCount = std::max(m_vsIntConstsCount, StartRegister + Count);
+       } else /* if constexpr (ConstantType == D3D9ConstantType::Bool) */ {
+@@ -7099,6 +7262,8 @@
  
  
-diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/d3d9/d3d9_device.h b/src/d3d9/d3d9_device.h
---- a/src/d3d9/d3d9_device.h	2026-07-15 12:37:28
-+++ b/src/d3d9/d3d9_device.h	2026-11-16 14:57:21
+   HRESULT D3D9DeviceEx::ResetState(D3DPRESENT_PARAMETERS* pPresentationParameters) {
++    m_swvpPushedFloatCount = ~0u;
++
+     if (!pPresentationParameters->EnableAutoDepthStencil)
+       SetDepthStencilSurface(nullptr);
+ 
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_device.h b/src/d3d9/d3d9_device.h
+--- a/src/d3d9/d3d9_device.h	2026-11-18 00:00:00
++++ b/src/d3d9/d3d9_device.h	2026-11-18 00:00:00
 @@ -1132,6 +1132,8 @@
  
      void UpdateSamplerDepthModeSpecConstant(uint32_t value);
@@ -240,10 +360,53 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      uint32_t                        m_lastProjectionBitfield = 0;
      uint32_t                        m_lastSamplerTypes = 0;
      uint32_t                        m_lastPointMode = 0;
-diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/d3d9/d3d9_fixed_function.cpp b/src/d3d9/d3d9_fixed_function.cpp
+@@ -1236,6 +1243,7 @@
+     D3D9ShaderMasks                 m_psShaderMasks = FixedFunctionMask;
+ 
+     bool                            m_isSWVP;
++    bool                            m_mxoZeroAwareConsts = env::getEnvVar("DXVK_MXO_ZERO_CONSTS") != "0";
+     bool                            m_amdATOC         = false;
+     bool                            m_nvATOC          = false;
+     bool                            m_ffZTest         = false;
+@@ -1246,6 +1254,8 @@
+     uint32_t                        m_robustUBOAlignment      = 1;
+ 
+     uint32_t                        m_vsFloatConstsCount = 0;
++    uint32_t                        m_swvpFloatHighWater = 0;     // highest nonzero SWVP float register + 1
++    uint32_t                        m_swvpPushedFloatCount = ~0u; // count last given to the shaders
+     uint32_t                        m_vsIntConstsCount   = 0;
+     uint32_t                        m_vsBoolConstsCount  = 0;
+     uint32_t                        m_psFloatConstsCount = 0;
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_fixed_function.cpp b/src/d3d9/d3d9_fixed_function.cpp
 --- a/src/d3d9/d3d9_fixed_function.cpp	2026-07-15 12:37:28
-+++ b/src/d3d9/d3d9_fixed_function.cpp	2026-11-16 14:57:21
-@@ -721,7 +721,7 @@
++++ b/src/d3d9/d3d9_fixed_function.cpp	2026-11-18 17:13:47
+@@ -203,7 +203,7 @@
+     uint32_t floatType = spvModule.defFloatType(32);
+     uint32_t vec3Type  = spvModule.defVectorType(floatType, 3);
+ 
+-    std::array<uint32_t, 11> rsMembers = {{
++    std::array<uint32_t, 12> rsMembers = {{
+       vec3Type,
+       floatType,
+       floatType,
+@@ -216,6 +216,8 @@
+       floatType,
+       floatType,
+       floatType,
++
++      floatType,
+     }};
+ 
+     uint32_t rsStruct = spvModule.defStructTypeUnique(count, rsMembers.data());
+@@ -249,6 +251,7 @@
+     SetMemberName("point_scale_a",  offsetof(D3D9RenderStateInfo, pointScaleA));
+     SetMemberName("point_scale_b",  offsetof(D3D9RenderStateInfo, pointScaleB));
+     SetMemberName("point_scale_c",  offsetof(D3D9RenderStateInfo, pointScaleC));
++    SetMemberName("swvp_float_count", offsetof(D3D9RenderStateInfo, swvpFloatCount));
+ 
+     return rsBlock;
+   }
+@@ -721,7 +724,7 @@
      info.inputMask = m_inputMask;
      info.outputMask = m_outputMask;
      info.pushConstOffset = m_pushConstOffset;
@@ -252,9 +415,9 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
  
      return new DxvkShader(info, m_module.compile());
    }
-diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/d3d9/d3d9_include.h b/src/d3d9/d3d9_include.h
---- a/src/d3d9/d3d9_include.h	2026-07-15 12:37:28
-+++ b/src/d3d9/d3d9_include.h	2026-11-16 14:57:21
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_include.h b/src/d3d9/d3d9_include.h
+--- a/src/d3d9/d3d9_include.h	2026-11-18 00:00:00
++++ b/src/d3d9/d3d9_include.h	2026-11-18 00:00:00
 @@ -79,10 +79,7 @@
  
  // MinGW headers are broken. Who'dve guessed?
@@ -267,9 +430,30 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
  
  #ifndef __WINE__
  extern "C" WINUSERAPI WINBOOL WINAPI SetProcessDPIAware(VOID);
-diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/d3d9/d3d9_mxo_fastmath.cpp b/src/d3d9/d3d9_mxo_fastmath.cpp
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_initializer.cpp b/src/d3d9/d3d9_initializer.cpp
+--- a/src/d3d9/d3d9_initializer.cpp	2026-07-15 12:37:28
++++ b/src/d3d9/d3d9_initializer.cpp	2026-11-18 17:13:47
+@@ -1,6 +1,7 @@
+ #include <cstring>
+ 
+ #include "d3d9_initializer.h"
++#include "../dxvk/dxvk_debug_counters.h"
+ 
+ namespace dxvk {
+ 
+@@ -68,6 +69,9 @@
+     // If the buffer is mapped, we can write data directly
+     // to the mapped memory region instead of doing it on
+     // the GPU. Same goes for zero-initialization.
++    DxvkDebugCounters::add(DxvkDebugCounter::InitFillKB, uint32_t(Slice.length() >> 10));
++    DxvkDebugTimer timer(DxvkDebugCounter::InitFillUs);
++
+     std::memset(
+       Slice.mapPtr(0), 0,
+       Slice.length());
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_mxo_fastmath.cpp b/src/d3d9/d3d9_mxo_fastmath.cpp
 --- a/src/d3d9/d3d9_mxo_fastmath.cpp	1970-01-01 01:00:00
-+++ b/src/d3d9/d3d9_mxo_fastmath.cpp	2026-11-16 21:18:18
++++ b/src/d3d9/d3d9_mxo_fastmath.cpp	2026-11-18 17:13:47
 @@ -0,0 +1,321 @@
 +#include <windows.h>
 +#include <tlhelp32.h>
@@ -592,9 +776,9 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +  }
 +
 +}
-diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/d3d9/d3d9_mxo_fastmath.h b/src/d3d9/d3d9_mxo_fastmath.h
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_mxo_fastmath.h b/src/d3d9/d3d9_mxo_fastmath.h
 --- a/src/d3d9/d3d9_mxo_fastmath.h	1970-01-01 01:00:00
-+++ b/src/d3d9/d3d9_mxo_fastmath.h	2026-11-16 19:21:35
++++ b/src/d3d9/d3d9_mxo_fastmath.h	2026-11-18 17:13:47
 @@ -0,0 +1,32 @@
 +#pragma once
 +
@@ -628,9 +812,9 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +  float GetMxoRenderThrottle();
 +
 +}
-diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/d3d9/d3d9_mxo_fastmath_asm.inc b/src/d3d9/d3d9_mxo_fastmath_asm.inc
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_mxo_fastmath_asm.inc b/src/d3d9/d3d9_mxo_fastmath_asm.inc
 --- a/src/d3d9/d3d9_mxo_fastmath_asm.inc	1970-01-01 01:00:00
-+++ b/src/d3d9/d3d9_mxo_fastmath_asm.inc	2026-11-16 15:36:05
++++ b/src/d3d9/d3d9_mxo_fastmath_asm.inc	2026-11-18 17:13:47
 @@ -0,0 +1,81 @@
 +// SSE replacements for two x87 math routines of The Matrix Online client (see d3d9_mxo_fastmath.cpp).
 +//
@@ -713,9 +897,9 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +extern "C" void MxoMatMulSSE();
 +extern "C" void MxoQuatToMatSSE();
-diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/d3d9/d3d9_mxo_x87.h b/src/d3d9/d3d9_mxo_x87.h
---- a/src/d3d9/d3d9_mxo_x87.h	1970-01-01 01:00:00
-+++ b/src/d3d9/d3d9_mxo_x87.h	2026-11-16 19:15:37
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_mxo_x87.h b/src/d3d9/d3d9_mxo_x87.h
+--- a/src/d3d9/d3d9_mxo_x87.h	2026-11-18 00:00:00
++++ b/src/d3d9/d3d9_mxo_x87.h	2026-11-18 00:00:00
 @@ -0,0 +1,71 @@
 +// Runtime side of the x87 -> SSE2 translations generated by xlat.py.
 +#pragma once
@@ -788,9 +972,9 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +  return true;
 +}
-diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/d3d9/d3d9_options.cpp b/src/d3d9/d3d9_options.cpp
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_options.cpp b/src/d3d9/d3d9_options.cpp
 --- a/src/d3d9/d3d9_options.cpp	2026-07-15 12:37:28
-+++ b/src/d3d9/d3d9_options.cpp	2026-11-16 20:24:01
++++ b/src/d3d9/d3d9_options.cpp	2026-11-18 17:13:47
 @@ -1,5 +1,7 @@
  #include "d3d9_options.h"
  
@@ -808,9 +992,9 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      this->seamlessCubes                 = config.getOption<bool>        ("d3d9.seamlessCubes",                 false);
  
      // If we are not Nvidia, enable general hazards.
-diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/d3d9/d3d9_options.h b/src/d3d9/d3d9_options.h
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_options.h b/src/d3d9/d3d9_options.h
 --- a/src/d3d9/d3d9_options.h	2026-07-15 12:37:28
-+++ b/src/d3d9/d3d9_options.h	2026-11-16 20:24:01
++++ b/src/d3d9/d3d9_options.h	2026-11-18 17:13:47
 @@ -158,6 +158,10 @@
      /// Disable direct buffer mapping
      bool allowDirectBufferMapping;
@@ -822,9 +1006,9 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      /// Don't use non seamless cube maps
      bool seamlessCubes;
    };
-diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/d3d9/d3d9_shader.cpp b/src/d3d9/d3d9_shader.cpp
---- a/src/d3d9/d3d9_shader.cpp	2026-07-15 12:37:28
-+++ b/src/d3d9/d3d9_shader.cpp	2026-11-16 14:57:21
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_shader.cpp b/src/d3d9/d3d9_shader.cpp
+--- a/src/d3d9/d3d9_shader.cpp	2026-11-18 00:00:00
++++ b/src/d3d9/d3d9_shader.cpp	2026-11-18 00:00:00
 @@ -16,6 +16,11 @@
        const void*                 pShaderBytecode,
        const DxsoAnalysisInfo&     AnalysisInfo,
@@ -896,9 +1080,9 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
    }
  
  
-diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/d3d9/d3d9_shader.h b/src/d3d9/d3d9_shader.h
---- a/src/d3d9/d3d9_shader.h	2026-07-15 12:37:28
-+++ b/src/d3d9/d3d9_shader.h	2026-11-16 14:57:21
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_shader.h b/src/d3d9/d3d9_shader.h
+--- a/src/d3d9/d3d9_shader.h	2026-11-18 00:00:00
++++ b/src/d3d9/d3d9_shader.h	2026-11-18 00:00:00
 @@ -1,5 +1,7 @@
  #pragma once
  
@@ -943,9 +1127,22 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
  
    };
  
-diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/d3d9/d3d9_swapchain.cpp b/src/d3d9/d3d9_swapchain.cpp
---- a/src/d3d9/d3d9_swapchain.cpp	2026-07-15 12:37:28
-+++ b/src/d3d9/d3d9_swapchain.cpp	2026-11-16 21:10:22
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_state.h b/src/d3d9/d3d9_state.h
+--- a/src/d3d9/d3d9_state.h	2026-07-15 12:37:28
++++ b/src/d3d9/d3d9_state.h	2026-11-18 17:13:47
+@@ -44,6 +44,9 @@
+     float pointScaleA  = 1.0f;
+     float pointScaleB  = 0.0f;
+     float pointScaleC  = 0.0f;
++
++    // number of software vertex processing float constants in the bound buffer (see DxsoOptions::swvpDynamicConstCount)
++    float swvpFloatCount = 0.0f;
+   };
+ 
+   enum class D3D9RenderStateItem {
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_swapchain.cpp b/src/d3d9/d3d9_swapchain.cpp
+--- a/src/d3d9/d3d9_swapchain.cpp	2026-11-18 00:00:00
++++ b/src/d3d9/d3d9_swapchain.cpp	2026-11-18 00:00:00
 @@ -1,4 +1,11 @@
 +#include <cstdio>
 +#include <windows.h>
@@ -958,7 +1155,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
  #include "d3d9_surface.h"
  #include "d3d9_monitor.h"
  
-@@ -184,6 +191,292 @@
+@@ -184,6 +191,337 @@
    };
  
  
@@ -968,7 +1165,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +  // winevulkan.dll (so that time spent waiting or inside Vulkan can be attributed to its caller). Samples are
 +  // appended to C:\\Games\\dxvk\\samples.bin every ten seconds; translator/profile.py reads the file.
 +  struct SampleRecord {
-+    uint32_t tid, eip, retSelf[3], retClient, retVulkan;
++    uint32_t tid, eip, retSelf[3], retClient[3], retVulkan;
 +  };
 +
 +  // A stack value is taken for a return address only if a call instruction ends right before it
@@ -1012,8 +1209,12 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +    range[0][0] = uint32_t(uintptr_t(self));
 +    range[0][1] = range[0][0] + ImageSize(self);
 +
++    // Light mode (C:\\Games\\dxvk\\sample-light.flag): only the thread that presents, every 20 ms.
++    // Pausing every thread every 5 ms makes the game's own memory writes far slower than they are.
++    const bool light = ::GetFileAttributesA("C:\\Games\\dxvk\\sample-light.flag") != INVALID_FILE_ATTRIBUTES;
++
 +    for (;;) {
-+      ::Sleep(5);
++      ::Sleep(light ? 20 : 5);
 +      const DWORD now = ::GetTickCount();
 +
 +      if (now - lastScan >= 2000) {
@@ -1051,6 +1252,9 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +      }
 +
 +      for (uint32_t i = 0; i < threadCount && count < MaxSamples; i++) {
++        if (light && threads[i].tid != s_presentThreadId)
++          continue;
++
 +        if (::SuspendThread(threads[i].handle) == DWORD(-1))
 +          continue;
 +
@@ -1058,7 +1262,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +        context.ContextFlags = CONTEXT_CONTROL;
 +
 +        if (::GetThreadContext(threads[i].handle, &context)) {
-+          SampleRecord record = { threads[i].tid, uint32_t(context.Eip), { 0, 0, 0 }, 0, 0 };
++          SampleRecord record = { threads[i].tid, uint32_t(context.Eip), { 0, 0, 0 }, { 0, 0, 0 }, 0 };
++          uint32_t clientCount = 0;
 +          uint32_t selfCount = 0;
 +          auto stack = reinterpret_cast<const uint32_t*>(uintptr_t(context.Esp));
 +
@@ -1069,7 +1274,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +              if (value >= range[0][0] + 0x1000 && value < range[0][1]) {
 +                if (selfCount < 3 && FollowsCall(value)) record.retSelf[selfCount++] = value;
 +              } else if (value >= range[1][0] + 0x1000 && value < range[1][1]) {
-+                if (!record.retClient && FollowsCall(value)) record.retClient = value;
++                if (clientCount < 3 && FollowsCall(value)) record.retClient[clientCount++] = value;
 +              } else if (value >= range[2][0] + 0x1000 && value < range[2][1]) {
 +                if (!record.retVulkan && FollowsCall(value)) record.retVulkan = value;
 +              }
@@ -1090,7 +1295,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +      if (FILE* file = std::fopen("C:\\Games\\dxvk\\samples.bin", "ab")) {
 +        const env::ThreadNameEntry* names = nullptr;
 +        const uint32_t nameCount = env::getThreadNames(&names);
-+        const uint32_t head[10] = { 0x33504d53u /* SMP3 */, count, range[1][0], range[0][0], range[0][1] - range[0][0],
++        const uint32_t head[10] = { 0x34504d53u /* SMP4 */, count, range[1][0], range[0][0], range[0][1] - range[0][0],
 +          range[2][0], range[2][1] - range[2][0], uint32_t(s_presentThreadId), nameCount, 0 };
 +        std::fwrite(head, 4, 10, file);
 +        std::fwrite(names, sizeof(env::ThreadNameEntry), nameCount, file);
@@ -1104,7 +1309,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +  static void StartSamplerOnce() {
 +    static const bool s_started = [] {
-+      if (::GetFileAttributesA("C:\\Games\\dxvk\\sample.flag") == INVALID_FILE_ATTRIBUTES)
++      if (::GetFileAttributesA("C:\\Games\\dxvk\\sample.flag") == INVALID_FILE_ATTRIBUTES
++       && ::GetFileAttributesA("C:\\Games\\dxvk\\sample-light.flag") == INVALID_FILE_ATTRIBUTES)
 +        return false;
 +
 +      s_presentThreadId = ::GetCurrentThreadId();
@@ -1143,6 +1349,41 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +    if (!s_lastLog)
 +      s_lastLog = now;
 +
++    // Spike lines: any frame slower than 40 ms, with what happened during it
++    {
++      static uint64_t s_prevPresent = 0;
++      static uint32_t s_spikes = 0;
++      static DxvkStatCounters s_prevFrame;
++      const DxvkStatCounters frameCounters = device->GetDXVKDevice()->getStatCounters();
++      const uint64_t frameUs = s_prevPresent ? (now - s_prevPresent) * 1000000 / second : 0;
++      s_prevPresent = now;
++
++      static const char* const spikeNames[] = { "SetRenderTarget", "Clear", "EndScene", "StretchRect", "texture locks",
++        "texture uploads", "buffer uploads", "buffer renames", "ColorFill", "GetRenderTargetData",
++        "SWVP constant uploads", "SWVP vec4s", "HW constant uploads", "new buffers", "KB cleared", "KB new mapped memory",
++        "KB copied by renames", "KB zero-filled", "us zero-filling", "us clearing", "us prefaulting", "prefault failures",
++        "KB warmed", "us warming", "warm chunks used", "warm misses", "pipelines built", "us building pipelines" };
++      static_assert(sizeof(spikeNames) / sizeof(spikeNames[0]) == uint32_t(DxvkDebugCounter::Count));
++
++      std::string what;
++      for (uint32_t i = 0; i < uint32_t(DxvkDebugCounter::Count); i++) {
++        const uint32_t n = DxvkDebugCounters::s_frame[i].exchange(0);
++        if (n && frameUs >= 40000)
++          what += str::format(", ", spikeNames[i], " ", n);
++      }
++
++      if (frameUs >= 40000 && s_spikes < 400) {
++        s_spikes++;
++        auto d = [&] (DxvkStatCounter c) { return frameCounters.getCtr(c) - s_prevFrame.getCtr(c); };
++        Logger::info(str::format("SPIKE ", frameUs / 1000, " ms: draws ", d(DxvkStatCounter::CmdDrawCalls),
++          ", waits for render thread ", d(DxvkStatCounter::CsSyncCount), " = ", d(DxvkStatCounter::CsSyncTicks), " us",
++          ", waits for GPU ", d(DxvkStatCounter::GpuSyncCount), " = ", d(DxvkStatCounter::GpuSyncTicks), " us",
++          ", pipelines total ", frameCounters.getCtr(DxvkStatCounter::PipeCountGraphics), what));
++      }
++
++      s_prevFrame = frameCounters;
++    }
++
 +    if (now - s_lastLog >= 5 * second) {
 +      // what the graphics layer did per frame, and how long this thread sat waiting for it
 +      static DxvkStatCounters s_lastCounters;
@@ -1164,7 +1405,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +      // what the game asked for, and where render passes were broken up (callers by offset in this DLL)
 +      static const char* const names[] = { "SetRenderTarget", "Clear", "EndScene", "StretchRect", "texture locks",
-+        "texture uploads", "buffer uploads", "buffer renames", "ColorFill", "GetRenderTargetData" };
++        "texture uploads", "buffer uploads", "buffer renames", "ColorFill", "GetRenderTargetData",
++        "SWVP constant uploads", "SWVP constant vec4s copied", "HW constant uploads", "new buffers", "KB cleared", "KB new mapped memory", "KB copied by renames", "KB zero-filled at creation", "us zero-filling", "us clearing", "us prefaulting", "prefault failures", "KB warmed (background)", "us warming (background)", "warm chunks used", "warm misses", "pipelines built at draw time", "us building pipelines" };
 +      std::string calls;
 +
 +      for (uint32_t i = 0; i < uint32_t(DxvkDebugCounter::Count); i++) {
@@ -1251,7 +1493,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
    D3D9SwapChainEx::D3D9SwapChainEx(
            D3D9DeviceEx*          pDevice,
            D3DPRESENT_PARAMETERS* pPresentParams,
-@@ -255,6 +548,10 @@
+@@ -255,6 +593,10 @@
            HWND     hDestWindowOverride,
      const RGNDATA* pDirtyRegion,
            DWORD    dwFlags) {
@@ -1262,7 +1504,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      D3D9DeviceLock lock = m_parent->LockDevice();
  
      uint32_t presentInterval = m_presentParams.PresentationInterval;
-@@ -851,6 +1148,22 @@
+@@ -851,6 +1193,22 @@
        VkRect2D dstRect = {
          {  int32_t(m_dstRect.left),                    int32_t(m_dstRect.top)                    },
          { uint32_t(m_dstRect.right - m_dstRect.left), uint32_t(m_dstRect.bottom - m_dstRect.top) } };
@@ -1285,9 +1527,9 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
  
        m_blitter->presentImage(m_context.ptr(),
          m_imageViews.at(imageIndex), dstRect,
-diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/d3d9/meson.build b/src/d3d9/meson.build
---- a/src/d3d9/meson.build	2026-07-15 12:37:28
-+++ b/src/d3d9/meson.build	2026-11-16 15:36:05
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/meson.build b/src/d3d9/meson.build
+--- a/src/d3d9/meson.build	2026-11-18 00:00:00
++++ b/src/d3d9/meson.build	2026-11-18 00:00:00
 @@ -11,6 +11,7 @@
  
  d3d9_src = [
@@ -1296,9 +1538,9 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
    'd3d9_interface.cpp',
    'd3d9_adapter.cpp',
    'd3d9_monitor.cpp',
-diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/dxso/dxso_compiler.cpp b/src/dxso/dxso_compiler.cpp
---- a/src/dxso/dxso_compiler.cpp	2026-07-15 12:37:28
-+++ b/src/dxso/dxso_compiler.cpp	2026-11-16 14:57:21
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/dxso/dxso_compiler.cpp b/src/dxso/dxso_compiler.cpp
+--- a/src/dxso/dxso_compiler.cpp	2026-11-18 00:00:00
++++ b/src/dxso/dxso_compiler.cpp	2026-11-18 00:00:00
 @@ -253,7 +253,7 @@
      info.inputMask = m_inputMask;
      info.outputMask = m_outputMask;
@@ -1343,7 +1585,52 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      resource.access = VK_ACCESS_SHADER_READ_BIT;
      m_resourceSlots.push_back(resource);
    }
-@@ -2885,7 +2902,7 @@
+@@ -1019,6 +1036,26 @@
+         }
+       }
+ 
++      // Software vertex processing without robustness2: the buffer holds only the constants
++      // the application set (count in the render state push constant block). Read index 0
++      // instead of going past the end, and return zero for anything at or above the count.
++      const bool dynamicCount = reg.id.type == DxsoRegisterType::Const && isSwvp()
++                             && m_moduleInfo.options.swvpDynamicConstCount;
++      uint32_t inBounds = 0;
++
++      if (dynamicCount) {
++        uint32_t floatType = m_module.defFloatType(32);
++        uint32_t member    = m_module.constu32(11);
++        uint32_t countPtr  = m_module.opAccessChain(
++          m_module.defPointerType(floatType, spv::StorageClassPushConstant),
++          m_rsBlock, 1, &member);
++        uint32_t count = m_module.opConvertFtoU(m_module.defIntType(32, 0),
++          m_module.opLoad(floatType, countPtr));
++
++        inBounds    = m_module.opULessThan(m_module.defBoolType(), relativeIdx, count);
++        relativeIdx = m_module.opSelect(m_module.defIntType(32, 1), inBounds, relativeIdx, m_module.consti32(0));
++      }
++
+       std::array<uint32_t, 2> indices = { structIdx, relativeIdx };
+ 
+       uint32_t typeId = getVectorTypeId(result.type);
+@@ -1028,7 +1065,16 @@
+ 
+       result.id = m_module.opLoad(typeId, ptrId);
+ 
+-      if (relative && !m_moduleInfo.options.robustness2Supported) {
++      if (dynamicCount) {
++        std::array<uint32_t, 4> condIds = { inBounds, inBounds, inBounds, inBounds };
++        uint32_t cond = m_module.opCompositeConstruct(
++          m_module.defVectorType(m_module.defBoolType(), 4),
++          condIds.size(), condIds.data());
++
++        result.id = m_module.opSelect(typeId, cond, result.id,
++          m_module.constvec4f32(0.0f, 0.0f, 0.0f, 0.0f));
++      }
++      else if (relative && !m_moduleInfo.options.robustness2Supported) {
+         uint32_t constCount = m_module.constu32(m_layout->floatCount);
+ 
+         // Expand condition to bvec4 since the result has four components
+@@ -2885,7 +2931,7 @@
      }
  
      // SM < 1.x does not have dcl sampler type.
@@ -1352,7 +1639,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
        emitDclSampler(samplerIdx, DxsoTextureType::Texture2D);
  
      DxsoSampler sampler = m_samplers.at(samplerIdx);
-@@ -3084,7 +3101,27 @@
+@@ -3084,7 +3130,27 @@
          SampleImage(texcoordVar, sampler.color[samplerType], false, samplerType, sampler.boundConst);
      };
  
@@ -1381,13 +1668,45 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
        DxsoSamplerType samplerType =
          SamplerTypeFromTextureType(sampler.type);
  
-diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/dxso/dxso_options.h b/src/dxso/dxso_options.h
+@@ -3725,6 +3791,11 @@
+       // Point scale never triggers on programmable
+       m_pushConstSize   = sizeof(float) * 3;
+       count = 8;
++
++      if (isSwvp() && m_moduleInfo.options.swvpDynamicConstCount) {
++        m_pushConstSize = offsetof(D3D9RenderStateInfo, swvpFloatCount) + sizeof(float) - m_pushConstOffset;
++        count = 12;
++      }
+     }
+ 
+     m_rsBlock = SetupRenderStateBlock(m_module, count);
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/dxso/dxso_options.cpp b/src/dxso/dxso_options.cpp
+--- a/src/dxso/dxso_options.cpp	2026-07-15 12:37:28
++++ b/src/dxso/dxso_options.cpp	2026-11-18 17:13:47
+@@ -45,6 +45,9 @@
+     alphaTestWiggleRoom = options.alphaTestWiggleRoom;
+ 
+     robustness2Supported = devFeatures.extRobustness2.robustBufferAccess2;
++
++    swvpDynamicConstCount = !robustness2Supported
++      && env::getEnvVar("DXVK_MXO_SWVP_COUNT") != "0";
+   }
+ 
+ }
+\ No newline at end of file
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/dxso/dxso_options.h b/src/dxso/dxso_options.h
 --- a/src/dxso/dxso_options.h	2026-07-15 12:37:28
-+++ b/src/dxso/dxso_options.h	2026-11-16 14:57:21
-@@ -57,6 +57,13 @@
++++ b/src/dxso/dxso_options.h	2026-11-18 17:13:47
+@@ -57,6 +57,19 @@
  
      /// Whether or not we can rely on robustness2 to handle oob constant access
      bool robustness2Supported;
++
++    /// Software vertex processing without robustness2: vertex shaders read the number of
++    /// float constants actually uploaded from a push constant, clamp the index to it and
++    /// return zero beyond it. Lets the device upload only the constants the application
++    /// set instead of all 8192 per draw. DXVK_MXO_SWVP_COUNT=0 turns this off.
++    bool swvpDynamicConstCount;
 +
 +    /// Fix sampler image types and depth-compare modes at compile time instead of
 +    /// declaring several image variables on one binding and picking one through
@@ -1399,9 +1718,35 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
  
  }
 \ No newline at end of file
-diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/dxvk/dxvk_context.cpp b/src/dxvk/dxvk_context.cpp
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/dxvk/dxvk_buffer.cpp b/src/dxvk/dxvk_buffer.cpp
+--- a/src/dxvk/dxvk_buffer.cpp	2026-11-18 00:00:00
++++ b/src/dxvk/dxvk_buffer.cpp	2026-11-18 00:00:00
+@@ -1,6 +1,7 @@
+ #include "dxvk_barrier.h"
+ #include "dxvk_buffer.h"
+ #include "dxvk_device.h"
++#include "dxvk_debug_counters.h"
+ 
+ #include <algorithm>
+ 
+@@ -126,8 +127,13 @@
+         handle.memory.memory(), handle.memory.offset()) != VK_SUCCESS)
+       throw DxvkError("DxvkBuffer: Failed to bind device memory");
+     
+-    if (clear && (m_memFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT))
++    DxvkDebugCounters::add(DxvkDebugCounter::BufferAllocs);
++
++    if (clear && (m_memFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)) {
++      DxvkDebugCounters::add(DxvkDebugCounter::BufferClearKB, uint32_t(info.size >> 10));
++      DxvkDebugTimer timer(DxvkDebugCounter::ClearUs);
+       std::memset(handle.memory.mapPtr(0), 0, info.size);
++    }
+ 
+     return handle;
+   }
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/dxvk/dxvk_context.cpp b/src/dxvk/dxvk_context.cpp
 --- a/src/dxvk/dxvk_context.cpp	2026-07-15 12:37:28
-+++ b/src/dxvk/dxvk_context.cpp	2026-11-16 20:47:03
++++ b/src/dxvk/dxvk_context.cpp	2026-11-18 17:13:47
 @@ -3,7 +3,11 @@
  #include <utility>
  
@@ -1535,9 +1880,9 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
        m_flags.clr(DxvkContextFlag::GpRenderPassBound);
  
        this->pauseTransformFeedback();
-diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/dxvk/dxvk_context.h b/src/dxvk/dxvk_context.h
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/dxvk/dxvk_context.h b/src/dxvk/dxvk_context.h
 --- a/src/dxvk/dxvk_context.h	2026-07-15 12:37:28
-+++ b/src/dxvk/dxvk_context.h	2026-11-16 20:47:03
++++ b/src/dxvk/dxvk_context.h	2026-11-18 17:13:47
 @@ -1067,6 +1067,8 @@
      DxvkBarrierSet          m_initBarriers;
      DxvkBarrierSet          m_execAcquires;
@@ -1547,16 +1892,17 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      DxvkBarrierSet          m_gfxBarriers;
      DxvkBarrierControlFlags m_barrierControl;
      
-diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/dxvk/dxvk_debug_counters.h b/src/dxvk/dxvk_debug_counters.h
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/dxvk/dxvk_debug_counters.h b/src/dxvk/dxvk_debug_counters.h
 --- a/src/dxvk/dxvk_debug_counters.h	1970-01-01 01:00:00
-+++ b/src/dxvk/dxvk_debug_counters.h	2026-11-16 20:41:13
-@@ -0,0 +1,48 @@
++++ b/src/dxvk/dxvk_debug_counters.h	2026-11-18 17:13:47
+@@ -0,0 +1,64 @@
 +#pragma once
 +
 +// Diagnostic counters read by the D3D9 front end's optional frame log (C:\Games\dxvk\debug.flag).
 +// Written from the rendering threads without locking; the values are statistics, not state.
 +
 +#include <atomic>
++#include <chrono>
 +#include <cstdint>
 +
 +namespace dxvk {
@@ -1590,19 +1936,201 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +  /// Calls the application made, per kind
 +  enum class DxvkDebugCounter : uint32_t {
 +    SetRenderTarget, Clear, EndScene, StretchRect, TextureLock, TextureUpload, BufferUpload, BufferRename,
-+    ColorFill, GetRenderTargetData, Count
++    ColorFill, GetRenderTargetData, SwvpConstUploads, SwvpConstVec4, HwConstUploads, BufferAllocs, BufferClearKB, NewMappedKB, RenameCopyKB, InitFillKB, InitFillUs, ClearUs, PrefaultUs, PrefaultFailed, WarmKB, WarmUs, WarmChunksUsed, WarmMisses, PipelineBuilds, PipelineBuildUs, Count
 +  };
 +
 +  struct DxvkDebugCounters {
 +    static inline std::atomic<uint32_t> s_value[uint32_t(DxvkDebugCounter::Count)] = { };
-+    static void add(DxvkDebugCounter c) { s_value[uint32_t(c)]++; }
++    static inline std::atomic<uint32_t> s_frame[uint32_t(DxvkDebugCounter::Count)] = { };  // per frame, for spike lines
++    static void add(DxvkDebugCounter c) { s_value[uint32_t(c)]++; s_frame[uint32_t(c)]++; }
++    static void add(DxvkDebugCounter c, uint32_t n) { s_value[uint32_t(c)] += n; s_frame[uint32_t(c)] += n; }
++  };
++
++  /// Adds the microseconds between construction and destruction to a counter
++  struct DxvkDebugTimer {
++    DxvkDebugCounter counter;
++    std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
++
++    explicit DxvkDebugTimer(DxvkDebugCounter c) : counter(c) { }
++
++    ~DxvkDebugTimer() {
++      DxvkDebugCounters::add(counter, uint32_t(std::chrono::duration_cast<std::chrono::microseconds>(
++        std::chrono::steady_clock::now() - start).count()));
++    }
 +  };
 +
 +}
-diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/dxvk/dxvk_memory.cpp b/src/dxvk/dxvk_memory.cpp
---- a/src/dxvk/dxvk_memory.cpp	2026-07-15 12:37:28
-+++ b/src/dxvk/dxvk_memory.cpp	2026-11-16 14:57:21
-@@ -389,6 +389,23 @@
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/dxvk/dxvk_graphics.cpp b/src/dxvk/dxvk_graphics.cpp
+--- a/src/dxvk/dxvk_graphics.cpp	2026-11-18 00:00:00
++++ b/src/dxvk/dxvk_graphics.cpp	2026-11-18 00:00:00
+@@ -2,6 +2,7 @@
+ 
+ #include "dxvk_device.h"
+ #include "dxvk_graphics.h"
++#include "dxvk_debug_counters.h"
+ #include "dxvk_pipemanager.h"
+ #include "dxvk_spec_const.h"
+ #include "dxvk_state_cache.h"
+@@ -77,6 +78,8 @@
+       if (!instance) {
+         // Keep pipeline object locked, at worst we're going to stall
+         // a state cache worker and the current thread needs priority.
++        DxvkDebugCounters::add(DxvkDebugCounter::PipelineBuilds);
++        DxvkDebugTimer timer(DxvkDebugCounter::PipelineBuildUs);
+         instance = this->createInstance(state, renderPass);
+         this->writePipelineStateToCache(state, renderPass->format());
+       }
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/dxvk/dxvk_memory.cpp b/src/dxvk/dxvk_memory.cpp
+--- a/src/dxvk/dxvk_memory.cpp	2026-11-18 00:00:00
++++ b/src/dxvk/dxvk_memory.cpp	2026-11-18 00:00:00
+@@ -2,6 +2,7 @@
+ 
+ #include "dxvk_device.h"
+ #include "dxvk_memory.h"
++#include "dxvk_debug_counters.h"
+ 
+ namespace dxvk {
+   
+@@ -232,12 +233,128 @@
+         }
+       }
+     }
++
++    const std::string warm = env::getEnvVar("DXVK_WARM_MEMORY_MB");
++    m_warmTarget = VkDeviceSize(warm.empty() ? 0u : uint32_t(std::strtoul(warm.c_str(), nullptr, 10))) << 20;
++
++    if (m_warmTarget)
++      m_warmThread = dxvk::thread([this] { warmFunc(); });
+   }
+   
+   
+   DxvkMemoryAllocator::~DxvkMemoryAllocator() {
+-    
++    if (m_warmThread.joinable()) {
++      { std::lock_guard<dxvk::mutex> lock(m_mutex);
++        m_warmStop = true; }
++
++      m_warmCond.notify_all();
++      m_warmThread.join();
++    }
++
++    for (uint32_t i = 0; i < VK_MAX_MEMORY_TYPES; i++) {
++      for (const auto& memory : m_warmPool[i])
++        freeDeviceMemory(&m_memTypes[i], memory);
++    }
+   }
++
++
++  DxvkDeviceMemory DxvkMemoryAllocator::takeWarmMemory(
++          DxvkMemoryType*       type,
++          VkMemoryPropertyFlags flags,
++          VkDeviceSize          size) {
++    if (!m_warmTarget || !(type->memType.propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT))
++      return DxvkDeviceMemory();
++
++    const uint32_t t = type->memTypeId;
++
++    if (m_warmChunkSize[t] != size) {
++      // first chunk of this type: start keeping a reserve for it
++      if (!m_warmChunkSize[t]) {
++        m_warmChunkSize[t] = size;
++        m_warmCond.notify_one();
++      }
++      return DxvkDeviceMemory();
++    }
++
++    auto& pool = m_warmPool[t];
++
++    if (pool.empty()) {
++      DxvkDebugCounters::add(DxvkDebugCounter::WarmMisses);
++      return DxvkDeviceMemory();
++    }
++
++    DxvkDeviceMemory result = pool.back();
++    pool.pop_back();
++    result.memFlags = flags;
++
++    DxvkDebugCounters::add(DxvkDebugCounter::WarmChunksUsed);
++    m_warmCond.notify_one();
++    return result;
++  }
++
++
++  void DxvkMemoryAllocator::warmFunc() {
++    env::setThreadName("dxvk-warm");
++
++    std::unique_lock<dxvk::mutex> lock(m_mutex);
++
++    while (!m_warmStop) {
++      uint32_t t = VK_MAX_MEMORY_TYPES;
++
++      for (uint32_t i = 0; i < m_memProps.memoryTypeCount && t == VK_MAX_MEMORY_TYPES; i++) {
++        if (m_warmChunkSize[i] && (m_warmPool[i].size() + 1) * m_warmChunkSize[i] <= m_warmTarget)
++          t = i;
++      }
++
++      if (t == VK_MAX_MEMORY_TYPES) {
++        m_warmCond.wait(lock);
++        continue;
++      }
++
++      DxvkMemoryType* type = &m_memTypes[t];
++      const VkDeviceSize size = m_warmChunkSize[t];
++
++      if (type->heap->budget && type->heap->stats.memoryAllocated + size > type->heap->budget) {
++        m_warmCond.wait(lock);
++        continue;
++      }
++
++      lock.unlock();
++
++      VkMemoryAllocateInfo info = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
++      info.allocationSize  = size;
++      info.memoryTypeIndex = t;
++
++      DxvkDeviceMemory memory;
++      memory.memSize  = size;
++      memory.memFlags = type->memType.propertyFlags;
++
++      bool ok = m_vkd->vkAllocateMemory(m_vkd->device(), &info, nullptr, &memory.memHandle) == VK_SUCCESS;
++
++      if (ok && m_vkd->vkMapMemory(m_vkd->device(), memory.memHandle, 0, VK_WHOLE_SIZE, 0, &memory.memPointer) != VK_SUCCESS) {
++        m_vkd->vkFreeMemory(m_vkd->device(), memory.memHandle, nullptr);
++        ok = false;
++      }
++
++      if (ok) {
++        DxvkDebugCounters::add(DxvkDebugCounter::WarmKB, uint32_t(size >> 10));
++        DxvkDebugTimer timer(DxvkDebugCounter::WarmUs);
++        std::memset(memory.memPointer, 0, size);
++      }
++
++      lock.lock();
++
++      if (!ok) {
++        Logger::warn("DxvkMemoryAllocator: memory warming stopped, allocation failed");
++        m_warmTarget = 0;
++        break;
++      }
++
++      type->heap->stats.memoryAllocated += size;
++      m_device->adapter()->notifyHeapMemoryAlloc(type->heapId, size);
++      m_warmPool[t].push_back(memory);
++    }
++  }
+   
+   
+   DxvkMemory DxvkMemoryAllocator::alloc(
+@@ -370,6 +487,8 @@
+         if (this->shouldFreeEmptyChunks(type->heap, chunkSize))
+           this->freeEmptyChunks(type->heap);
+ 
++        devMem = takeWarmMemory(type, flags, chunkSize);
++
+         for (uint32_t i = 0; i < 6 && (chunkSize >> i) >= size && !devMem.memHandle; i++)
+           devMem = tryAllocDeviceMemory(type, flags, chunkSize >> i, hints, nullptr);
+ 
+@@ -389,6 +508,27 @@
    }
    
    
@@ -1618,26 +2146,95 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +    if (!s_enabled || !ptr || !size)
 +      return;
 +
++    DxvkDebugTimer timer(DxvkDebugCounter::PrefaultUs);
++
 +    if (::VirtualLock(ptr, SIZE_T(size)))
 +      ::VirtualUnlock(ptr, SIZE_T(size));
++    else
++      DxvkDebugCounters::add(DxvkDebugCounter::PrefaultFailed);
 +  }
 +
 +
    DxvkDeviceMemory DxvkMemoryAllocator::tryAllocDeviceMemory(
            DxvkMemoryType*                   type,
            VkMemoryPropertyFlags             flags,
-@@ -435,6 +452,8 @@
+@@ -435,6 +575,9 @@
          m_vkd->vkFreeMemory(m_vkd->device(), result.memHandle, nullptr);
          return DxvkDeviceMemory();
        }
 +
 +      PrefaultMappedMemory(result.memPointer, size);
++      DxvkDebugCounters::add(DxvkDebugCounter::NewMappedKB, uint32_t(size >> 10));
      }
  
      type->heap->stats.memoryAllocated += size;
-diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/dxvk/dxvk_resource.h b/src/dxvk/dxvk_resource.h
---- a/src/dxvk/dxvk_resource.h	2026-07-15 12:37:28
-+++ b/src/dxvk/dxvk_resource.h	2026-11-16 20:46:11
+@@ -524,6 +667,27 @@
+     // Under memory pressure, we should start freeing everything.
+     if (this->shouldFreeEmptyChunks(type->heap, 0))
+       return true;
++
++    // Wine maps all memory of a game whose executable is not NX-compatible as executable, and
++    // under Rosetta the first write to each page of new memory is slow. Keep emptied
++    // host-visible chunks for reuse instead of handing them back, up to
++    // DXVK_KEEP_EMPTY_CHUNKS_MB (default 256) per memory type; 0 restores the old behaviour.
++    if (type->memType.propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) {
++      static const VkDeviceSize s_keep = [] {
++        const std::string v = env::getEnvVar("DXVK_KEEP_EMPTY_CHUNKS_MB");
++        return VkDeviceSize(v.empty() ? 256u : uint32_t(std::strtoul(v.c_str(), nullptr, 10))) << 20;
++      } ();
++
++      VkDeviceSize empty = 0;
++
++      for (const auto& c : type->chunks) {
++        if (c->isEmpty())
++          empty += c->size();
++      }
++
++      if (empty + chunk->size() <= s_keep)
++        return false;
++    }
+ 
+     // Even if we have enough memory to spare, only keep
+     // one chunk of each type around to save memory.
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/dxvk/dxvk_memory.h b/src/dxvk/dxvk_memory.h
+--- a/src/dxvk/dxvk_memory.h	2026-11-18 00:00:00
++++ b/src/dxvk/dxvk_memory.h	2026-11-18 00:00:00
+@@ -257,6 +257,8 @@
+      */
+     bool isCompatible(const Rc<DxvkMemoryChunk>& other) const;
+ 
++    VkDeviceSize size() const { return m_memory.memSize; }
++
+   private:
+     
+     struct FreeSlice {
+@@ -392,6 +394,23 @@
+ 
+     void freeEmptyChunks(
+       const DxvkMemoryHeap*       heap);
++
++    // Background warming of host-visible memory: a thread allocates whole chunks ahead of
++    // time and writes every page once, so the rendering threads get memory whose first-write
++    // cost has already been paid. DXVK_WARM_MEMORY_MB per memory type (default 0 = off; Revived never needed it once freed chunks are kept).
++    dxvk::condition_variable                                       m_warmCond;
++    dxvk::thread                                                   m_warmThread;
++    bool                                                           m_warmStop   = false;
++    VkDeviceSize                                                   m_warmTarget = 0;
++    std::array<std::vector<DxvkDeviceMemory>, VK_MAX_MEMORY_TYPES> m_warmPool;
++    std::array<VkDeviceSize, VK_MAX_MEMORY_TYPES>                  m_warmChunkSize = { };
++
++    void warmFunc();
++
++    DxvkDeviceMemory takeWarmMemory(
++            DxvkMemoryType*       type,
++            VkMemoryPropertyFlags flags,
++            VkDeviceSize          size);
+ 
+   };
+   
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/dxvk/dxvk_resource.h b/src/dxvk/dxvk_resource.h
+--- a/src/dxvk/dxvk_resource.h	2026-11-18 00:00:00
++++ b/src/dxvk/dxvk_resource.h	2026-11-18 00:00:00
 @@ -41,6 +41,29 @@
          result |= m_useCountR.load() != 0;
        return result;
@@ -1677,9 +2274,9 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
  
    };
    
-diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/util/util_env.cpp b/src/util/util_env.cpp
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/util/util_env.cpp b/src/util/util_env.cpp
 --- a/src/util/util_env.cpp	2026-07-15 12:37:28
-+++ b/src/util/util_env.cpp	2026-11-16 20:18:38
++++ b/src/util/util_env.cpp	2026-11-18 17:13:47
 @@ -8,6 +8,9 @@
  #include <limits.h>
  #endif
@@ -1716,9 +2313,9 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      using SetThreadDescriptionProc = HRESULT (WINAPI *) (HANDLE, PCWSTR);
  
      static auto proc = reinterpret_cast<SetThreadDescriptionProc>(
-diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=.DS_Store a/src/util/util_env.h b/src/util/util_env.h
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/util/util_env.h b/src/util/util_env.h
 --- a/src/util/util_env.h	2026-07-15 12:37:28
-+++ b/src/util/util_env.h	2026-11-16 20:18:38
++++ b/src/util/util_env.h	2026-11-18 17:13:47
 @@ -1,5 +1,7 @@
  #pragma once
  

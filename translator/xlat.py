@@ -318,6 +318,7 @@ class Translator:
         self.uid = 0
         self.stats = []
         self.ftol = set()    # RVAs of the compiler's float-to-integer helper (takes st0, returns edx:eax)
+        self.exact = False   # True: rounding that also matches x87 outside the float range (slower)
         self.jumptables = [] # (label, [case labels]) of translated switches
         self.tabledeps = []  # (rva, size) of original switch tables the translations were made from
         self.info = []
@@ -390,8 +391,17 @@ class Translator:
 
     # ---- emission --------------------------------------------------------------------------
     def rnd(self, x):
-        """Rounds x to a 24-bit significand, nearest-even, keeping the exponent range: add and
-        subtract 1.5 * 2^(exponent + 29) with the sign of x. Needs only T1; no flags."""
+        """Rounds x to a 24-bit significand, nearest-even.
+
+        Default: convert to float and back. Both are full-width forms, which the translator under
+        Rosetta handles in one step each. This equals the x87 result whenever the value lies in the
+        float range; beyond it the x87 keeps a finite value or a normal tiny one, where this gives
+        infinity or a float denormal.
+
+        With exact: add and subtract 1.5 * 2^(exponent + 29) with the sign of x, which keeps the
+        x87 exponent range. Needs only T1; no flags."""
+        if not self.exact:
+            return ['cvtpd2ps %s, %s' % (x, x), 'cvtps2pd %s, %s' % (x, x)]
         p = self.prefix
         return ['movapd %s, %s' % (T1, x),
                 'andpd %s, XMMWORD PTR [_%s_signexp]' % (T1, p),
@@ -1010,7 +1020,7 @@ class Underflow(Exception):
 
 def main():
     """xlat.py <pe|flat> <image> <prefix> <out.inc> [--map file] [--ftol rva,...] [--min samples] [--max count]
-               [--skip rva,...] [--write-list file] <start-limit | @list> ...
+               [--skip rva,...] [--write-list file] [--exact-range] <start-limit | @list> ...
 
     A list holds one routine per line: "start limit weight [size hash]" (hex, weight decimal). With size
     and hash present, a routine is translated only if the image holds exactly the code the list was made
@@ -1035,6 +1045,8 @@ def main():
             skip = {int(x, 16) for x in args.pop(0).split(',')}
         elif a == '--write-list':
             writelist = args.pop(0)
+        elif a == '--exact-range':
+            t.exact = True
         elif a.startswith('@'):
             for l in open(a[1:]):
                 f = l.split('#')[0].split()

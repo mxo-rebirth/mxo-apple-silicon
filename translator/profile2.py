@@ -66,7 +66,7 @@ def dsym(addr, base):
 
 
 WAITS = ('WaitForAlertByThreadId', 'WaitForSingleObject', 'WaitForMultipleObjects', 'DelayExecution',
-         'WaitForKeyedEvent', 'RemoveIoCompletion', 'SignalAndWaitForSingleObject', 'YieldExecution')
+         'WaitForKeyedEvent', 'RemoveIoCompletion', 'NotifyChangeKey', 'SignalAndWaitForSingleObject', 'YieldExecution')
 
 threads = collections.defaultdict(collections.Counter)      # tid -> category -> samples
 detail = collections.defaultdict(lambda: collections.defaultdict(collections.Counter))
@@ -80,8 +80,9 @@ allsamples = []
 while o + 40 <= len(data):
     magic, count, cbase, sbase, ssize, vbase, vsize, ptid, nnames, _ = struct.unpack_from('<10I', data, o)
     o += 40
-    if magic != 0x33504d53:
-        raise SystemExit('not an SMP3 file')
+    if magic not in (0x33504d53, 0x34504d53):
+        raise SystemExit('not an SMP3/SMP4 file')
+    nwords = 7 if magic == 0x33504d53 else 9
     for k in range(nnames):
         tid = struct.unpack_from('<I', data, o)[0]
         names[tid] = data[o + 4:o + 32].split(b'\0')[0].decode()
@@ -89,21 +90,24 @@ while o + 40 <= len(data):
     recs += 1
     present = ptid or present
     for k in range(count):
-        s = struct.unpack_from('<7I', data, o)
-        o += 28
+        s = struct.unpack_from('<%dI' % nwords, data, o)
+        o += 4 * nwords
+        if nwords == 7:   # SMP3: one game return address; pad to the SMP4 layout
+            s = s[:5] + (s[5], 0, 0, s[6])
         if recs > skip:
             allsamples.append((s, cbase, sbase, ssize, vbase, vsize))
 
 # ntdll base: most waits sit at <Nt stub> + 0xc
 cnt = collections.Counter(s[0][1] for s in allsamples if s[0][1] >> 24 in (0x7b, 0x7c, 0x7d, 0x7e, 0x7f))
 for addr, _ in cnt.most_common(5):
-    c = [(addr - 0xc - a) for a, n in nt_tab if n.startswith('Nt') and (addr - 0xc - a) & 0xffff == 0]
+    c = [(addr - 0xc - a) for a, n in nt_tab if n[:2] in ('Nt', 'Zw') and (addr - 0xc - a) & 0xffff == 0]
     if c:
         ntbase = c[0]
         break
 
 for s, cbase, sbase, ssize, vbase, vsize in allsamples:
-    tid, eip, r1, r2, r3, rclient, rvk = s
+    tid, eip, r1, r2, r3, rc1, rc2, rc3, rvk = s
+    rclient = rc1
     rself = r1
     total += 1
     t = threads[tid]
@@ -130,7 +134,8 @@ for s, cbase, sbase, ssize, vbase, vsize in allsamples:
             nm = nearest(nt_tab, nt_addr, eip - ntbase)
         caller = ' < '.join(dsym(r, sbase)[:44] for r in (r1, r2, r3) if r) or '-'
         if rclient and cbase:
-            caller += '  [game+%x]' % (entries[bisect.bisect_right(entries, rclient - cbase) - 1])
+            caller += '  [game ' + ' < '.join('%x' % (entries[bisect.bisect_right(entries, r - cbase) - 1])
+                                            for r in (rc1, rc2, rc3) if r) + ']'
         if nm and any(w in nm for w in WAITS):
             t['waiting'] += 1
             detail[tid]['wait'][(nm, caller)] += 1

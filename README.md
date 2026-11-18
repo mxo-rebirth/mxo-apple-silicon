@@ -2,8 +2,8 @@
 
 This is a write-up for the **MxO Rejacked** and **MxO Revived** teams. It describes why the 2009
 client runs badly on Apple Silicon Macs under CrossOver, what we found when we measured where
-the time goes, and the fixes we built. The code is in this repository. It is experimental: it has been played for
-a few short sessions by one person on one machine.
+the time goes, and the fixes we built. The code is in this repository. It is experimental: it has been played in
+short sessions by one person on one machine, with both Rejacked and Revived.
 
 Nothing in this repository comes from the game. The fixes are generated on the player's own
 machine from their own `client.dll`.
@@ -14,24 +14,28 @@ machine from their own `client.dll`.
   animation math on the x87 FPU. Rosetta 2 emulates x87 in software at roughly 25 ns per
   instruction. In the world, 80–90% of the game's main thread was x87 math.
 - **The fix for that** is to replace the x87 routines the game spends most of its time in.
-  They are swapped, in memory at startup, for SSE2 code that gives bit-identical results. The
+  They are swapped, in memory at startup, for SSE2 code that gives the same results for every
+  value a `float` can hold (see [Replacing the x87 routines](#replacing-the-x87-routines)). The
   SSE2 code is produced automatically by a small translator program (`translator/xlat.py`);
-  about 470 routines are covered. On their own, translated routines run 5 to 50 times faster.
+  470 routines are covered. On their own, translated routines run 5 to 120 times faster.
 - **Graphics needed work too.** CrossOver's own DXVK does not work with this client (black
   screen), and once it does, two stalls and a display glitch show up that are specific to this
   DXVK version on Apple GPUs. We fixed those in a custom build of DXVK's `d3d9.dll`.
 - **The client's render throttle hides all of this.** It silently cuts draw distance, down to
   25%, to chase 30 fps. A slow machine therefore shows "15–20 fps" at any speed, just with less
   world drawn. Frame-rate comparisons mean little unless the throttle is held at a fixed value.
-- **Result so far:** the loading area went from 8–18 fps to 85–89 fps. In the world at full
-  detail, a controlled test went from 8.5 fps to 23–29 fps with the *first* translated build,
-  which later turned out to be missing 12 of the most expensive routines. Fullscreen at 3440×1440 the
-  player now sees about 23 fps at full draw distance, and the limit appears to have moved to
-  the graphics side.
-  Details and caveats are under [Results](#results).
-- **It works with Rejacked. With Revived it does not yet:** the math translation matches
-  Revived's `client.dll` (467 of 468 routines), but Revived with our graphics DLL ran at 2–4 fps
-  for a reason we have not found. See [Open problems](#open-problems).
+- **Result so far:** fullscreen at 3440×1440 with maximum detail, in the world: Rejacked
+  44–64 fps and Revived 44–57 fps, both with music. Before this work the same machine showed
+  8–18 fps in the loading area and around 15 fps in the world, with the draw distance cut. The
+  GPU is now busy 93–100% of the time, so the graphics chip itself is the limit at that
+  resolution. Details and caveats are under [Results](#results).
+- **Two more problems were specific to this DXVK version on Apple GPUs** and cost far more than
+  expected: every draw copied all 8,192 software vertex shader constants (128 KB), and memory
+  that the game freed was handed back to the system and requested again, which is slow under
+  Rosetta for this client. Both are fixed; see [What goes wrong](#what-goes-wrong).
+- **Two settings matter outside the DLL:** the game crashed after about a minute when its 2 GB
+  address space ran out (`WINE_LARGE_ADDRESS_AWARE=1` fixes that), and the Rejacked launcher's
+  beta "new glow shader" option halves the frame rate at high resolution.
 
 - **Other platforms:** untested. We expect the math fix to help wherever x86 code is translated
   and x87 is emulated, and to be of no use, or a small loss, on real x86 processors. See
@@ -45,7 +49,7 @@ machine from their own `client.dll`.
 | Translation layer | CrossOver 26.3 (Wine 11 based, 32-bit code in a 64-bit process, Rosetta 2) |
 | Display | 3440×1440 at 120 Hz external, plus the built-in display |
 | Client | Rejacked install; `client.dll` with PE timestamp `0x50E8ED23`, 10,924,032 bytes |
-| Also checked | Revived's `client.dll` (11,059,200 bytes): same code at the same addresses for 467 of the 468 routines we translate |
+| Also checked | Revived's `client.dll` (11,059,200 bytes): same code at the same addresses for 469 of the 470 routines we translate |
 
 ## What goes wrong
 
@@ -150,6 +154,23 @@ the graphics layer. We found two causes, and one display glitch:
   screen, the surface stays 3440×1440 and DXVK draws the 800×600 picture unscaled in the top
   left corner.
 
+Later sessions at 3440×1440 turned up three more:
+
+- **All 8,192 vertex shader constants copied on every draw.** The client creates its device
+  with mixed vertex processing, which gives software vertex shaders 8,192 constant registers.
+  DXVK normally copies only the registers the game has set, and relies on a Vulkan feature
+  (`robustness2`) to return zero for the rest. MoltenVK does not offer that feature, so this
+  DXVK version copies all 8,192 registers, 128 KB, for each of the 1,000–1,500 constant updates
+  per frame, each time into fresh memory. In Rejacked this froze the game at 3–8 fps for about
+  50 seconds while entering the world, and the client never sets more than 248 registers.
+- **Freed memory handed back to the system.** DXVK keeps at most one empty 16 MB block of
+  CPU-visible memory and returns the others. Revived streams textures and geometry constantly,
+  so it kept getting brand-new memory, and writing to new memory is slow for this client under
+  Rosetta. Revived ran at 1–4 fps in the world.
+- **Running out of address space.** `matrix.exe` is a 32-bit program without the "large address
+  aware" flag, so it gets 2 GB. With DXVK, after about a minute in the world an allocation in
+  `client.dll` failed and the game crashed.
+
 ## What we do about it
 
 Everything is in one file: a custom build of DXVK's `d3d9.dll`, made from CodeWeavers' own DXVK
@@ -168,6 +189,9 @@ Direct3D 9. No game file is modified on disk.
 | Buffer lock waits for the GPU | the game gets a fresh copy of the buffer to write into; draws already queued keep using the old one (standalone test: 1 fps to 22 fps, same picture) |
 | Texture upload interrupts drawing | if nothing drawn so far in the frame uses the texture or buffer, the upload is moved to the start of the frame (standalone test with 250 new textures per frame: 251 interruptions to 2, 57 fps to 120, same picture) |
 | Picture in the corner | the picture is scaled to the surface whenever the two sizes differ |
+| 8,192 constants per draw | vertex shaders get the number of registers actually uploaded as a push constant, read index 0 instead of going past it, and return zero beyond it, as Direct3D 9 expects. Only the registers the game has set to non-zero values are uploaded (about 250 instead of 8,192) |
+| Freed memory handed back | emptied CPU-visible memory blocks are kept for reuse, up to 256 MB per memory type |
+| Address space | `WINE_LARGE_ADDRESS_AWARE=1` in the bottle's environment gives the 32-bit game 4 GB |
 
 ### Replacing the x87 routines
 
@@ -176,13 +200,18 @@ Direct3D 9. No game file is modified on disk.
 - Each x87 register becomes an SSE register holding a double. The x87 registers form a stack,
   and the depth of that stack at each instruction can be worked out in advance, so every stack
   slot gets a fixed SSE register.
-- **Results are bit-identical.** Direct3D 9 puts the FPU in 24-bit precision mode. In that mode
-  every add, subtract, multiply, divide and square root is rounded to 24 significant bits (the
-  precision of a `float`) but can still hold far larger and smaller numbers than a `float`
-  can. The translation computes in double precision and then rounds to 24 bits the same way
-  the FPU does, without limiting the result to the range of a `float`. That matters:
-  bounding-box code uses values like `FLT_MAX` to mean "no limit", and in `float` range those
-  overflow to infinity and then turn into NaN.
+- **Results are identical for every value a `float` can hold.** Direct3D 9 puts the FPU in
+  24-bit precision mode. In that mode every add, subtract, multiply, divide and square root is
+  rounded to 24 significant bits (the precision of a `float`) but can still hold far larger and
+  smaller numbers than a `float` can. The translation computes in double precision and then
+  rounds each result by converting it to `float` and back (two instructions). That is exact
+  as long as the intermediate result fits in a `float`. Outside that range it differs: a value
+  above `FLT_MAX` becomes infinity where the FPU would keep it, and a value below the smallest
+  normal `float` loses precision. Bounding-box code uses values like `FLT_MAX` to mean "no
+  limit", so this is a real trade-off. `xlat.py --exact-range` produces the older form, which
+  also reproduces the extended range bit for bit, at 13 instructions per rounding instead of
+  2. The game has been played with the faster form without visible problems; if something
+  looks wrong, build with `--exact-range` first.
 - Integer instructions are copied unchanged. Translated code never changes the CPU flags,
   because x87 code does not either and the surrounding integer code relies on that.
 - Compares followed by `fnstsw ax` produce the same condition bits in `AH`.
@@ -215,12 +244,16 @@ jump overwrote and then continue in the original routine.
   the original x87 code on random inputs including huge, tiny, zero, infinite and NaN values:
   6.6 million comparisons, all identical.
 - **The game's routines**, each called as original and as translation on random memory: 278 of
-  the 468 could be run this way, 20,504 comparisons. 262 were identical in every run. The other
+  the 468 translated at the time could be run this way, 20,504 comparisons. 262 were identical in every run. The other
   16 differed only in situations that random input creates and the game does not: doubles too
   small or too large to occur in practice, two NaNs meeting in one operation, and a called
   routine that fails to return a value it should have.
+- **The faster rounding**: 200,000 random cases per synthetic test with ordinary values, no
+  differences. The game routines, run again with it: the only new differences involve
+  denormal numbers, which only random input produces.
 - **The float-to-integer replacement**: 400,000 values over the whole range, identical.
-- **In the game**: several short sessions on Rejacked.
+- **In the game**: short sessions on Rejacked and Revived, in fullscreen at 3440×1440.
+- **The generated shaders** (288 in total, both games) pass the Vulkan validator `spirv-val`.
 
 The test programs are in `tests/`.
 
@@ -263,29 +296,50 @@ What a frame in the world looks like now: about 2,700 draw calls, 40 buffer lock
 copy, and 12 texture uploads, none of which interrupts drawing any more. Drawing is still split
 into 19 separate passes per frame, for the reasons under Open problems.
 
+With all fixes (current build), fullscreen 3440×1440, maximum detail, anti-aliasing on, throttle
+on automatic, music on, from the player's own sessions of one to two minutes:
+
+| | In the world | Entering the world |
+|---|---|---|
+| Rejacked | 44–64 fps | no stall (was about 50 s at 3–8 fps) |
+| Revived | 44–57 fps (was 1–4 fps) | no stall |
+
+The GPU was busy 93–100% of the time in both, so at this resolution the graphics chip is now
+the limit. What is left are single slow frames: mostly frames with 4,000–6,000 draw calls,
+plus a few hundred-millisecond pauses while signing in or loading, and one 0.6-second pause in
+the world with no graphics activity at all (so it comes from the game itself).
+
+Settings that changed the numbers:
+
+| Setting | Effect at 3440×1440 |
+|---|---|
+| Rejacked launcher, "new glow shader for Screen Filter: Over-Bright (BETA)" | halves the frame rate (18–29 fps instead of 36–52) |
+| Anti-aliasing | costs a few fps |
+| The green "Matrix" tint | costs nothing measurable |
+
 ## Open problems
 
-- **Revived with this DLL: 2–4 fps.** In the one session we have, the main thread spent 97% of
-  its time on the first write of a `memset` (a memory clear), which is what the first-write
-  page fault described above looks like. We do not know what calls it. Revived's display add-on (the R30
-  `mxrdisp`) works with the DLL in a standalone windowed test, so we suspect something that
-  happens only in the game in fullscreen. Revived is back on stock graphics on the test machine.
-- **The graphics side appears to be the limit in fullscreen now.** The game's main thread waits
-  in `Present` for 37% of its time, and DXVK's submission thread spends 46% of its time inside
-  `vkQueuePresentKHR`. Drawing is split into 19 passes per frame: about 11 because the game
-  itself switches render targets, 3–4 because DXVK sends work to the GPU in the middle of a
-  frame, and the rest from clears and one copy between targets. Each return to the main target
-  reads back 3440×1440 of colour and depth. We have not measured how much of the frame that
-  costs, so this is a lead, not a diagnosis.
-- **The game sleeps while streaming.** In the first minute in the world, 18% of the main thread
-  was in `Sleep`, called from a routine at `client.dll+0x371010` that looks like part of the
-  resource loader.
-- **One unexplained freeze** at the loading screen with an early build. It has not recurred,
-  and the install step now pauses other threads first, but the cause was never found.
+- **Revived with music was slow in three sessions and fast in the next two.** Music needs
+  Microsoft's DirectSound (see CROSSOVER.md). In three sessions after switching to it, Revived
+  ran at 1–12 fps from the loading screen on; in the two sessions after that, with the same
+  files and settings, it ran at 44–57 fps. A standalone test with Microsoft's DirectSound,
+  16 looping 3D sounds and DirectMusic showed no slowdown of the process. We do not know what
+  made the difference.
+- **Measuring changes the result.** The DLL's sampling profiler pauses every thread every 5 ms.
+  That made memory writes in the game look extremely slow (tens of milliseconds for a few
+  kilobytes) and sent us after a problem that only existed while profiling. A lighter mode
+  samples only the main thread every 20 ms (BUILD.md).
+- **The graphics side is the limit in fullscreen now.** Drawing is split into about 19 passes
+  per frame: about 11 because the game itself switches render targets, the rest from clears,
+  one copy between targets and DXVK sending work mid-frame. Each return to the main target reads
+  back 3440×1440 of colour and depth on a tile-based GPU. That is the next thing to look at.
+- **Revived's sign-in takes 4–5 seconds of typing.** The Revived launcher hands the account and
+  password to the 2009 login console, which types them out at about four characters a second
+  with the processor idle. That pace is set in the launcher, not by the Mac.
+- **One unexplained freeze** at the loading screen with an early build. It has not recurred.
 - **The 800×600 login screen** sometimes comes up without a display mode switch. The picture is
-  now scaled to fit, but mouse coordinates in that state are unverified.
+  scaled to fit, but mouse coordinates in that state are unverified.
 - **Not tested:** long sessions, combat, interiors, other districts, anything but one M4 Mac.
-  The client is a 32-bit process, and DXVK uses more address space than Wine's Direct3D.
 
 ## Other platforms
 
@@ -314,6 +368,8 @@ Two consequences if you ship the math replacement more widely:
 
 - The typo, the texture-type variants, the memory pre-touch and the MoltenVK setting are
   specific to CodeWeavers' DXVK 1.10.3 on macOS.
+- The vertex shader constant fix matters on any Vulkan driver without `robustness2` (MoltenVK
+  among them). Keeping freed memory helps wherever writing to new memory is slow.
 - The buffer-lock and texture-upload changes address how DXVK 1.10 behaves on any system. They
   matter most on tile-based GPUs such as Apple's, where interrupting drawing is expensive; on
   desktop GPUs it is cheap. Newer DXVK versions have reworked this code, so check what your
