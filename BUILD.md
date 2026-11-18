@@ -137,6 +137,9 @@ Environment variables, in `cxbottle.conf` under `[EnvironmentVariables]`:
 | `DXVK_LOCK_RENAME_COPY=0` | buffer locks wait for the GPU again |
 | `DXVK_HOIST_UPLOADS=0` | texture and buffer uploads interrupt the render pass again |
 | `DXVK_PREFAULT_MAPPED_MEMORY=0` | no pre-touching of mapped memory |
+| `DXVK_MXO_RESPECT_ADDONS=0` | also replace game routines that add-ons such as Revived's `mxrdisp` check or hook (by default those are left alone so the add-on keeps working) |
+| `DXVK_MXO_FAN_TO_LIST=0` | triangle fans are passed to MoltenVK as fans again (it emulates each one with a compute pass that interrupts drawing) |
+| `DXVK_MXO_WEAK_FLUSH=1` | buffer unlocks and similar hints submit work to the GPU mid-frame again, as upstream DXVK does |
 | `DXVK_LOCK_MAPPED_MEMORY=0` | pre-touched memory is unlocked right away instead of staying locked in RAM (it can then be compressed or swapped out, and stall again) |
 | `DXVK_STATIC_SAMPLERS=0` | no per-texture-type shader variants |
 | `DXVK_MXO_SWVP_COUNT=0` | vertex shaders no longer read the uploaded constant count; all 8,192 constants are copied per draw again |
@@ -149,7 +152,7 @@ Files in `C:\Games\dxvk` (`drive_c/Games/dxvk`), read when the game starts:
 | File | Effect |
 |---|---|
 | `x87max.txt` | a number N: install only the first N translated routines (0 = none). For finding a misbehaving routine by halving. |
-| `debug.flag` | empty file. Every 5 s the log gets the frame rate, the render throttle, DXVK's per-frame statistics, the game's calls per frame, memory activity and which DXVK routine interrupted render passes how often. Every frame slower than 40 ms gets a `SPIKE` line saying what happened in it (pipelines built, waits, uploads, new memory). While a frame is more than 200 ms late, a `STALL` line records where the game's main thread is, as `module+offset` call chains. Creating `shot.req` saves the next frame to `shot.bmp`. |
+| `debug.flag` | empty file. Every 5 s the log gets the frame rate, the render throttle, DXVK's per-frame statistics, the game's calls per frame, memory activity and which DXVK routine interrupted render passes how often. Every frame slower than 40 ms gets a `SPIKE` line saying what happened in it (pipelines built, waits, uploads, new memory). While a frame is more than 200 ms late, a `STALL` line records where the game's main thread is, as `module+offset` call chains. Creating `shot.req` saves the next frame to `shot.bmp`; creating `drawlog.req` writes one `DRAW` line per draw call of the next frame (shaders, textures, render target, blending). |
 | `sample.flag` | empty file. A sampling profiler records where every thread is and who called it, and appends it to `samples.bin` every 10 s. It pauses every thread every 5 ms, which makes memory writes in the game much slower than they really are; do not judge frame rates with it. |
 | `sample-light.flag` | empty file. The same profiler, but only for the game's main thread and DXVK's own threads, every 20 ms. Distorts far less. |
 

@@ -657,7 +657,13 @@ class Translator:
                     o.append('movsd xmm%d, QWORD PTR [_%s_%s]' % (d, p, name[3:]))
                 elif name in ('fst_m', 'fstp_m'):
                     if arg == 32:
-                        memfix(['cvtpd2ps %s, %s' % (T1, reg(d, 0)), 'movss %s, %s' % (m, T1)])
+                        # A popping float store right after the rounding: the store's own conversion
+                        # to float rounds the same way, and the popped value is never read again.
+                        x = reg(d, 0)
+                        if (name == 'fstp_m' and not self.exact
+                                and o[-2:] == ['cvtpd2ps %s, %s' % (x, x), 'cvtps2pd %s, %s' % (x, x)]):
+                            del o[-2:]
+                        memfix(['cvtpd2ps %s, %s' % (T1, x), 'movss %s, %s' % (m, T1)])
                     else:
                         memfix(['movsd %s, %s' % (m, reg(d, 0))])
                     if arg == 32:

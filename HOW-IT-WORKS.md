@@ -201,6 +201,8 @@ Direct3D 9. No game file is modified on disk.
 | 8,192 constants per draw | vertex shaders get the number of registers actually uploaded as a push constant, read index 0 instead of going past it, and return zero beyond it, as Direct3D 9 expects. Only the registers the game has set to non-zero values are uploaded (about 250 instead of 8,192) |
 | Freed memory handed back | emptied CPU-visible memory blocks are kept for reuse, up to 256 MB per memory type |
 | Address space | `WINE_LARGE_ADDRESS_AWARE=1` in the bottle's environment gives the 32-bit game 4 GB |
+| Triangle fans | Metal has no triangle fans, so MoltenVK turns every fan draw into a small compute job first, which interrupts the drawing pass. The game draws its map as about 800 fans per frame (10 fps with the map open). Fans are now drawn as indexed triangle lists with a prepared index buffer: map 10 to 30 fps, and in the world the GPU went from fully busy to about 45% idle |
+| Work sent to the GPU mid-frame | DXVK submitted work after many buffer unlocks; each submission ends the drawing pass. Those hints now submit only when the GPU has nothing queued |
 | Stalls under memory pressure | memory shared with the GPU stays locked in RAM (`VirtualLock`), so macOS cannot compress or swap it out; it is released when the memory is freed |
 
 ### Replacing the x87 routines
