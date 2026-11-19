@@ -601,7 +601,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_mxo_fastmath.cpp b/src/d3d9/d3d9_mxo_fastmath.cpp
 --- a/src/d3d9/d3d9_mxo_fastmath.cpp	2026-11-19 00:00:00
 +++ b/src/d3d9/d3d9_mxo_fastmath.cpp	2026-11-19 00:00:00
-@@ -0,0 +1,430 @@
+@@ -0,0 +1,469 @@
 +#include <windows.h>
 +#include <tlhelp32.h>
 +
@@ -816,6 +816,45 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +    Logger::info(str::format("MxO fast math: matrix multiply ", replaced[0] ? "replaced" : "left alone",
 +      ", quaternion to matrix ", replaced[1] ? "replaced" : "left alone"));
++
++    // MSVCR71!sqrt, through client.dll's import table: only if the slot still holds the runtime's own
++    // sqrt (an add-on may have hooked it). DXVK_MXO_SQRT=0 leaves it alone.
++    if (env::getEnvVar("DXVK_MXO_SQRT") != "0") {
++      const char* result = "left alone (import not found)";
++      HMODULE crt = ::GetModuleHandleA("msvcr71.dll");
++      auto crtSqrt = crt ? reinterpret_cast<uint32_t>(::GetProcAddress(crt, "sqrt")) : 0u;
++      const auto& dir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
++
++      if (crtSqrt && dir.VirtualAddress && dir.VirtualAddress < imageSize) {
++        for (auto imp = reinterpret_cast<const IMAGE_IMPORT_DESCRIPTOR*>(base + dir.VirtualAddress); imp->Name; imp++) {
++          if (_stricmp(reinterpret_cast<const char*>(base + imp->Name), "msvcr71.dll") || !imp->OriginalFirstThunk)
++            continue;
++
++          auto names = reinterpret_cast<const uint32_t*>(base + imp->OriginalFirstThunk);
++          auto slots = reinterpret_cast<uint32_t*>(base + imp->FirstThunk);
++
++          for (uint32_t k = 0; names[k]; k++) {
++            if ((names[k] & 0x80000000u) || std::strcmp(reinterpret_cast<const char*>(base + names[k] + 2), "sqrt"))
++              continue;
++
++            result = "left alone (import hooked)";
++
++            if (slots[k] == crtSqrt) {
++              MxoSqrtOriginal = crtSqrt;
++              DWORD oldProtect = 0;
++
++              if (::VirtualProtect(&slots[k], 4, PAGE_READWRITE, &oldProtect)) {
++                reinterpret_cast<std::atomic<uint32_t>*>(&slots[k])->store(reinterpret_cast<uint32_t>(&MxoSqrtSSE));
++                ::VirtualProtect(&slots[k], 4, oldProtect, &oldProtect);
++                result = "replaced";
++              }
++            }
++          }
++        }
++      }
++
++      Logger::info(str::format("MxO fast math: sqrt ", result));
++    }
 +
 +    if (env::getEnvVar("DXVK_MXO_X87") == "0")
 +      return;
@@ -1071,7 +1110,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_mxo_fastmath_asm.inc b/src/d3d9/d3d9_mxo_fastmath_asm.inc
 --- a/src/d3d9/d3d9_mxo_fastmath_asm.inc	2026-11-19 00:00:00
 +++ b/src/d3d9/d3d9_mxo_fastmath_asm.inc	2026-11-19 00:00:00
-@@ -0,0 +1,81 @@
+@@ -0,0 +1,147 @@
 +// SSE replacements for two x87 math routines of The Matrix Online client (see d3d9_mxo_fastmath.cpp).
 +//
 +// MxoMatMulSSE      thiscall  Matrix4* Matrix4::Multiply(Matrix4* out, const Matrix4* b)   out = this * b
@@ -1153,6 +1192,72 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +extern "C" void MxoMatMulSSE();
 +extern "C" void MxoQuatToMatSSE();
++
++// MxoSqrtSSE        cdecl     double sqrt(double x), result in st0, for the client's import of MSVCR71!sqrt
++//
++// The x87 sqrt Rosetta runs is slow; SSE2's is not. The result must equal what fsqrt gives under the
++// calling thread's FPU control word, so only two cases are computed here, everything else goes to the
++// original (MxoSqrtOriginal):
++// - 24-bit precision, round to nearest (the game's render thread): sqrtsd, then rounding to float. Taken
++//   only if the result is a normal float (the x87 keeps its wider exponent range, a float does not) and
++//   the double result is not exactly halfway between two floats (there, rounding twice could differ
++//   from rounding once; anywhere else it cannot, because no halfway point lies between the exact root
++//   and its nearest double).
++// - 53-bit precision, round to nearest: sqrtsd is exactly fsqrt.
++// x must be positive and finite; zero, negative, infinite and NaN inputs take the original, which also
++// handles their error reporting.
++__asm__(
++  ".intel_syntax noprefix\n"
++  ".section .rdata\n"
++  ".p2align 3\n"
++  "MxoSqrtFltMin: .quad 0x3810000000000000\n"     // FLT_MIN as double
++  "MxoSqrtFltMax: .quad 0x47efffffe0000000\n"     // FLT_MAX as double
++  "MxoSqrtDblMax: .quad 0x7fefffffffffffff\n"
++  ".text\n"
++  ".p2align 4\n"
++  ".globl _MxoSqrtSSE\n"
++  "_MxoSqrtSSE:\n"
++  "movsd   xmm0, qword ptr [esp+4]\n"
++  "pxor    xmm1, xmm1\n"
++  "ucomisd xmm0, xmm1\n"
++  "jbe     8f\n"                                   // x <= 0 or NaN
++  "ucomisd xmm0, qword ptr [MxoSqrtDblMax]\n"
++  "ja      8f\n"                                   // infinite
++  "sub     esp, 12\n"
++  "fnstcw  word ptr [esp]\n"
++  "movzx   eax, word ptr [esp]\n"
++  "and     eax, 0xf00\n"                           // precision and rounding control
++  "sqrtsd  xmm0, xmm0\n"
++  "test    eax, eax\n"
++  "jz      1f\n"
++  "cmp     eax, 0x200\n"
++  "jne     7f\n"
++  "jmp     2f\n"
++  "1:\n"                                          // 24-bit precision
++  "ucomisd xmm0, qword ptr [MxoSqrtFltMin]\n"
++  "jb      7f\n"
++  "ucomisd xmm0, qword ptr [MxoSqrtFltMax]\n"
++  "ja      7f\n"
++  "movd    eax, xmm0\n"
++  "and     eax, 0x1fffffff\n"                      // the 29 bits a float drops
++  "cmp     eax, 0x10000000\n"
++  "je      7f\n"                                   // exactly halfway
++  "cvtsd2ss xmm0, xmm0\n"
++  "cvtss2sd xmm0, xmm0\n"
++  "2:\n"
++  "movsd   qword ptr [esp+4], xmm0\n"
++  "fld     qword ptr [esp+4]\n"
++  "add     esp, 12\n"
++  "ret\n"
++  "7:\n"
++  "add     esp, 12\n"
++  "8:\n"
++  "jmp     dword ptr [_MxoSqrtOriginal]\n"
++  ".att_syntax prefix\n"
++);
++
++extern "C" void MxoSqrtSSE();
++extern "C" { uint32_t MxoSqrtOriginal = 0; }
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_mxo_x87.h b/src/d3d9/d3d9_mxo_x87.h
 --- a/src/d3d9/d3d9_mxo_x87.h	2026-11-19 00:00:00
 +++ b/src/d3d9/d3d9_mxo_x87.h	2026-11-19 00:00:00
@@ -1437,7 +1542,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      else if (message == WM_SIZE)
      {
        D3DDEVICE_CREATION_PARAMETERS create_parms;
-@@ -184,6 +210,536 @@
+@@ -184,6 +210,567 @@
    };
  
  
@@ -1698,6 +1803,37 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +          }
 +
 +          ::CloseHandle(snapshot);
++        }
++
++        // Where every module sits (C:\\Games\\dxvk\\modules.txt, rewritten when the list changes), so that
++        // samples outside this DLL and client.dll can be named: "base size name", hex.
++        static uint32_t s_moduleSum = 0;
++        snapshot = ::CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, 0);
++
++        if (snapshot != INVALID_HANDLE_VALUE) {
++          char text[16384];
++          size_t used = 0;
++          uint32_t sum = 0;
++          MODULEENTRY32 entry = { };
++          entry.dwSize = sizeof(entry);
++
++          for (BOOL more = ::Module32First(snapshot, &entry); more; more = ::Module32Next(snapshot, &entry)) {
++            sum = sum * 31 + uint32_t(uintptr_t(entry.modBaseAddr)) + entry.modBaseSize;
++            int n = std::snprintf(text + used, sizeof(text) - used, "%08x %08x %s\n",
++              unsigned(uintptr_t(entry.modBaseAddr)), unsigned(entry.modBaseSize), entry.szModule);
++            if (n > 0 && used + size_t(n) < sizeof(text))
++              used += size_t(n);
++          }
++
++          ::CloseHandle(snapshot);
++
++          if (sum != s_moduleSum) {
++            s_moduleSum = sum;
++            if (FILE* file = std::fopen("C:\\Games\\dxvk\\modules.txt", "w")) {
++              std::fwrite(text, 1, used, file);
++              std::fclose(file);
++            }
++          }
 +        }
 +      }
 +
@@ -1974,7 +2110,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
    D3D9SwapChainEx::D3D9SwapChainEx(
            D3D9DeviceEx*          pDevice,
            D3DPRESENT_PARAMETERS* pPresentParams,
-@@ -255,6 +811,11 @@
+@@ -255,6 +842,11 @@
            HWND     hDestWindowOverride,
      const RGNDATA* pDirtyRegion,
            DWORD    dwFlags) {
@@ -1986,7 +2122,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      D3D9DeviceLock lock = m_parent->LockDevice();
  
      uint32_t presentInterval = m_presentParams.PresentationInterval;
-@@ -852,11 +1413,84 @@
+@@ -852,11 +1444,84 @@
          {  int32_t(m_dstRect.left),                    int32_t(m_dstRect.top)                    },
          { uint32_t(m_dstRect.right - m_dstRect.left), uint32_t(m_dstRect.bottom - m_dstRect.top) } };
  

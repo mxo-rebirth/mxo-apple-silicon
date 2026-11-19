@@ -65,3 +65,10 @@ What matters is the list of routines where the two versions *differ*. On the ref
 - `eax` left over from `fnstsw ax` can differ in the bits that report the FPU stack pointer
   when a callee that should have returned a float did not;
 - when two NaNs meet, x87 and SSE2 keep a different one.
+
+## sqrt
+
+`sqrt_test.cpp` checks the replacement for the game's `MSVCR71!sqrt` import (`MxoSqrtSSE`) against
+Wine's own `sqrt`: random and edge-case inputs, values whose root lies exactly halfway between two
+floats, under seven FPU control words. It must report zero differences; it also prints the time per
+call of both (about 500 ns for Wine's x87 version under Rosetta, about 50 ns for the replacement).
