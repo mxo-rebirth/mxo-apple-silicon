@@ -9,6 +9,9 @@
 # is downloaded once into build/.
 #
 # Needs: mingw-w64 (i686), meson, ninja, glslang, python3.   brew install mingw-w64 meson ninja glslang
+# The DLL is compiled with llvm-mingw, downloaded once into build/ (about 125 MB, checksum verified):
+# Homebrew's 32-bit GCC uses setjmp/longjmp exceptions, whose bookkeeping on every function call cost
+# about 5% of the game's main thread. MXO_COMPILER=gcc builds with Homebrew's GCC instead.
 set -euo pipefail
 
 if [ $# -lt 1 ] || [ ! -f "$1" ]; then
@@ -26,6 +29,21 @@ for tool in i686-w64-mingw32-g++ i686-w64-mingw32-objdump i686-w64-mingw32-strip
 done
 
 mkdir -p "$WORK"
+
+LLVM_MINGW_VERSION=20261104
+LLVM_MINGW_SHA256=66cbd5178c4a71b0d473e68ede172f8eb7d15d023e67f39201d0a69e21f6bf3c
+LLVM_MINGW="$WORK/toolchain/llvm-mingw-$LLVM_MINGW_VERSION-ucrt-macos-universal"
+if [ "${MXO_COMPILER:-clang}" != gcc ] && [ ! -x "$LLVM_MINGW/bin/i686-w64-mingw32-clang++" ]; then
+  echo "== downloading llvm-mingw $LLVM_MINGW_VERSION"
+  mkdir -p "$WORK/toolchain"
+  archive="$WORK/toolchain/llvm-mingw-$LLVM_MINGW_VERSION.tar.xz"
+  curl -L --fail -o "$archive.part" \
+    "https://github.com/mstorsjo/llvm-mingw/releases/download/$LLVM_MINGW_VERSION/llvm-mingw-$LLVM_MINGW_VERSION-ucrt-macos-universal.tar.xz"
+  echo "$LLVM_MINGW_SHA256  $archive.part" | shasum -a 256 -c - >/dev/null || { echo "llvm-mingw checksum mismatch" >&2; exit 1; }
+  mv "$archive.part" "$archive"
+  tar -xJf "$archive" -C "$WORK/toolchain"
+  rm -f "$archive"
+fi
 
 if [ $# -ge 2 ]; then
   TARBALL=$(cd "$(dirname "$2")" && pwd)/$(basename "$2")
@@ -60,13 +78,26 @@ grep -c '^SKIP' "$WORK/translate.log" | sed 's/^/   routines skipped (see build\
 echo "== building d3d9.dll"
 (
   cd "$WORK/dxvk"
-  meson setup --cross-file build-win32.txt --buildtype release \
+  cross=build-win32.txt
+  extra=-Wno-template-body
+  if [ "${MXO_COMPILER:-clang}" != gcc ]; then
+    cross=build-win32-llvm-mingw.txt
+    extra=
+    L="$LLVM_MINGW/bin"
+    printf "[binaries]\nc = '%s'\ncpp = '%s'\nar = '%s'\nstrip = '%s'\nwindres = '%s'\n\n[properties]\nneeds_exe_wrapper = true\n\n[host_machine]\nsystem = 'windows'\ncpu_family = 'x86'\ncpu = 'x86'\nendian = 'little'\n" \
+      "$L/i686-w64-mingw32-clang" "$L/i686-w64-mingw32-clang++" "$L/llvm-ar" "$L/llvm-strip" "$L/i686-w64-mingw32-windres" > "$cross"
+  fi
+  meson setup --cross-file "$cross" --buildtype release \
     -Denable_dxgi=false -Denable_d3d10=false -Denable_d3d11=false -Denable_d3d9=true \
-    -Dcpp_args="-include cstdint -include cstring -include cstdlib -include algorithm -include limits -Wno-template-body" \
+    -Dcpp_args="-include cstdint -include cstring -include cstdlib -include algorithm -include limits $extra" \
     build.w32 > "$WORK/meson.log" 2>&1
   ninja -C build.w32 > "$WORK/ninja.log" 2>&1
 ) || { echo "build failed, see build/meson.log and build/ninja.log" >&2; exit 1; }
 
-i686-w64-mingw32-strip -o "$WORK/d3d9.dll" "$WORK/dxvk/build.w32/src/d3d9/d3d9.dll"
+if [ "${MXO_COMPILER:-clang}" != gcc ]; then
+  "$LLVM_MINGW/bin/llvm-strip" -o "$WORK/d3d9.dll" "$WORK/dxvk/build.w32/src/d3d9/d3d9.dll"
+else
+  i686-w64-mingw32-strip -o "$WORK/d3d9.dll" "$WORK/dxvk/build.w32/src/d3d9/d3d9.dll"
+fi
 echo "== done: $WORK/d3d9.dll"
 echo "   install steps: BUILD.md"

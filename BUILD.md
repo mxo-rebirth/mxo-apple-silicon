@@ -48,6 +48,13 @@ Tools (Homebrew): `brew install mingw-w64 meson ninja glslang`
 scripts/build.sh "/path/to/your/client.dll"
 ```
 
+The DLL is compiled with [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) 20261104, which the
+script downloads once into `build/toolchain` (about 125 MB) and checks against a fixed SHA-256.
+Homebrew's 32-bit GCC handles C++ exceptions with setjmp/longjmp, and the bookkeeping that needs on
+nearly every function call cost about 5% of the game's main thread. Homebrew's mingw-w64 is still
+needed for `objdump`, which the translator uses. `MXO_COMPILER=gcc scripts/build.sh ...` builds with
+GCC as before.
+
 `client.dll` is the one in your game folder. The script
 
 1. downloads CodeWeavers' source for CrossOver 26.3.0 once (about 200 MB; pass a tarball you
