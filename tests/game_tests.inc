@@ -89,6 +89,38 @@ struct Job {
   char msg[3][200]; int nmsg;
 };
 
+// Random memory rarely gets far into some routines. For those, MXO_SHAPE=1 builds plausible input in the
+// arena (g_init) before the call. 0x47DDB0 maps a world position to a map grid cell: this = {.., +8 grid*},
+// grid = {+28 minX, +38 minZ, +40 maxX, +50 maxZ, +58 cell size (double), +60 scale (int), +64/+68 columns/rows},
+// arg0 = position {+0 x, +10 z}, arg1/arg2 = column/row out.
+static void putd(size_t byteOff, double v) { memcpy((uint8_t*)g_init + byteOff, &v, 8); }
+static double rndRange(double lo, double hi) { return lo + (hi - lo) * double(rnd32() % 1000001) / 1000000.0; }
+
+static int g_reached = 0;   // shaped calls whose first output was written by the original
+
+static void shapeInput(const GameFn& g) {
+  if (g.rva != 0x47ddb0) return;
+  const size_t grid = BlockSize * 8, pos = BlockSize * 1;
+  g_init[2] = uint32_t(uintptr_t(g_arena)) + grid;
+  double minX = rndRange(-5000, 5000), minZ = rndRange(-5000, 5000);
+  double maxX = minX + rndRange(1, 8000), maxZ = minZ + rndRange(1, 8000);
+  putd(grid + 0x28, minX); putd(grid + 0x38, minZ); putd(grid + 0x40, maxX); putd(grid + 0x50, maxZ);
+  uint32_t pick = rnd32() % 16;
+  uint32_t cols = pick == 3 ? 0 : 1 + rnd32() % 512, rows = pick == 4 ? 0 : 1 + rnd32() % 512;
+  int32_t scale = pick == 2 ? -int32_t(rnd32() % 100000) : pick == 7 ? 0 : 1 + int32_t(rnd32() % 255);
+  // cell size times scale near the map width divided by the columns, so the results spread over the grid
+  double cell = (maxX - minX) / double(cols ? cols : 1) / double(scale > 0 ? scale : 1) * rndRange(0.3, 1.5);
+  putd(grid + 0x58, pick == 0 ? 0.0 : pick == 1 ? -rndRange(0, 10) : cell);
+  memcpy((uint8_t*)g_init + grid + 0x60, &scale, 4);
+  memcpy((uint8_t*)g_init + grid + 0x64, &cols, 4);
+  memcpy((uint8_t*)g_init + grid + 0x68, &rows, 4);
+  bool inside = rnd32() % 10 != 0;
+  putd(pos + 0x00, inside ? rndRange(minX, maxX) : rndRange(-20000, 20000));
+  putd(pos + 0x10, inside ? rndRange(minZ, maxZ) : rndRange(-20000, 20000));
+  if (pick == 5) putd(pos + 0x00, minX);   // exactly on the edges
+  if (pick == 6) putd(pos + 0x10, maxZ);
+}
+
 static DWORD WINAPI gameWorker(void* param) {
   Job& j = *(Job*)param;
   const GameFn& g = *j.g;
@@ -102,6 +134,7 @@ static DWORD WINAPI gameWorker(void* param) {
       // mostly floats; a few small integers and in-arena pointers so counts and links are sometimes sane
       g_init[k] = r < 56 ? fbits(rndf()) : r < 61 ? rnd32() % 5 : uint32_t(uintptr_t(g_arena)) + (rnd32() % (BlockSize * (Blocks - 1) / 4)) * 4;
     }
+    if (getenv("MXO_SHAPE") && *getenv("MXO_SHAPE")) shapeInput(g);
     uint32_t args[PassedArgs];
     for (int a = 0; a < PassedArgs; a++)
       args[a] = (a < g.nargs && g.kinds[a] == 'f') ? fbits(rndf()) : uint32_t(uintptr_t(g_arena)) + uint32_t(BlockSize * (a + 1));
@@ -109,6 +142,7 @@ static DWORD WINAPI gameWorker(void* param) {
     memcpy(g_arena, g_init, BlockSize * Blocks);
     Result ra = runOne(g_base + g.rva, g, args);
     memcpy(g_resA, g_arena, BlockSize * Blocks);
+    if (g.rva == 0x47ddb0 && g_resA[BlockSize * 2 / 4] != 0xffffffffu && !ra.crashed) g_reached++;
     memcpy(g_dataA, g_data, g_dataSize);
     memcpy(g_data, g_dataInit, g_dataSize);
     memcpy(g_arena, g_init, BlockSize * Blocks);
@@ -151,14 +185,14 @@ static int runGameChild(int iterations, int first, int count) {
   DWORD old; VirtualProtect(g_data, g_dataSize, PAGE_READWRITE, &old);
   g_dataInit = (uint8_t*)malloc(g_dataSize); g_dataA = (uint8_t*)malloc(g_dataSize);
   memcpy(g_dataInit, g_data, g_dataSize);
-  g_seed ^= uint64_t(first + 1) * 0x9E3779B97F4A7C15ull;
+  g_seed ^= uint64_t(first + 2) * 0x9E3779B97F4A7C15ull;   // first + 1 would cancel the start value for routine 0 and leave the generator at zero
   FILE* out = fopen(FuzzFile, "a");
   const int total = int(sizeof(g_gameFns) / sizeof(g_gameFns[0]));
   for (int idx = first; idx < first + count && idx < total; idx++) {
     const GameFn& g = g_gameFns[idx];
     MxoXFunc* f = findFunc(MxoX_funcs, g.rva);
     if (!f || !MxoXMatches(base, imageSize, MxoX_imagebase, *f)) { fprintf(out, "%d %06x NOMATCH\n", idx, g.rva); fflush(out); continue; }
-    static Job j; memset(&j, 0, sizeof(j));
+    static Job j; memset(&j, 0, sizeof(j)); g_reached = 0;
     j.g = &g; j.f = f; j.iterations = iterations;
     g_timeouts = 0; g_guard = 0;
     HANDLE th = CreateThread(nullptr, 0, gameWorker, &j, 0, nullptr);
@@ -169,8 +203,8 @@ static int runGameChild(int iterations, int first, int count) {
       if (j.heartbeat != lastBeat) { lastBeat = j.heartbeat; lastChange = GetTickCount(); }
       else if (GetTickCount() - lastChange > 4000) { killed = true; break; }
     }
-    fprintf(out, "%d %06x %s ran=%d crashed=%d crashdiff=%d timeouts=%ld result=%d data=%d eax=%d stack=%d sig=%s%s\n", idx, g.rva,
-      killed ? "BLOCKED" : "DONE", j.done, j.crashed, j.crashdiff, long(g_timeouts), j.bad, j.databad, j.eaxdiff, j.stack, g.thisPtr ? "this," : "", g.kinds);
+    fprintf(out, "%d %06x %s ran=%d crashed=%d crashdiff=%d timeouts=%ld result=%d data=%d eax=%d stack=%d reached=%d sig=%s%s\n", idx, g.rva,
+      killed ? "BLOCKED" : "DONE", j.done, j.crashed, j.crashdiff, long(g_timeouts), j.bad, j.databad, j.eaxdiff, j.stack, g_reached, g.thisPtr ? "this," : "", g.kinds);
     for (int k = 0; k < j.nmsg; k++) fprintf(out, "# %06x %s\n", g.rva, j.msg[k]);
     fflush(out);
     if (killed) { fclose(out); TerminateProcess(GetCurrentProcess(), 3); }

@@ -47,6 +47,11 @@ pointers, huge or tiny numbers). The translation keeps values in the float range
 must match the original exactly: any routine listed as different is a translation fault. Fewer routines
 run to completion that way, because many need pointers to work on.
 
+With `MXO_SHAPE=1` some routines get plausible input instead of random memory, because random memory
+rarely gets far into them. So far that is the map routine at `0x47DDB0` (world position to map grid
+cell): a map object with sane bounds, grid size and cell size, and positions mostly inside the map. The
+`reached=` count in `fuzz.txt` says how many calls got all the way to the result.
+
 The game part calls each routine blind: random floats, a few small integers and pointers into a
 scratch area, with no idea what the routine expects. Many routines crash on that (in both
 versions, which is caught and not counted) and some block; each batch runs in its own process
