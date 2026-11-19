@@ -16,7 +16,7 @@ extern "C" {
   extern uint32_t XT_funcs[], XT_absfix[], XT_relfix[];
   extern uint8_t  XT_code_begin[], XT_code_end[];
   extern uint32_t XT_tid, XT_imagebase;
-  void t1(); void t2(); void t3(); void t4(); void t5(); void t6(); void t7(); void t8(); void t8h(); void t9(); void t10();
+  void t1(); void t2(); void t3(); void t4(); void t5(); void t6(); void t7(); void t8(); void t8h(); void t9(); void t10(); void t11();
 #ifdef WITH_GAME
   extern uint32_t MxoX_funcs[], MxoX_absfix[], MxoX_relfix[], MxoX_deps[];
   extern uint8_t  MxoX_code_begin[], MxoX_code_end[];
@@ -169,7 +169,8 @@ int main(int argc, char** argv) {
 #ifdef WITH_GAME
   if (argc > 4 && !strcmp(argv[2], "child")) { g_plain = argc > 5 || (getenv("MXO_PLAIN") && *getenv("MXO_PLAIN")); fpu_setcw(0x007f); return runGameChild(iterations, atoi(argv[3]), atoi(argv[4])); }
 #endif
-  if (argc > 2) goto game;   // second argument: skip the synthetic part
+  const bool synthOnly = argc > 2 && !strcmp(argv[2], "synth");   // "synth": only the synthetic part
+  if (argc > 2 && !synthOnly) goto game;   // any other second argument: skip the synthetic part
   fpu_setcw(0x007f);   // 24-bit precision, round to nearest, exceptions masked: what Direct3D 9 sets
   if (!MxoXFixups(synth_begin, 0x62000000, XT_absfix, XT_relfix, XT_code_begin, XT_code_end)) { printf("fixups failed\n"); return 2; }
   for (int pass = 0; pass < 3; pass++) {
@@ -188,6 +189,7 @@ int main(int argc, char** argv) {
     bad += runSynth("t8", t8, true, iterations);
     bad += runSynth("t9", t9, false, iterations);
     bad += runSynth("t10", t10, false, iterations);
+    bad += runSynth("t11", t11, false, iterations);
   }
   XT_tid = GetCurrentThreadId();
   for (int m = 0; m < 1; m++) {
@@ -197,6 +199,7 @@ int main(int argc, char** argv) {
   benchSynth("t5", t5, 1000000); benchSynth("t6", t6, 1000000); benchSynth("t9", t9, 1000000); benchSynth("t10", t10, 1000000);
   }
   fpu_setcw(0x007f);
+  if (synthOnly) { printf("TOTAL problems: %d\n", bad); return bad ? 1 : 0; }
 game:
 #ifdef WITH_GAME
   fpu_setcw(0x007f);

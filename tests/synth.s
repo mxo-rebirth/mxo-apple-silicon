@@ -472,3 +472,257 @@ _t10:
   pop ebp
   ret
 _t10_end:
+
+# t11: every "test ah, M / jcc" a compare is followed by, with ax dead afterwards, so the translator turns
+# each into a direct branch on the compare (single floats, doubles and register operands, NaN included)
+.globl _t11
+_t11:
+  push ebp
+  mov ebp, esp
+  push esi
+  push edi
+  mov esi, [ebp+8]
+  mov edi, [ebp+12]
+  xor ecx, ecx
+  xor edx, edx
+  fld dword ptr [esi+0]
+  fcomp dword ptr [esi+12]
+  fnstsw ax
+  test ah, 0x01
+  jz 1f
+  or ecx, 0x1
+1:
+  xor eax, eax
+  fld dword ptr [esi+20]
+  fcomp qword ptr [esi+88]
+  fnstsw ax
+  test ah, 0x01
+  jnz 1f
+  or ecx, 0x2
+1:
+  xor eax, eax
+  fld dword ptr [esi+4]
+  fld dword ptr [esi+40]
+  fcompp
+  fnstsw ax
+  test ah, 0x01
+  jp 1f
+  or ecx, 0x4
+1:
+  xor eax, eax
+  fld dword ptr [esi+60]
+  fcomp dword ptr [esi+32]
+  fnstsw ax
+  test ah, 0x01
+  jnp 1f
+  or ecx, 0x8
+1:
+  xor eax, eax
+  fld dword ptr [esi+16]
+  fcomp qword ptr [esi+80]
+  fnstsw ax
+  test ah, 0x04
+  jz 1f
+  or ecx, 0x10
+1:
+  xor eax, eax
+  fld dword ptr [esi+24]
+  fld dword ptr [esi+36]
+  fcompp
+  fnstsw ax
+  test ah, 0x04
+  jnz 1f
+  or ecx, 0x20
+1:
+  xor eax, eax
+  fld dword ptr [esi+56]
+  fcomp dword ptr [esi+52]
+  fnstsw ax
+  test ah, 0x04
+  jp 1f
+  or ecx, 0x40
+1:
+  xor eax, eax
+  fld dword ptr [esi+12]
+  fcomp qword ptr [esi+104]
+  fnstsw ax
+  test ah, 0x04
+  jnp 1f
+  or ecx, 0x80
+1:
+  xor eax, eax
+  fld dword ptr [esi+44]
+  fld dword ptr [esi+32]
+  fcompp
+  fnstsw ax
+  test ah, 0x05
+  jz 1f
+  or ecx, 0x100
+1:
+  xor eax, eax
+  fld dword ptr [esi+52]
+  fcomp dword ptr [esi+8]
+  fnstsw ax
+  test ah, 0x05
+  jnz 1f
+  or ecx, 0x200
+1:
+  xor eax, eax
+  fld dword ptr [esi+8]
+  fcomp qword ptr [esi+96]
+  fnstsw ax
+  test ah, 0x05
+  jp 1f
+  or ecx, 0x400
+1:
+  xor eax, eax
+  fld dword ptr [esi+0]
+  fld dword ptr [esi+28]
+  fcompp
+  fnstsw ax
+  test ah, 0x05
+  jnp 1f
+  or ecx, 0x800
+1:
+  xor eax, eax
+  fld dword ptr [esi+48]
+  fcomp dword ptr [esi+28]
+  fnstsw ax
+  test ah, 0x40
+  jz 1f
+  or ecx, 0x1000
+1:
+  xor eax, eax
+  fld dword ptr [esi+4]
+  fcomp qword ptr [esi+88]
+  fnstsw ax
+  test ah, 0x40
+  jnz 1f
+  or ecx, 0x2000
+1:
+  xor eax, eax
+  fld dword ptr [esi+20]
+  fld dword ptr [esi+24]
+  fcompp
+  fnstsw ax
+  test ah, 0x40
+  jp 1f
+  or ecx, 0x4000
+1:
+  xor eax, eax
+  fld dword ptr [esi+44]
+  fcomp dword ptr [esi+48]
+  fnstsw ax
+  test ah, 0x40
+  jnp 1f
+  or ecx, 0x8000
+1:
+  xor eax, eax
+  fld dword ptr [esi+0]
+  fcomp qword ptr [esi+80]
+  fnstsw ax
+  test ah, 0x41
+  jz 1f
+  or ecx, 0x10000
+1:
+  xor eax, eax
+  fld dword ptr [esi+40]
+  fld dword ptr [esi+20]
+  fcompp
+  fnstsw ax
+  test ah, 0x41
+  jnz 1f
+  or ecx, 0x20000
+1:
+  xor eax, eax
+  fld dword ptr [esi+40]
+  fcomp dword ptr [esi+4]
+  fnstsw ax
+  test ah, 0x41
+  jp 1f
+  or ecx, 0x40000
+1:
+  xor eax, eax
+  fld dword ptr [esi+60]
+  fcomp qword ptr [esi+104]
+  fnstsw ax
+  test ah, 0x41
+  jnp 1f
+  or ecx, 0x80000
+1:
+  xor eax, eax
+  fld dword ptr [esi+60]
+  fld dword ptr [esi+16]
+  fcompp
+  fnstsw ax
+  test ah, 0x44
+  jz 1f
+  or ecx, 0x100000
+1:
+  xor eax, eax
+  fld dword ptr [esi+36]
+  fcomp dword ptr [esi+24]
+  fnstsw ax
+  test ah, 0x44
+  jnz 1f
+  or ecx, 0x200000
+1:
+  xor eax, eax
+  fld dword ptr [esi+56]
+  fcomp qword ptr [esi+96]
+  fnstsw ax
+  test ah, 0x44
+  jp 1f
+  or ecx, 0x400000
+1:
+  xor eax, eax
+  fld dword ptr [esi+16]
+  fld dword ptr [esi+12]
+  fcompp
+  fnstsw ax
+  test ah, 0x44
+  jnp 1f
+  or ecx, 0x800000
+1:
+  xor eax, eax
+  fld dword ptr [esi+32]
+  fcomp dword ptr [esi+44]
+  fnstsw ax
+  test ah, 0x45
+  jz 1f
+  or ecx, 0x1000000
+1:
+  xor eax, eax
+  fld dword ptr [esi+52]
+  fcomp qword ptr [esi+88]
+  fnstsw ax
+  test ah, 0x45
+  jnz 1f
+  or ecx, 0x2000000
+1:
+  xor eax, eax
+  fld dword ptr [esi+36]
+  fld dword ptr [esi+8]
+  fcompp
+  fnstsw ax
+  test ah, 0x45
+  jp 1f
+  or ecx, 0x4000000
+1:
+  xor eax, eax
+  fld dword ptr [esi+28]
+  fcomp dword ptr [esi+0]
+  fnstsw ax
+  test ah, 0x45
+  jnp 1f
+  or ecx, 0x8000000
+1:
+  xor eax, eax
+  mov [edi+96], ecx
+  mov [edi+100], edx
+  pop edi
+  pop esi
+  mov esp, ebp
+  pop ebp
+  ret
+_t11_end:

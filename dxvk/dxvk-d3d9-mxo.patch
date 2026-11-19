@@ -601,7 +601,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_mxo_fastmath.cpp b/src/d3d9/d3d9_mxo_fastmath.cpp
 --- a/src/d3d9/d3d9_mxo_fastmath.cpp	2026-11-19 00:00:00
 +++ b/src/d3d9/d3d9_mxo_fastmath.cpp	2026-11-19 00:00:00
-@@ -0,0 +1,469 @@
+@@ -0,0 +1,505 @@
 +#include <windows.h>
 +#include <tlhelp32.h>
 +
@@ -625,7 +625,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +#include "d3d9_mxo_x87.inc"
 +
 +extern "C" {
-+  extern uint32_t MxoX_funcs[], MxoX_absfix[], MxoX_relfix[], MxoX_deps[];
++  extern uint32_t MxoX_funcs[], MxoX_absfix[], MxoX_relfix[], MxoX_deps[], MxoX_inlined[], MxoX_xrdeps[];
 +  extern uint8_t  MxoX_code_begin[], MxoX_code_end[];
 +  extern uint32_t MxoX_tid, MxoX_imagebase;
 +}
@@ -984,11 +984,32 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +      std::string respected;
 +
++      // Routines that compute msvcr71's floor or ceil in place instead of calling them through the import table:
++      // only if the slot still holds the runtime's own function (an add-on could have hooked it).
++      std::vector<uint32_t> inlineBlocked;
++      HMODULE crtModule = ::GetModuleHandleA("msvcr71.dll");
++      const uint32_t crtFns[2] = {
++        crtModule ? reinterpret_cast<uint32_t>(::GetProcAddress(crtModule, "floor")) : 0u,
++        crtModule ? reinterpret_cast<uint32_t>(::GetProcAddress(crtModule, "ceil"))  : 0u };
++
++      for (const uint32_t* e = MxoX_inlined; e[0]; e += 3) {
++        const bool inImage = e[0] + 4 <= imageSize;
++        const uint32_t slot = inImage ? *reinterpret_cast<const uint32_t*>(base + e[0]) : 0u;
++        if (e[2] > 1 || !crtFns[e[2]] || slot != crtFns[e[2]])
++          inlineBlocked.push_back(e[1]);
++      }
++
++      if (!inlineBlocked.empty())
++        Logger::info(str::format("MxO fast math: ", inlineBlocked.size(), " floor/ceil uses keep their routine original (import hooked or missing)"));
++
 +      for (auto f = reinterpret_cast<const MxoXFunc*>(MxoX_funcs); f->size; f++) {
 +        if (total++ >= limit)
 +          continue;
 +
 +        if ((f->flags & 1) && !depsIntact)
++          continue;
++
++        if (std::find(inlineBlocked.begin(), inlineBlocked.end(), f->rva) != inlineBlocked.end())
 +          continue;
 +
 +        auto ref = std::lower_bound(addonRefs.begin(), addonRefs.end(), f->rva);
@@ -1002,6 +1023,21 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +          todo.push_back(f);
 +        else if (differing.size() < 80)
 +          differing += str::format(" ", std::hex, f->rva);
++      }
++
++      // A routine that calls another translated routine directly (for its result in xmm0) goes in only together
++      // with that routine; repeat until nothing changes, since callees can have such callees too.
++      for (bool changed = true; changed; ) {
++        changed = false;
++        for (const uint32_t* d = MxoX_xrdeps; d[0]; d += 2) {
++          auto caller = std::find_if(todo.begin(), todo.end(), [d] (const MxoXFunc* f) { return f->rva == d[0]; });
++          if (caller == todo.end())
++            continue;
++          if (std::none_of(todo.begin(), todo.end(), [d] (const MxoXFunc* f) { return f->rva == d[1]; })) {
++            todo.erase(caller);
++            changed = true;
++          }
++        }
 +      }
 +
 +      matching  = uint32_t(todo.size());

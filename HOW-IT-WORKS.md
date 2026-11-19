@@ -234,6 +234,18 @@ Direct3D 9. No game file is modified on disk.
   rounded once more to 24 bits does not change, this gives the same bits as computing in double
   and rounding: 527 routines now need 55,500 instructions instead of 78,600, and conversions
   between float and double fell from 27,600 to 6,100.
+- **Compares branch directly.** The original reads the FPU status word (`fnstsw ax`), tests bits of `ah`
+  and jumps. Rebuilding that status word from an SSE compare takes `lahf` and parity flags, which Rosetta
+  computes in software. Where the code only tests `ah` and jumps, and flow analysis shows that neither the
+  flags nor the bytes of `ax` holding the status word are read again before being overwritten, the
+  translation branches on the SSE compare itself (1,316 of 1,607 places in the current list). A routine
+  that returns a `bool` in `al` may then return a different, unused `ah`.
+- **`floor` and `ceil`** called through the client's import table are computed in place with SSE4.1
+  `roundsd`, which gives the same bits as msvcr71's functions. The installer keeps such a routine original
+  if the import slot does not hold msvcr71's own function.
+- **Float results between translated routines** stay in an SSE register: a translated routine whose
+  every return leaves one value on the FPU stack gets a second entry that returns it in `xmm0`, and
+  translated callers call that entry. The installer installs a caller only together with its callees.
 - Integer instructions are copied unchanged. Translated code never changes the CPU flags,
   because x87 code does not either and the surrounding integer code relies on that.
 - Compares followed by `fnstsw ax` produce the same condition bits in `AH`.
@@ -347,6 +359,10 @@ With the map's grid lookup translated (v27) and the llvm-mingw build (v28), Reja
 fps in the world, against 61–62 before, at about 3,300 draw calls per frame. Opening the map now
 costs about 5 fps (it was 15–20): one routine, at `0x47DDB0`, had taken 18% of the main thread
 with the map open.
+
+With the `sqrt` replacement (v30) and the translator changes above (v33), translated routines went from
+43% to 38.5% of the main thread, and Rejacked's average in the world went from 67 to 69–78 fps
+depending on the scene.
 
 Settings that changed the numbers:
 

@@ -155,7 +155,10 @@ static DWORD WINAPI gameWorker(void* param) {
     }
     if (ra.tags != rb.tags) { if (!j.stack++ && j.nmsg < 3) snprintf(j.msg[j.nmsg++], 200, "FPU stack differs: orig %04x xlat %04x", ra.tags, rb.tags); }
     if ((ra.eax ^ rb.eax) & 0xffffff00) { if (!j.eaxdiff++ && j.nmsg < 3) snprintf(j.msg[j.nmsg++], 200, "eax orig %08x xlat %08x", ra.eax, rb.eax); }
-    if (diff(g_resA, g_arena, BlockSize * Blocks, &where) || diff(&ra.st0, &rb.st0, 8, &where)) {
+    if (diff(&ra.st0, &rb.st0, 8, &where) && !diff(g_resA, g_arena, BlockSize * Blocks, &where)) {
+      uint64_t a, b; memcpy(&a, &ra.st0, 8); memcpy(&b, &rb.st0, 8);
+      if (!j.bad++ && j.nmsg < 3) snprintf(j.msg[j.nmsg++], 200, "st0 differs: orig %016llx xlat %016llx (iteration %d)", (unsigned long long)a, (unsigned long long)b, it);
+    } else if (diff(g_resA, g_arena, BlockSize * Blocks, &where) || diff(&ra.st0, &rb.st0, 8, &where)) {
       if (!j.bad++ && j.nmsg < 3) snprintf(j.msg[j.nmsg++], 200, "result differs at arena+%u: orig %08x xlat %08x (iteration %d)", unsigned(where), g_resA[where / 4], g_arena[where / 4], it);
     }
   }
@@ -164,6 +167,32 @@ static DWORD WINAPI gameWorker(void* param) {
 }
 
 static const char* FuzzFile = "fuzz.txt";   // in the current folder
+
+// The image is loaded without resolving imports, so originals that call msvcr71's floor or ceil would crash
+// where their translations (which compute these in place) do not. Those two slots get the real functions.
+static void ResolveMathImports(uint8_t* base, const IMAGE_NT_HEADERS32* nt) {
+  HMODULE crt = LoadLibraryA("msvcr71.dll");
+  const auto& dir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+  if (!crt || !dir.VirtualAddress)
+    return;
+  for (auto imp = (const IMAGE_IMPORT_DESCRIPTOR*)(base + dir.VirtualAddress); imp->Name; imp++) {
+    if (_stricmp((const char*)(base + imp->Name), "msvcr71.dll") || !imp->OriginalFirstThunk)
+      continue;
+    auto names = (const uint32_t*)(base + imp->OriginalFirstThunk);
+    auto slots = (uint32_t*)(base + imp->FirstThunk);
+    for (uint32_t k = 0; names[k]; k++) {
+      if (names[k] & 0x80000000u)
+        continue;
+      const char* name = (const char*)(base + names[k] + 2);
+      if (strcmp(name, "floor") && strcmp(name, "ceil"))
+        continue;
+      DWORD old;
+      VirtualProtect(&slots[k], 4, PAGE_READWRITE, &old);
+      slots[k] = (uint32_t)(uintptr_t)GetProcAddress(crt, name);
+      VirtualProtect(&slots[k], 4, old, &old);
+    }
+  }
+}
 
 // Child: tests routines [first, first + count) and appends one line per routine. A routine that blocks
 // for good ends the process, because whatever it holds would block everything after it too.
@@ -174,6 +203,7 @@ static int runGameChild(int iterations, int first, int count) {
   auto nt = (const IMAGE_NT_HEADERS32*)(base + ((const IMAGE_DOS_HEADER*)base)->e_lfanew);
   uint32_t imageSize = nt->OptionalHeader.SizeOfImage;
   if (!MxoXFixups(base, MxoX_imagebase, MxoX_absfix, MxoX_relfix, MxoX_code_begin, MxoX_code_end)) return 2;
+  ResolveMathImports(base, nt);
   AddVectoredExceptionHandler(1, crashHandler);
   CreateThread(nullptr, 0, watchdog, nullptr, 0, nullptr);
   g_arena = (uint32_t*)VirtualAlloc(nullptr, BlockSize * Blocks, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);

@@ -72,3 +72,12 @@ What matters is the list of routines where the two versions *differ*. On the ref
 Wine's own `sqrt`: random and edge-case inputs, values whose root lies exactly halfway between two
 floats, under seven FPU control words. It must report zero differences; it also prints the time per
 call of both (about 500 ns for Wine's x87 version under Rosetta, about 50 ns for the replacement).
+
+`xtest.exe <iterations> synth` runs only the synthetic part. Run one test program at a time per folder:
+the game part writes `fuzz.txt` in the current folder.
+
+## floor and ceil
+
+`floor_test.cpp` checks that SSE4.1 `roundsd`, which the translator puts in place of calls to msvcr71's
+`floor` and `ceil`, gives the same bits as Wine's functions after the x87 round trip the original caller
+makes (NaNs, infinities, zeros, denormals and values around 2^52 included). It must report zero differences.

@@ -51,6 +51,24 @@ class Image:
             self.base = 0x62000000
             self.secs = [(len(self.data), 0, len(self.data), 0)]
             self.text = [(0, len(self.data))]
+        self.imports = {}      # import address table slot rva -> (dll in lower case, function name)
+        if mode == 'pe':
+            irva = struct.unpack_from('<I', b, pe + 24 + 96 + 8)[0]
+            o = self.off(irva) if irva else None
+            while o is not None:
+                ilt, _, _, name, iat = struct.unpack_from('<5I', b, o)
+                if not name:
+                    break
+                dll = b[self.off(name):b.index(b'\0', self.off(name))].decode().lower()
+                k = 0
+                while True:
+                    t = struct.unpack_from('<I', b, self.off(ilt or iat) + 4 * k)[0]
+                    if not t:
+                        break
+                    if not t & 0x80000000:
+                        self.imports[iat + 4 * k] = (dll, b[self.off(t) + 2:b.index(b'\0', self.off(t) + 2)].decode())
+                    k += 1
+                o += 20
         self.relocs_sorted = sorted(self.relocs)
         # (value rva, location rva) of every relocated pointer, to find who points into a function
         self.pointers = []
@@ -323,6 +341,11 @@ class Translator:
         self.tabledeps = []  # (rva, size) of original switch tables the translations were made from
         self.info = []
         self.edgeconv = 0     # float-to-double conversions placed at branches and branch targets (fast mode)
+        self.inlined = []     # (import slot rva, routine rva, INLINE_IMPORTS number) of imports computed in place
+        self.xr_targets = set()   # routines translated callers call directly, result in xmm0 (see translate's xr)
+        self.xrdeps = set()   # (caller rva, callee rva) of such calls
+        self.fpcalls = set()  # targets of direct calls whose floating-point result is used
+        self.fpret_all = {}   # routine rva -> every return leaves exactly one value on the FPU stack
 
     def label(self):
         self.uid += 1
@@ -431,8 +454,10 @@ class Translator:
         translator under Rosetta handles without a merge step; divide stays scalar."""
         return ['%s %s, %s' % ({'add': 'addpd', 'sub': 'subpd', 'mul': 'mulpd', 'div': 'divsd'}[op], dst, src)]
 
-    def translate(self, s, e):
-        """Translates the function at s; e is the furthest it may extend (start of the next function)."""
+    def translate(self, s, e, xr=False):
+        """Translates the function at s; e is the furthest it may extend (start of the next function). With xr, the
+        variant that translated callers call directly: no entry check, and a floating-point result returned in xmm0
+        (as a double) instead of on the FPU stack."""
         img = self.img
         relocs = img.relocs_in(s, e)
 
@@ -560,7 +585,8 @@ class Translator:
             if depth[n] is not None and i.kind == 'switch':
                 targets.update(i.cases)
         p = self.prefix
-        fn = '_%s_%06x' % (p, s)
+        lp = p + ('R' if xr else '')            # local labels: the xr variant is a second copy of the body
+        fn = '_%s_%06x%s' % (p, s, '_xr' if xr else '')
         o = self.out
         # instructions the 5-byte entry patch overwrites; other threads run them here and continue in the original
         head, hlen = [], 0
@@ -573,13 +599,19 @@ class Translator:
             hlen += len(i.raw)
         if hlen < 5:
             raise Fail('function shorter than the entry patch')
-        tramp = 'L%s_tramp_%06x' % (p, s)
+        tramp = 'L%s_tramp_%06x' % (lp, s)
         o.append('.p2align 4')
         o.append('.globl %s' % fn)
         o.append('%s:' % fn)
-        # the translation assumes the FPU precision of the thread that owns the Direct3D device
-        o.extend(['push eax', 'mov eax, DWORD PTR fs:[0x24]', 'cmp eax, DWORD PTR [_%s_tid]' % p, 'pop eax',
-                  'jne %s' % tramp])
+        # the translation assumes the FPU precision of the thread that owns the Direct3D device (the xr variant is
+        # only called from translated code, which has already checked)
+        if not xr:
+            o.extend(['push eax', 'mov eax, DWORD PTR fs:[0x24]', 'cmp eax, DWORD PTR [_%s_tid]' % p, 'pop eax',
+                      'jne %s' % tramp])
+        live = [(n, i) for n, i in enumerate(ins) if depth[n] is not None]
+        self.fpret_all[s] = (any(i.kind == 'ret' for n, i in live)
+                             and all(depth[n] == 1 for n, i in live if i.kind == 'ret')
+                             and not any(i.kind == 'ijmp' or (i.kind == 'jmp' and not (s <= i.target < e)) for n, i in live))
         cs = [None]      # how a pending compare is held: 'pair' = operands in T1/T2, 'stash' = status image in T2
         nfall = 0
 
@@ -620,14 +652,44 @@ class Translator:
         def movd(j):                # instruction that copies xmm j into another register as a double
             return 'cvtps2pd' if kind[j] == 'f' else 'movapd'
 
+        idx_of = {i.rva: k for k, i in enumerate(ins)}
+        fused_skip = set()          # tests folded into a preceding status word read
+        fused_jump = {}             # their jcc: index -> (outcomes taken, target)
+        self.fused = getattr(self, 'fused', 0)
+
+        def fuse(n, d):
+            """At a status word read right after a compare: a direct branch on the compare when the code only tests
+            ah and jumps. Returns True if emitted."""
+            if os.environ.get('XLAT_NO_FUSE'):
+                return False
+            f = self.fused_status_branch(ins, n, targets, idx_of, s, e)
+            if f is None:
+                return False
+            taken, target, k = f
+            o.append('ucomisd %s, %s' % (T1, T2))
+            fused_skip.add(k)                       # the test
+            fused_jump[k + 1] = (taken, target)     # the jcc: emitted there, after any FPU register moves
+            self.fused += 1
+            return True
+
         for n, i in enumerate(ins):
             d = depth[n]
+            if n in fused_skip:
+                continue
+            if n in fused_jump:
+                taken, target = fused_jump.pop(n)
+                if fast:
+                    all_d(d)        # branch edges carry doubles; the conversions leave the flags alone
+                skip = self.label()
+                for l in self.FUSED_JUMPS[taken]:
+                    o.append(l.format(T='L%s_%06x' % (lp, target), S=skip))
+                continue
             if i.rva in targets:
                 if fast:
                     if d is not None and falls[0]:
                         all_d(d)
                     kind[:] = ['d'] * 8
-                o.append('L%s_%06x:' % (p, i.rva))
+                o.append('L%s_%06x:' % (lp, i.rva))
                 cs[0] = None
             if d is None:
                 continue        # never executed (padding, data)
@@ -788,6 +850,8 @@ class Translator:
                             o.append('orpd %s, XMMWORD PTR [_%s_sw_top+%d]' % (T1, p, 16 * sw_top))
                         o.extend(['lea esp, [esp-4]', 'movd DWORD PTR [esp], %s' % T1, 'mov ah, BYTE PTR [esp]',
                                   'lea esp, [esp+4]'])
+                    elif cs[0] == 'pair' and fuse(n, d):
+                        pass
                     elif cs[0] == 'pair':
                         seq = ['ucomisd %s, %s' % (T1, T2), 'lahf', 'and ah, 0x45']
                         if sw_top:
@@ -944,6 +1008,8 @@ class Translator:
                             o.append('orpd %s, XMMWORD PTR [_%s_sw_top+%d]' % (T1, p, 16 * top))
                         o.extend(['lea esp, [esp-4]', 'movd DWORD PTR [esp], %s' % T1, 'mov ah, BYTE PTR [esp]',
                                   'lea esp, [esp+4]'])
+                    elif cs[0] == 'pair' and fuse(n, d):
+                        pass
                     elif cs[0] == 'pair':
                         seq = ['ucomisd %s, %s' % (T1, T2), 'lahf', 'and ah, 0x45']
                         if top:
@@ -1010,11 +1076,20 @@ class Translator:
             if i.kind == 'switch':
                 jt = self.label()
                 o.append('jmp DWORD PTR [%s*4+%s]' % (i.index, jt))
-                self.jumptables.append((jt, ['L%s_%06x' % (p, t) for t in i.cases]))
+                self.jumptables.append((jt, ['L%s_%06x' % (lp, t) for t in i.cases]))
                 self.tabledeps.append((i.table, 4 * len(i.cases)))
             elif i.kind in ('jmp', 'jcc') and s <= i.target < e:
-                o.append('%s L%s_%06x' % (i.mnem, p, i.target))
+                o.append('%s L%s_%06x' % (i.mnem, lp, i.target))
+            elif i.kind == 'call' and n in fpret and i.target in self.xr_targets and not os.environ.get('XLAT_NO_XR'):
+                # a translated routine that returns its result in xmm0 when called from here: no FPU stack round trip
+                o.append('call _%s_%06x_xr' % (p, i.target))
+                self.xrdeps.add((s, i.target))
+                cs[0] = None
+                if fast:
+                    kind[0] = 'd'
             elif i.kind in ('call', 'jmp'):
+                if i.kind == 'call' and n in fpret:
+                    self.fpcalls.add(i.target)
                 lab = self.label()
                 o.append('.byte 0x%02x' % i.raw[0])
                 o.append('%s: .long 0' % lab)
@@ -1029,8 +1104,18 @@ class Translator:
                 if d == 1:
                     if fast:
                         to_d(0)
-                    o.extend(spill_push('xmm0'))
+                    if not xr:
+                        o.extend(spill_push('xmm0'))
                 o.append(raw)
+            elif i.kind == 'icall' and n in fpret and self.inline_import(i) is not None:
+                # MSVCR71 floor/ceil through the import table: computed in place, the double argument is at [esp].
+                # The installer keeps this routine original unless the slot still holds the runtime's own function.
+                kind_no, mode = self.inline_import(i)
+                o.extend(['movsd xmm0, QWORD PTR [esp]', 'roundsd xmm0, xmm0, %d' % mode])
+                self.inlined.append((struct.unpack_from('<I', i.raw, 2)[0] - img.base, s, kind_no))
+                cs[0] = None
+                if fast:
+                    kind[0] = 'd'
             else:
                 if i.relocs:
                     lab = self.label()
@@ -1044,6 +1129,8 @@ class Translator:
                         o.extend(spill_load('xmm0'))
                         if fast:
                             kind[0] = 'd'
+        if xr:
+            return
         o.append('%s:' % tramp)
         for i in head:
             if i.relocs:
@@ -1150,6 +1237,182 @@ class Translator:
         self.relfix.append((lab, f + hlen))
         self.funcs.append((f, end - f, relocs, 0))
 
+    AX_PARTS = re.compile(r'\b(eax|ax|ah|al)\b')
+    AX_IMPLICIT = {'cdq', 'cwde', 'cbw', 'cwd', 'mul', 'div', 'idiv', 'stos', 'stosb', 'stosw', 'stosd', 'lods',
+                   'lodsb', 'lodsd', 'scas', 'scasb', 'scasd', 'xlat', 'xlatb', 'sahf', 'lahf', 'cmpxchg', 'aaa',
+                   'aas', 'aam', 'aad', 'daa', 'das', 'in', 'out', 'rep', 'repz', 'repnz', 'repe', 'repne', 'enter',
+                   'leave', 'pusha', 'pushad', 'popa', 'popad'}
+
+    def ax_dead(self, ins, n, idx, dirty=('al', 'ah'), budget=48, seen=None):
+        """True if, on every path from instruction n, no instruction reads a byte of ax still holding the status
+        word ('dirty') before it is overwritten. Calls overwrite eax (the return register). A return counts as a
+        read unless al has been written since (a byte-sized return value: the caller looks at al only)."""
+        seen = set() if seen is None else seen
+        dirty = set(dirty)
+        while n < len(ins) and budget > 0:
+            if not dirty:
+                return True
+            if (n, tuple(sorted(dirty))) in seen:
+                return True                 # a loop back to a point already being checked
+            seen.add((n, tuple(sorted(dirty))))
+            budget -= 1
+            i = ins[n]
+            if i.kind == 'x87':
+                if i.x87[0] == 'fnstsw_ax':
+                    return True
+                n += 1
+                continue
+            if i.kind in ('call', 'icall', 'ftol'):
+                return True
+            if i.kind == 'ret':
+                return 'al' not in dirty
+            if i.kind in ('ijmp', 'switch', 'err'):
+                return False
+            if i.kind == 'jmp':
+                if i.target not in idx:
+                    return False
+                n = idx[i.target]
+                continue
+            if i.kind == 'jcc':
+                if i.mnem in ('loop', 'loope', 'loopne', 'jecxz') or i.target not in idx:
+                    return False
+                if not self.ax_dead(ins, idx[i.target], idx, tuple(dirty), budget, seen):
+                    return False
+                n += 1
+                continue
+            if i.mnem in self.AX_IMPLICIT or (i.mnem == 'imul' and ',' not in i.ops):
+                return False
+            if not self.AX_PARTS.search(i.ops):
+                n += 1
+                continue
+            dst, _, src = i.ops.partition(',')
+            dst, src = dst.strip(), src.strip()
+            if self.AX_PARTS.search(src) and not (i.mnem in ('xor', 'sub') and src == dst):
+                parts = set(self.AX_PARTS.findall(src))
+                if 'eax' in parts or 'ax' in parts or parts & dirty:
+                    return False
+            writes_only = i.mnem in ('mov', 'movzx', 'movsx', 'lea', 'pop') or (i.mnem in ('xor', 'sub') and src == dst) \
+                or i.mnem.startswith('set')
+            if dst in ('eax', 'ax') and writes_only:
+                return True
+            if dst in ('al', 'ah') and writes_only:
+                dirty.discard(dst)
+                n += 1
+                continue
+            if self.AX_PARTS.fullmatch(dst):
+                if dst in ('eax', 'ax') or dst in dirty:
+                    return False            # read-modify-write of a byte still holding the status word
+                n += 1
+                continue
+            # ax inside a memory operand (an address register) or anything else: a read
+            return False
+        return False
+
+    def fused_status_branch(self, ins, n, targets, idx, s, e):
+        """For 'fnstsw ax / test ah, M / jcc' at n (FPU register moves allowed before the test) with ax and the
+        flags dead afterwards: the set of compare outcomes ('G', 'L', 'E', 'U') on which the jump is taken, the
+        jump target and the index of the test. None otherwise."""
+        k = n + 1
+        # register moves of the FPU stack may sit between: they become SSE moves, which leave the flags alone
+        while k < len(ins) and ins[k].kind == 'x87' and ins[k].x87[0] in ('fst_r', 'fstp_r', 'fxch') \
+                and ins[k].rva not in targets:
+            k += 1
+        if k + 1 >= len(ins):
+            return None
+        t, j = ins[k], ins[k + 1]
+        if t.kind != 'raw' or t.mnem != 'test' or j.kind != 'jcc' or t.rva in targets or j.rva in targets:
+            return None
+        m = re.match(r'^ah,\s*(0x[0-9a-f]+|\d+)$', t.ops)
+        if not m or not (s <= j.target < e) or j.target not in idx:
+            return None
+        cond = {'je': 'z', 'jz': 'z', 'jne': 'nz', 'jnz': 'nz', 'jp': 'p', 'jpe': 'p', 'jnp': 'np', 'jpo': 'np'}.get(j.mnem)
+        if cond is None:
+            return None
+        if not (self.flags_dead_path(ins, k + 2, idx) and self.flags_dead_path(ins, idx[j.target], idx)):
+            return None
+        if not (self.ax_dead(ins, k + 2, idx) and self.ax_dead(ins, idx[j.target], idx)):
+            return None
+        mask = int(m.group(1), 0)
+        taken = set()
+        for name, bits in (('G', 0x00), ('L', 0x01), ('E', 0x40), ('U', 0x45)):
+            v = bits & mask
+            even = bin(v).count('1') % 2 == 0
+            if {'z': v == 0, 'nz': v != 0, 'p': even, 'np': not even}[cond]:
+                taken.add(name)
+        return frozenset(taken), j.target, k
+
+    # jumps after "ucomisd st0, other" that are taken exactly on the given set of outcomes
+    # (ucomisd: greater ZF=PF=CF=0, less CF=1, equal ZF=1, unordered ZF=PF=CF=1)
+    FUSED_JUMPS = {
+        frozenset(): [], frozenset('GLEU'): ['jmp {T}'],
+        frozenset('G'): ['ja {T}'], frozenset('GE'): ['jae {T}'], frozenset('LU'): ['jb {T}'], frozenset('LEU'): ['jbe {T}'],
+        frozenset('EU'): ['je {T}'], frozenset('GL'): ['jne {T}'], frozenset('U'): ['jp {T}'], frozenset('GLE'): ['jnp {T}'],
+        frozenset('L'): ['jp {S}', 'jb {T}', '{S}:'], frozenset('E'): ['jp {S}', 'je {T}', '{S}:'], frozenset('LE'): ['jp {S}', 'jbe {T}', '{S}:'],
+        frozenset('GU'): ['ja {T}', 'jp {T}'], frozenset('GEU'): ['jae {T}', 'jp {T}'], frozenset('GLU'): ['jne {T}', 'jp {T}'],
+    }
+
+    JCC_READS = {'jo': 'O', 'jno': 'O', 'jb': 'C', 'jc': 'C', 'jnae': 'C', 'jae': 'C', 'jnb': 'C', 'jnc': 'C',
+                 'je': 'Z', 'jz': 'Z', 'jne': 'Z', 'jnz': 'Z', 'jbe': 'CZ', 'jna': 'CZ', 'ja': 'CZ', 'jnbe': 'CZ',
+                 'js': 'S', 'jns': 'S', 'jp': 'P', 'jpe': 'P', 'jnp': 'P', 'jpo': 'P', 'jl': 'SO', 'jnge': 'SO',
+                 'jge': 'SO', 'jnl': 'SO', 'jle': 'ZSO', 'jng': 'ZSO', 'jg': 'ZSO', 'jnle': 'ZSO'}
+
+    def flags_dead_path(self, ins, n, idx, dirty='CZPSAO', budget=48, seen=None):
+        """True if, on every path from n, the flags in 'dirty' are redefined before any instruction reads them.
+        Follows jumps; inc and dec redefine every flag but CF."""
+        seen = set() if seen is None else seen
+        dirty = set(dirty)
+        while n < len(ins) and budget > 0:
+            if not dirty:
+                return True
+            key = (n, tuple(sorted(dirty)))
+            if key in seen:
+                return True
+            seen.add(key)
+            budget -= 1
+            i = ins[n]
+            if i.kind == 'x87':
+                if i.x87[0] in ('comi', 'comip'):
+                    return True
+                n += 1
+                continue
+            if i.mnem in FLAG_DEF:
+                return True
+            if i.mnem in ('inc', 'dec'):
+                dirty &= {'C'}
+                n += 1
+                continue
+            if i.kind == 'jmp':
+                if i.target not in idx:
+                    return False
+                n = idx[i.target]
+                continue
+            if i.kind == 'jcc':
+                if i.mnem not in self.JCC_READS or i.target not in idx:
+                    return False
+                if set(self.JCC_READS[i.mnem]) & dirty:
+                    return False
+                if not self.flags_dead_path(ins, idx[i.target], idx, ''.join(dirty), budget, seen):
+                    return False
+                n += 1
+                continue
+            if i.mnem in FLAG_NEUTRAL:
+                n += 1
+                continue
+            return False
+        return False
+
+    # import functions computed in place: name -> (number in the installer's table, roundsd rounding mode)
+    INLINE_IMPORTS = {'floor': (0, 9), 'ceil': (1, 10)}
+
+    def inline_import(self, i):
+        """For 'call DWORD PTR ds:[slot]' on msvcr71.dll's floor or ceil: (table number, rounding mode)."""
+        if os.environ.get('XLAT_NO_INLINE') or len(i.raw) != 6 or i.raw[:2] != b'\xff\x15':
+            return None
+        imp = self.img.imports.get(struct.unpack_from('<I', i.raw, 2)[0] - self.img.base)
+        if not imp or imp[0] != 'msvcr71.dll':
+            return None
+        return self.INLINE_IMPORTS.get(imp[1])
+
     def flags_dead(self, ins, n):
         while n < len(ins):
             i = ins[n]
@@ -1226,7 +1489,19 @@ class Translator:
         L += ['.globl _%s_deps' % p, '_%s_deps:' % p]
         for s, size, relocs, flags in deps:
             L.append('.long 0x%x, %d, 0, L%s_orig_%06x, L%s_rel_%06x, 0' % (s, size, p, s, p, s))
-        L += ['.long 0, 0, 0, 0, 0, 0',
+        L += ['.long 0, 0, 0, 0, 0, 0']
+        # imports computed in place: import slot, routine, function (0 floor, 1 ceil); the installer leaves the
+        # routine original unless the slot still holds msvcr71.dll's own function
+        L += ['.globl _%s_inlined' % p, '_%s_inlined:' % p]
+        for slot, rva, k in self.inlined:
+            L.append('.long 0x%x, 0x%x, %d' % (slot, rva, k))
+        L += ['.long 0, 0, 0']
+        # direct calls into the xmm0-returning variant of another translated routine: caller, callee. The installer
+        # installs a caller only together with its callees.
+        L += ['.globl _%s_xrdeps' % p, '_%s_xrdeps:' % p]
+        for a, b in sorted(self.xrdeps):
+            L.append('.long 0x%x, 0x%x' % (a, b))
+        L += ['.long 0, 0',
               '.globl _%s_imagebase' % p, '_%s_imagebase: .long 0x%x' % (p, img.base),
               '.data', '.p2align 2', '.globl _%s_tid' % p, '_%s_tid: .long 0' % p,
               '.text', '.att_syntax prefix']
@@ -1302,6 +1577,25 @@ def main():
         else:
             s, e = [int(x, 16) for x in a.split('-')]
             jobs.append((s, e, 0, None))
+    # dry run: which translatable routines return a float on every path and are called by translated code for it;
+    # those get a second entry that returns in xmm0 (translate's xr)
+    if not os.environ.get('XLAT_NO_XR'):
+        t0 = Translator(img, prefix)
+        t0.ftol, t0.exact = set(t.ftol), t.exact
+        ok0, seen0 = set(), set()
+        for s, e, weight, check in jobs:
+            if s in seen0 or s in skip:
+                continue
+            seen0.add(s)
+            try:
+                t0.translate(s, e)
+                size = t0.funcs[-1][1]
+                if not check or (size, code_hash(img, s, size)) == check:
+                    ok0.add(s)
+            except Fail:
+                pass
+        t.xr_targets = {b for b in t0.fpcalls if b in ok0 and t0.fpret_all.get(b)}
+    limits = {s: e for s, e, weight, check in jobs}
     ok = 0
     okw = totw = 0
     reasons = {}
@@ -1315,7 +1609,7 @@ def main():
         if ok >= maxcount:
             continue
         mark = (len(t.out), len(t.absfix), len(t.relfix), len(t.jumptables), len(t.tabledeps),
-                len(t.funcs), len(t.stats), len(t.info))
+                len(t.funcs), len(t.stats), len(t.info), len(t.inlined))
         try:
             t.translate(s, e)
             size = t.funcs[-1][1]
@@ -1328,12 +1622,17 @@ def main():
             print('ok   %06x size %4d  x87 %3d  x87-fallbacks %d  fp-returning calls %d  weight %d' % (st + (weight,)))
         except Fail as f:
             del t.out[mark[0]:], t.absfix[mark[1]:], t.relfix[mark[2]:], t.jumptables[mark[3]:], t.tabledeps[mark[4]:]
-            del t.funcs[mark[5]:], t.stats[mark[6]:], t.info[mark[7]:]
+            del t.funcs[mark[5]:], t.stats[mark[6]:], t.info[mark[7]:], t.inlined[mark[8]:]
             print('SKIP %06x-%06x weight %d: %s' % (s, e, weight, f))
             key = re.sub(r'\b[0-9a-f]{4,8}\b', 'X', str(f))[:70]
             reasons.setdefault(key, [0, 0])
             reasons[key][0] += 1
             reasons[key][1] += weight
+    okset = {d[0] for d in done}
+    if t.xr_targets - okset:
+        raise SystemExit('internal error: direct-call targets not translated: %s' % sorted(t.xr_targets - okset))
+    for b in sorted(t.xr_targets):
+        t.translate(b, limits[b], xr=True)
     if writelist:
         with open(writelist, 'w') as f:
             f.write('# Routines of client.dll to translate: start limit weight size hash (hex; weight = profile samples).\n')
@@ -1358,6 +1657,8 @@ def main():
                     'true' if d['fpret'] else 'false', 'true' if d['framed'] else 'false'))
     print('%d of %d functions translated; sample weight covered %d of %d' % (ok, len(seen), okw, totw))
     if not t.exact:
+        print('compare branches fused: %d; floor/ceil calls computed in place: %d; direct float-returning calls: %d to %d routines'
+              % (getattr(t, 'fused', 0), len(t.inlined), len(t.xrdeps), len(t.xr_targets)))
         print('float-to-double conversions at branches: %d; instructions emitted: %d'
               % (t.edgeconv, sum(1 for l in t.out if not l.endswith(':') and not l.startswith('.'))))
     for k, v in sorted(reasons.items(), key=lambda kv: -kv[1][1])[:25]:
