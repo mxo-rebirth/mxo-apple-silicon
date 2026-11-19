@@ -122,7 +122,7 @@ for s, cbase, sbase, ssize, vbase, vsize in allsamples:
             detail[tid]['game'][(e, nxt, nx)] += 1
     elif sbase <= eip < sbase + ssize:
         n = dsym(eip, sbase)
-        if n.startswith('_MxoX_') or n.startswith('LMxoX') or n.startswith('_Mxo'):
+        if n.lstrip('_').startswith(('MxoX_', 'LMxoX', 'Mxo_')):
             t['translated routines'] += 1
             detail[tid]['xl'][n] += 1
         else:

@@ -322,6 +322,7 @@ class Translator:
         self.jumptables = [] # (label, [case labels]) of translated switches
         self.tabledeps = []  # (rva, size) of original switch tables the translations were made from
         self.info = []
+        self.edgeconv = 0     # float-to-double conversions placed at branches and branch targets (fast mode)
 
     def label(self):
         self.uid += 1
@@ -595,28 +596,58 @@ class Translator:
         def spill_push(src):        # xmm -> real FPU stack, esp restored afterwards
             return ['lea esp, [esp-8]', 'movsd QWORD PTR [esp], %s' % src, 'fld QWORD PTR [esp]', 'lea esp, [esp+8]']
 
+        # Fast mode keeps every result of a rounded operation as a float, and float loads stay floats, so
+        # operations between two floats are single SSE instructions: with the 24-bit precision Direct3D
+        # sets, rounding the double result to float equals the float result, and fast mode already confines
+        # values to the float range. kind[j] says how xmm j holds its stack value: 'f' = float in the low
+        # lane, 'd' = double in the low lane. Values from integers, doubles and constants other than 0 and
+        # 1 stay doubles. At every branch and branch target all values are doubles.
+        fast = not self.exact
+        kind = ['d'] * 8
+        falls = [True]          # the previous reachable instruction can fall through to the next one
+
+        def to_d(j):
+            if kind[j] == 'f':
+                o.append('cvtps2pd xmm%d, xmm%d' % (j, j))
+                kind[j] = 'd'
+
+        def all_d(d):
+            for j in range(d):
+                if kind[j] == 'f':
+                    self.edgeconv += 1
+                to_d(j)
+
+        def movd(j):                # instruction that copies xmm j into another register as a double
+            return 'cvtps2pd' if kind[j] == 'f' else 'movapd'
+
         for n, i in enumerate(ins):
             d = depth[n]
             if i.rva in targets:
+                if fast:
+                    if d is not None and falls[0]:
+                        all_d(d)
+                    kind[:] = ['d'] * 8
                 o.append('L%s_%06x:' % (p, i.rva))
                 cs[0] = None
             if d is None:
                 continue        # never executed (padding, data)
+            falls[0] = not (i.kind in ('jmp', 'ret', 'ijmp', 'switch'))
 
-            def compare(a, bload, i=i, n=n):
-                """st0 (in a) against the value that bload puts into T2."""
+            def compare(a, bload, af=False, i=i, n=n):
+                """st0 (in a; a float if af) against the value that bload puts into T2 as a double."""
+                mova = 'cvtps2pd' if af else 'movapd'
                 if self.compare_use(ins, n, targets) != 'stash':
-                    memfix(['movapd %s, %s' % (T1, a)] + bload)
+                    memfix(['%s %s, %s' % (mova, T1, a)] + bload)
                     cs[0] = 'pair'
                     return
                 # FP code runs between this compare and the status word read: work the condition bits out now,
                 # without touching flags or eax, and keep them in T2 (the only register that code leaves alone)
                 memfix(bload + [
-                    'movapd %s, %s' % (T1, a), 'cmpltsd %s, %s' % (T1, T2), 'andpd %s, XMMWORD PTR [_%s_sw_c0]' % (T1, p),
+                    '%s %s, %s' % (mova, T1, a), 'cmpltsd %s, %s' % (T1, T2), 'andpd %s, XMMWORD PTR [_%s_sw_c0]' % (T1, p),
                     'lea esp, [esp-16]', 'movsd QWORD PTR [esp], %s' % T1,
-                    'movapd %s, %s' % (T1, a), 'cmpeqsd %s, %s' % (T1, T2), 'andpd %s, XMMWORD PTR [_%s_sw_c3]' % (T1, p),
+                    '%s %s, %s' % (mova, T1, a), 'cmpeqsd %s, %s' % (T1, T2), 'andpd %s, XMMWORD PTR [_%s_sw_c3]' % (T1, p),
                     'movsd QWORD PTR [esp+8], %s' % T1,
-                    'movapd %s, %s' % (T1, a), 'cmpunordsd %s, %s' % (T2, T1), 'andpd %s, XMMWORD PTR [_%s_sw_all]' % (T2, p),
+                    '%s %s, %s' % (mova, T1, a), 'cmpunordsd %s, %s' % (T2, T1), 'andpd %s, XMMWORD PTR [_%s_sw_all]' % (T2, p),
                     'movsd %s, QWORD PTR [esp]' % T1, 'orpd %s, %s' % (T2, T1),
                     'movsd %s, QWORD PTR [esp+8]' % T1, 'orpd %s, %s' % (T2, T1), 'lea esp, [esp+16]'])
                 cs[0] = 'stash'
@@ -629,6 +660,195 @@ class Translator:
                         lab = self.label()
                         o.append(lab + ':')
                         self.absfix.append(lab + ' - 4')
+
+            if i.kind == 'x87' and fast:
+                name, arg = i.x87
+                m = i.mem
+                if i.relocs and len(i.relocs) != 1:
+                    raise Fail('x87 instruction with %d relocations at %x' % (len(i.relocs), i.rva))
+                top = d - 1                     # xmm index of st0
+                x = reg(d, 0)
+                fop = {'add': 'addps', 'sub': 'subps', 'mul': 'mulps', 'div': 'divss'}
+                if name == 'fnop':
+                    continue
+                if name == 'fld_m':
+                    dst = 'xmm%d' % d
+                    if arg == 32:
+                        memfix(['movss %s, %s' % (dst, m)])
+                        kind[d] = 'f'
+                    else:
+                        memfix(self.load(dst, 'm', arg, m))
+                        kind[d] = 'd'
+                elif name == 'fild_m':
+                    dst = 'xmm%d' % d
+                    if arg == 32:
+                        memfix(self.load(dst, 'mi', 32, m))
+                    else:
+                        memfix(['fild %s' % m] + spill_load(dst))
+                        nfall += 1
+                    kind[d] = 'd'
+                elif name == 'fld_r':
+                    o.append('movaps xmm%d, %s' % (d, reg(d, arg)))
+                    kind[d] = kind[top - arg]
+                elif name == 'fld1':
+                    o.append('movss xmm%d, DWORD PTR [_%s_onef]' % (d, p))
+                    kind[d] = 'f'
+                elif name == 'fldz':
+                    o.append('xorps xmm%d, xmm%d' % (d, d))
+                    kind[d] = 'f'
+                elif name in ('fldpi', 'fldl2e', 'fldln2', 'fldlg2', 'fldl2t'):
+                    o.append('movsd xmm%d, QWORD PTR [_%s_%s]' % (d, p, name[3:]))
+                    kind[d] = 'd'
+                elif name in ('fst_m', 'fstp_m'):
+                    if arg == 32:
+                        if kind[top] == 'f':
+                            memfix(['movss %s, %s' % (m, x)])
+                        else:
+                            memfix(['cvtpd2ps %s, %s' % (T1, x), 'movss %s, %s' % (m, T1)])
+                            t1_used()
+                    elif kind[top] == 'f':
+                        memfix(['cvtps2pd %s, %s' % (T1, x), 'movsd %s, %s' % (m, T1)])
+                        t1_used()
+                    else:
+                        memfix(['movsd %s, %s' % (m, x)])
+                elif name in ('fist_m', 'fistp_m'):
+                    if arg == 32:
+                        cvt = 'cvtps2dq' if kind[top] == 'f' else 'cvtpd2dq'
+                        memfix(['%s %s, %s' % (cvt, T1, x), 'movd %s, %s' % (m, T1)])
+                        t1_used()
+                    else:
+                        if name == 'fist_m':
+                            _bad(i)
+                        to_d(top)
+                        memfix(spill_push(x) + ['fistp %s' % m])
+                        nfall += 1
+                elif name in ('fst_r', 'fstp_r'):
+                    if arg:
+                        o.append('movaps %s, %s' % (reg(d, arg), x))
+                        kind[top - arg] = kind[top]
+                elif name == 'fxch':
+                    if arg:
+                        o.extend(['movaps %s, %s' % (T1, x), 'movaps %s, %s' % (x, reg(d, arg)),
+                                  'movaps %s, %s' % (reg(d, arg), T1)])
+                        kind[top], kind[top - arg] = kind[top - arg], kind[top]
+                        t1_used()
+                elif name == 'fchs':
+                    if kind[top] == 'f':
+                        o.append('xorps %s, XMMWORD PTR [_%s_signmaskf]' % (x, p))
+                    else:
+                        o.append('xorpd %s, XMMWORD PTR [_%s_signmask]' % (x, p))
+                elif name == 'fabs':
+                    if kind[top] == 'f':
+                        o.append('andps %s, XMMWORD PTR [_%s_absmaskf]' % (x, p))
+                    else:
+                        o.append('andpd %s, XMMWORD PTR [_%s_absmask]' % (x, p))
+                elif name == 'fsqrt':
+                    if kind[top] == 'f':
+                        o.append('sqrtss %s, %s' % (x, x))
+                    else:
+                        o.extend(['sqrtsd %s, %s' % (x, x), 'cvtpd2ps %s, %s' % (x, x)])
+                    kind[top] = 'f'
+                elif name in ('fsin', 'fcos', 'frndint'):
+                    to_d(top)
+                    o.extend(['lea esp, [esp-8]', 'movsd QWORD PTR [esp], %s' % x, 'fld QWORD PTR [esp]', name,
+                              'fstp QWORD PTR [esp]', 'movsd %s, QWORD PTR [esp]' % x, 'lea esp, [esp+8]'])
+                    nfall += 1
+                elif name in ('fpatan', 'fyl2x'):
+                    to_d(top - 1)
+                    to_d(top)
+                    a, b = reg(d, 1), x
+                    o.extend(['lea esp, [esp-16]', 'movsd QWORD PTR [esp+8], %s' % a, 'movsd QWORD PTR [esp], %s' % b,
+                              'fld QWORD PTR [esp+8]', 'fld QWORD PTR [esp]', name, 'fstp QWORD PTR [esp]',
+                              'movsd %s, QWORD PTR [esp]' % a, 'lea esp, [esp+16]'])
+                    nfall += 1
+                elif name in ('fptan', 'fsincos'):
+                    to_d(top)
+                    new = 'xmm%d' % d
+                    o.extend(['lea esp, [esp-16]', 'movsd QWORD PTR [esp], %s' % x, 'fld QWORD PTR [esp]', name,
+                              'fstp QWORD PTR [esp]', 'fstp QWORD PTR [esp+8]', 'movsd %s, QWORD PTR [esp]' % new,
+                              'movsd %s, QWORD PTR [esp+8]' % x, 'lea esp, [esp+16]'])
+                    kind[d] = 'd'
+                    nfall += 1
+                elif name == 'ftst':
+                    compare(x, ['xorpd %s, %s' % (T2, T2)], kind[top] == 'f')
+                elif name == 'compp':
+                    compare(x, ['%s %s, %s' % (movd(top - 1), T2, reg(d, 1))], kind[top] == 'f')
+                elif name in ('comi', 'comip'):
+                    if kind[top] == 'f' and kind[top - arg] == 'f':
+                        o.append('ucomiss %s, %s' % (x, reg(d, arg)))
+                    else:
+                        to_d(top)
+                        to_d(top - arg)
+                        o.append('ucomisd %s, %s' % (x, reg(d, arg)))
+                elif name == 'fnstsw_ax':
+                    sw_top = (8 - d) & 7
+                    if cs[0] == 'stash':
+                        o.append('movapd %s, %s' % (T1, T2))
+                        if sw_top:
+                            o.append('orpd %s, XMMWORD PTR [_%s_sw_top+%d]' % (T1, p, 16 * sw_top))
+                        o.extend(['lea esp, [esp-4]', 'movd DWORD PTR [esp], %s' % T1, 'mov ah, BYTE PTR [esp]',
+                                  'lea esp, [esp+4]'])
+                    elif cs[0] == 'pair':
+                        seq = ['ucomisd %s, %s' % (T1, T2), 'lahf', 'and ah, 0x45']
+                        if sw_top:
+                            seq.append('or ah, 0x%02x' % (sw_top << 3))
+                        if self.flags_dead(ins, n + 1):
+                            o.extend(seq)
+                        else:
+                            o.extend(['pushfd'] + seq + ['popfd'])
+                    else:
+                        raise Fail('status word read without a preceding compare at %x' % i.rva)
+                else:
+                    kd, op = name.split('_', 1)
+                    if kd in ('m', 'mi'):
+                        if kd == 'mi' and arg != 32:
+                            _bad(i)
+                        if op in ('com', 'comp'):
+                            compare(x, self.load(T2, kd, arg, m), kind[top] == 'f')
+                        elif kd == 'm' and arg == 32 and kind[top] == 'f':
+                            memfix(['movss %s, %s' % (T1, m)])
+                            if op.endswith('r'):
+                                o.extend(['%s %s, %s' % (fop[op[:-1]], T1, x), 'movaps %s, %s' % (x, T1)])
+                            else:
+                                o.append('%s %s, %s' % (fop[op], x, T1))
+                            t1_used()
+                        else:
+                            to_d(top)
+                            memfix(self.load(T1, kd, arg, m))
+                            if op.endswith('r'):
+                                o.extend(self.arith(op[:-1], T1, x) + ['movapd %s, %s' % (x, T1)])
+                            else:
+                                o.extend(self.arith(op, x, T1))
+                            o.append('cvtpd2ps %s, %s' % (x, x))
+                            kind[top] = 'f'
+                            t1_used()
+                    elif kd == 'r0' and op in ('com', 'comp'):
+                        compare(x, ['%s %s, %s' % (movd(top - arg), T2, reg(d, arg))], kind[top] == 'f')
+                    else:
+                        # r0: st0 = st0 op sti      ri/rp: sti = sti op st0      ...r: operands swapped
+                        if kd == 'r0':
+                            jd, js = top, top - arg
+                        else:
+                            jd, js = top - arg, top
+                        dst, src = 'xmm%d' % jd, 'xmm%d' % js
+                        if kind[jd] == 'f' and kind[js] == 'f':
+                            if op.endswith('r'):
+                                o.extend(['movaps %s, %s' % (T1, src), '%s %s, %s' % (fop[op[:-1]], T1, dst),
+                                          'movaps %s, %s' % (dst, T1)])
+                            else:
+                                o.append('%s %s, %s' % (fop[op], dst, src))
+                        else:
+                            to_d(jd)
+                            to_d(js)
+                            if op.endswith('r'):
+                                o.extend(['movapd %s, %s' % (T1, src)] + self.arith(op[:-1], T1, dst)
+                                         + ['movapd %s, %s' % (dst, T1)])
+                            else:
+                                o.extend(self.arith(op, dst, src))
+                            o.append('cvtpd2ps %s, %s' % (dst, dst))
+                        kind[jd] = 'f'
+                        t1_used()
+                continue
 
             if i.kind == 'x87':
                 name, arg = i.x87
@@ -773,8 +993,11 @@ class Translator:
                 # edx:eax = (int64)st0, truncated. Inline for the 32-bit range, the real helper otherwise.
                 x = reg(d, 0)
                 slow, done, lab = self.label(), self.label(), self.label()
-                o.extend(['cvttsd2si eax, %s' % x, 'cmp eax, 0x80000000', 'je %s' % slow, 'cdq', 'jmp %s' % done,
-                          slow + ':'])
+                f = fast and kind[d - 1] == 'f'
+                o.extend(['%s eax, %s' % ('cvttss2si' if f else 'cvttsd2si', x), 'cmp eax, 0x80000000', 'je %s' % slow,
+                          'cdq', 'jmp %s' % done, slow + ':'])
+                if f:
+                    o.append('cvtps2pd %s, %s' % (x, x))    # the value is popped here, so its kind no longer matters
                 o.extend(spill_push(x))
                 o.append('.byte 0xe8')
                 o.append('%s: .long 0' % lab)
@@ -782,6 +1005,8 @@ class Translator:
                 o.append(done + ':')
                 cs[0] = None
                 continue
+            if fast and (i.kind == 'switch' or (i.kind in ('jmp', 'jcc') and s <= i.target < e)):
+                all_d(d)
             if i.kind == 'switch':
                 jt = self.label()
                 o.append('jmp DWORD PTR [%s*4+%s]' % (i.index, jt))
@@ -798,8 +1023,12 @@ class Translator:
                     cs[0] = None
                     if n in fpret:
                         o.extend(spill_load('xmm0'))
+                        if fast:
+                            kind[0] = 'd'
             elif i.kind == 'ret':
                 if d == 1:
+                    if fast:
+                        to_d(0)
                     o.extend(spill_push('xmm0'))
                 o.append(raw)
             else:
@@ -813,6 +1042,8 @@ class Translator:
                     cs[0] = None
                     if n in fpret:
                         o.extend(spill_load('xmm0'))
+                        if fast:
+                            kind[0] = 'd'
         o.append('%s:' % tramp)
         for i in head:
             if i.relocs:
@@ -949,7 +1180,10 @@ class Translator:
               '_%s_big: .quad 0x7830000000000000, 0x7830000000000000' % p,      # 2^900
               '_%s_nbig: .quad 0xf830000000000000, 0xf830000000000000' % p,     # -2^900
               '_%s_k: .quad 0x41c8000000000000, 0x41c8000000000000' % p,        # 1.5 * 2^29
+              '_%s_signmaskf: .long 0x80000000, 0, 0, 0' % p,
+              '_%s_absmaskf: .long 0x7fffffff, 0xffffffff, 0xffffffff, 0xffffffff' % p,
               '_%s_one: .quad 0x3ff0000000000000' % p,
+              '_%s_onef: .long 0x3f800000' % p,
               '_%s_pi: .quad 0x400921fb54442d18' % p,
               '_%s_l2e: .quad 0x3ff71547652b82fe' % p,
               '_%s_ln2: .quad 0x3fe62e42fefa39ef' % p,
@@ -1123,6 +1357,9 @@ def main():
             f.write('  { 0x%x, %d, "%s", %s, %s, %s },\n' % (d['rva'], d['nargs'], d['kinds'], 'true' if d['this'] else 'false',
                     'true' if d['fpret'] else 'false', 'true' if d['framed'] else 'false'))
     print('%d of %d functions translated; sample weight covered %d of %d' % (ok, len(seen), okw, totw))
+    if not t.exact:
+        print('float-to-double conversions at branches: %d; instructions emitted: %d'
+              % (t.edgeconv, sum(1 for l in t.out if not l.endswith(':') and not l.startswith('.'))))
     for k, v in sorted(reasons.items(), key=lambda kv: -kv[1][1])[:25]:
         print('  skipped %4d functions, weight %6d: %s' % (v[0], v[1], k))
 

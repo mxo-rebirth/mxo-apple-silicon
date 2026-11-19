@@ -42,6 +42,11 @@ wine --bottle MatrixOnline -- 'C:\somewhere\xtest.exe' 100 game        # game ro
 
 The synthetic part must report zero mismatches.
 
+With `MXO_PLAIN=1` the game part fills the scratch area with ordinary float values only (no integers,
+pointers, huge or tiny numbers). The translation keeps values in the float range, so on such input it
+must match the original exactly: any routine listed as different is a translation fault. Fewer routines
+run to completion that way, because many need pointers to work on.
+
 The game part calls each routine blind: random floats, a few small integers and pointers into a
 scratch area, with no idea what the routine expects. Many routines crash on that (in both
 versions, which is caught and not counted) and some block; each batch runs in its own process

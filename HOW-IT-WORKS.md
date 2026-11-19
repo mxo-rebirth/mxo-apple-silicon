@@ -224,6 +224,14 @@ Direct3D 9. No game file is modified on disk.
   also reproduces the extended range bit for bit, at 13 instructions per rounding instead of
   2. The game has been played with the faster form without visible problems; if something
   looks wrong, build with `--exact-range` first.
+- **Single precision where possible.** In the faster form, every value loaded from a `float`
+  and every result of two such values stays a `float` in the low lane of its SSE register and is
+  computed with single-precision instructions (`addps`, `mulps`, `divss`, `sqrtss`, `ucomiss`,
+  `cvttss2si`). A double is made only when a value meets a double operand, and at branches,
+  labels and returns, where every register holds a double again. Because a 24-bit result
+  rounded once more to 24 bits does not change, this gives the same bits as computing in double
+  and rounding: 527 routines now need 55,500 instructions instead of 78,600, and conversions
+  between float and double fell from 27,600 to 6,100.
 - Integer instructions are copied unchanged. Translated code never changes the CPU flags,
   because x87 code does not either and the surrounding integer code relies on that.
 - Compares followed by `fnstsw ax` produce the same condition bits in `AH`.
@@ -264,6 +272,10 @@ jump overwrote and then continue in the original routine.
   differences. The game routines, run again with it: the only new differences involve
   denormal numbers, which only random input produces.
 - **The float-to-integer replacement**: 400,000 values over the whole range, identical.
+- **Single precision**: 3.3 million synthetic cases identical to the double form; the game's
+  routines, run against the double form, matched except `0x3B9A10`, which was taken out of the
+  list. With ordinary values only (`MXO_PLAIN=1`), the one remaining difference is `0x2FE670`,
+  where an intermediate product exceeds the `float` range (the trade-off described above).
 - **In the game**: short sessions on Rejacked and Revived, in fullscreen at 3440×1440.
 - **The generated shaders** (288 in total, both games) pass the Vulkan validator `spirv-val`.
 
@@ -320,6 +332,14 @@ The GPU was busy 93–100% of the time in both, so at this resolution the graphi
 the limit. What is left are single slow frames: mostly frames with 4,000–6,000 draw calls,
 plus a few hundred-millisecond pauses while signing in or loading, and one 0.6-second pause in
 the world with no graphics activity at all (so it comes from the game itself).
+
+With single precision in 527 routines (v26), same settings, about 3,000–4,500 draw calls per
+frame:
+
+| | In the world |
+|---|---|
+| Rejacked | 42–74 fps, 62 on average |
+| Revived | 42–65 fps, 58 on average |
 
 Settings that changed the numbers:
 

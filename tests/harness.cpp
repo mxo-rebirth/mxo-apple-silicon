@@ -167,7 +167,7 @@ int main(int argc, char** argv) {
   int bad = 0;
   setvbuf(stdout, nullptr, _IONBF, 0);
 #ifdef WITH_GAME
-  if (argc > 4 && !strcmp(argv[2], "child")) { g_plain = argc > 5; fpu_setcw(0x007f); return runGameChild(iterations, atoi(argv[3]), atoi(argv[4])); }
+  if (argc > 4 && !strcmp(argv[2], "child")) { g_plain = argc > 5 || (getenv("MXO_PLAIN") && *getenv("MXO_PLAIN")); fpu_setcw(0x007f); return runGameChild(iterations, atoi(argv[3]), atoi(argv[4])); }
 #endif
   if (argc > 2) goto game;   // second argument: skip the synthetic part
   fpu_setcw(0x007f);   // 24-bit precision, round to nearest, exceptions masked: what Direct3D 9 sets
