@@ -1,6 +1,6 @@
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_device.cpp b/src/d3d9/d3d9_device.cpp
---- a/src/d3d9/d3d9_device.cpp	2026-11-18 00:00:00
-+++ b/src/d3d9/d3d9_device.cpp	2026-11-18 00:00:00
+--- a/src/d3d9/d3d9_device.cpp	2026-11-19 00:00:00
++++ b/src/d3d9/d3d9_device.cpp	2026-11-19 00:00:00
 @@ -1,5 +1,8 @@
 +#include "d3d9_mxo_fastmath.h"
  #include "d3d9_device.h"
@@ -476,8 +476,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
        SetDepthStencilSurface(nullptr);
  
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_device.h b/src/d3d9/d3d9_device.h
---- a/src/d3d9/d3d9_device.h	2026-11-18 00:00:00
-+++ b/src/d3d9/d3d9_device.h	2026-11-18 00:00:00
+--- a/src/d3d9/d3d9_device.h	2026-11-19 00:00:00
++++ b/src/d3d9/d3d9_device.h	2026-11-19 00:00:00
 @@ -1132,6 +1132,8 @@
  
      void UpdateSamplerDepthModeSpecConstant(uint32_t value);
@@ -525,8 +525,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      uint32_t                        m_vsBoolConstsCount  = 0;
      uint32_t                        m_psFloatConstsCount = 0;
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_fixed_function.cpp b/src/d3d9/d3d9_fixed_function.cpp
---- a/src/d3d9/d3d9_fixed_function.cpp	2026-07-15 12:37:28
-+++ b/src/d3d9/d3d9_fixed_function.cpp	2026-11-18 22:02:40
+--- a/src/d3d9/d3d9_fixed_function.cpp	2026-11-19 00:00:00
++++ b/src/d3d9/d3d9_fixed_function.cpp	2026-11-19 00:00:00
 @@ -203,7 +203,7 @@
      uint32_t floatType = spvModule.defFloatType(32);
      uint32_t vec3Type  = spvModule.defVectorType(floatType, 3);
@@ -563,8 +563,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      return new DxvkShader(info, m_module.compile());
    }
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_include.h b/src/d3d9/d3d9_include.h
---- a/src/d3d9/d3d9_include.h	2026-11-18 00:00:00
-+++ b/src/d3d9/d3d9_include.h	2026-11-18 00:00:00
+--- a/src/d3d9/d3d9_include.h	2026-11-19 00:00:00
++++ b/src/d3d9/d3d9_include.h	2026-11-19 00:00:00
 @@ -79,10 +79,7 @@
  
  // MinGW headers are broken. Who'dve guessed?
@@ -578,8 +578,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
  #ifndef __WINE__
  extern "C" WINUSERAPI WINBOOL WINAPI SetProcessDPIAware(VOID);
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_initializer.cpp b/src/d3d9/d3d9_initializer.cpp
---- a/src/d3d9/d3d9_initializer.cpp	2026-07-15 12:37:28
-+++ b/src/d3d9/d3d9_initializer.cpp	2026-11-18 22:02:40
+--- a/src/d3d9/d3d9_initializer.cpp	2026-11-19 00:00:00
++++ b/src/d3d9/d3d9_initializer.cpp	2026-11-19 00:00:00
 @@ -1,6 +1,7 @@
  #include <cstring>
  
@@ -599,8 +599,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
        Slice.mapPtr(0), 0,
        Slice.length());
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_mxo_fastmath.cpp b/src/d3d9/d3d9_mxo_fastmath.cpp
---- a/src/d3d9/d3d9_mxo_fastmath.cpp	1970-01-01 01:00:00
-+++ b/src/d3d9/d3d9_mxo_fastmath.cpp	2026-11-18 22:02:40
+--- a/src/d3d9/d3d9_mxo_fastmath.cpp	2026-11-19 00:00:00
++++ b/src/d3d9/d3d9_mxo_fastmath.cpp	2026-11-19 00:00:00
 @@ -0,0 +1,430 @@
 +#include <windows.h>
 +#include <tlhelp32.h>
@@ -1033,8 +1033,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +}
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_mxo_fastmath.h b/src/d3d9/d3d9_mxo_fastmath.h
---- a/src/d3d9/d3d9_mxo_fastmath.h	1970-01-01 01:00:00
-+++ b/src/d3d9/d3d9_mxo_fastmath.h	2026-11-18 22:02:40
+--- a/src/d3d9/d3d9_mxo_fastmath.h	2026-11-19 00:00:00
++++ b/src/d3d9/d3d9_mxo_fastmath.h	2026-11-19 00:00:00
 @@ -0,0 +1,32 @@
 +#pragma once
 +
@@ -1069,8 +1069,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +}
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_mxo_fastmath_asm.inc b/src/d3d9/d3d9_mxo_fastmath_asm.inc
---- a/src/d3d9/d3d9_mxo_fastmath_asm.inc	1970-01-01 01:00:00
-+++ b/src/d3d9/d3d9_mxo_fastmath_asm.inc	2026-11-18 22:02:40
+--- a/src/d3d9/d3d9_mxo_fastmath_asm.inc	2026-11-19 00:00:00
++++ b/src/d3d9/d3d9_mxo_fastmath_asm.inc	2026-11-19 00:00:00
 @@ -0,0 +1,81 @@
 +// SSE replacements for two x87 math routines of The Matrix Online client (see d3d9_mxo_fastmath.cpp).
 +//
@@ -1154,8 +1154,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +extern "C" void MxoMatMulSSE();
 +extern "C" void MxoQuatToMatSSE();
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_mxo_x87.h b/src/d3d9/d3d9_mxo_x87.h
---- a/src/d3d9/d3d9_mxo_x87.h	2026-11-18 00:00:00
-+++ b/src/d3d9/d3d9_mxo_x87.h	2026-11-18 00:00:00
+--- a/src/d3d9/d3d9_mxo_x87.h	2026-11-19 00:00:00
++++ b/src/d3d9/d3d9_mxo_x87.h	2026-11-19 00:00:00
 @@ -0,0 +1,71 @@
 +// Runtime side of the x87 -> SSE2 translations generated by xlat.py.
 +#pragma once
@@ -1229,8 +1229,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +  return true;
 +}
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_options.cpp b/src/d3d9/d3d9_options.cpp
---- a/src/d3d9/d3d9_options.cpp	2026-07-15 12:37:28
-+++ b/src/d3d9/d3d9_options.cpp	2026-11-18 22:02:40
+--- a/src/d3d9/d3d9_options.cpp	2026-11-19 00:00:00
++++ b/src/d3d9/d3d9_options.cpp	2026-11-19 00:00:00
 @@ -1,5 +1,7 @@
  #include "d3d9_options.h"
  
@@ -1249,8 +1249,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
  
      // If we are not Nvidia, enable general hazards.
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_options.h b/src/d3d9/d3d9_options.h
---- a/src/d3d9/d3d9_options.h	2026-07-15 12:37:28
-+++ b/src/d3d9/d3d9_options.h	2026-11-18 22:02:40
+--- a/src/d3d9/d3d9_options.h	2026-11-19 00:00:00
++++ b/src/d3d9/d3d9_options.h	2026-11-19 00:00:00
 @@ -158,6 +158,10 @@
      /// Disable direct buffer mapping
      bool allowDirectBufferMapping;
@@ -1263,8 +1263,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      bool seamlessCubes;
    };
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_shader.cpp b/src/d3d9/d3d9_shader.cpp
---- a/src/d3d9/d3d9_shader.cpp	2026-11-18 00:00:00
-+++ b/src/d3d9/d3d9_shader.cpp	2026-11-18 00:00:00
+--- a/src/d3d9/d3d9_shader.cpp	2026-11-19 00:00:00
++++ b/src/d3d9/d3d9_shader.cpp	2026-11-19 00:00:00
 @@ -16,6 +16,11 @@
        const void*                 pShaderBytecode,
        const DxsoAnalysisInfo&     AnalysisInfo,
@@ -1337,8 +1337,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
  
  
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_shader.h b/src/d3d9/d3d9_shader.h
---- a/src/d3d9/d3d9_shader.h	2026-11-18 00:00:00
-+++ b/src/d3d9/d3d9_shader.h	2026-11-18 00:00:00
+--- a/src/d3d9/d3d9_shader.h	2026-11-19 00:00:00
++++ b/src/d3d9/d3d9_shader.h	2026-11-19 00:00:00
 @@ -1,5 +1,7 @@
  #pragma once
  
@@ -1384,8 +1384,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
    };
  
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_state.h b/src/d3d9/d3d9_state.h
---- a/src/d3d9/d3d9_state.h	2026-07-15 12:37:28
-+++ b/src/d3d9/d3d9_state.h	2026-11-18 22:02:40
+--- a/src/d3d9/d3d9_state.h	2026-11-19 00:00:00
++++ b/src/d3d9/d3d9_state.h	2026-11-19 00:00:00
 @@ -44,6 +44,9 @@
      float pointScaleA  = 1.0f;
      float pointScaleB  = 0.0f;
@@ -1397,8 +1397,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
  
    enum class D3D9RenderStateItem {
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_swapchain.cpp b/src/d3d9/d3d9_swapchain.cpp
---- a/src/d3d9/d3d9_swapchain.cpp	2026-11-18 00:00:00
-+++ b/src/d3d9/d3d9_swapchain.cpp	2026-11-18 00:00:00
+--- a/src/d3d9/d3d9_swapchain.cpp	2026-11-19 00:00:00
++++ b/src/d3d9/d3d9_swapchain.cpp	2026-11-19 00:00:00
 @@ -1,4 +1,15 @@
 +#include <cstdio>
 +#include <windows.h>
@@ -1415,7 +1415,29 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
  #include "d3d9_surface.h"
  #include "d3d9_monitor.h"
  
-@@ -184,6 +195,536 @@
+@@ -156,6 +167,21 @@
+         }
+       }
+     }
++    else if (message == WM_DISPLAYCHANGE && !IsIconic(window)) {
++      // MxO: under Wine the display mode can change after the window was already sized to the
++      // monitor (the switch completes asynchronously). Size the window to the new mode, otherwise
++      // a 3440x1440 window on an 800x600 display shows only its top left corner.
++      D3DDEVICE_CREATION_PARAMETERS create_parms;
++      windowData.swapchain->GetDevice()->GetCreationParameters(&create_parms);
++
++      if (!(create_parms.BehaviorFlags & D3DCREATE_NOWINDOWCHANGES)) {
++        D3D9WindowMessageFilter filter(window);
++        RECT rect;
++        GetMonitorRect(GetDefaultMonitor(), &rect);
++        SetWindowPos(window, HWND_TOPMOST, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top,
++                     SWP_NOACTIVATE);
++      }
++    }
+     else if (message == WM_SIZE)
+     {
+       D3DDEVICE_CREATION_PARAMETERS create_parms;
+@@ -184,6 +210,536 @@
    };
  
  
@@ -1952,7 +1974,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
    D3D9SwapChainEx::D3D9SwapChainEx(
            D3D9DeviceEx*          pDevice,
            D3DPRESENT_PARAMETERS* pPresentParams,
-@@ -255,6 +796,11 @@
+@@ -255,6 +811,11 @@
            HWND     hDestWindowOverride,
      const RGNDATA* pDirtyRegion,
            DWORD    dwFlags) {
@@ -1964,7 +1986,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      D3D9DeviceLock lock = m_parent->LockDevice();
  
      uint32_t presentInterval = m_presentParams.PresentationInterval;
-@@ -852,11 +1398,27 @@
+@@ -852,11 +1413,84 @@
          {  int32_t(m_dstRect.left),                    int32_t(m_dstRect.top)                    },
          { uint32_t(m_dstRect.right - m_dstRect.left), uint32_t(m_dstRect.bottom - m_dstRect.top) } };
  
@@ -1984,6 +2006,63 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +        dstRect.extent.height = uint32_t(float(dstRect.extent.height) * sy + 0.5f);
 +      }
 +
++      // Log every size involved in placing the picture whenever one of them changes, so that a
++      // picture in the wrong place can be explained from the log alone. The cheap sizes are compared
++      // every frame; the window and monitor rectangles every 60 frames; the client size and display
++      // mode are read only when something changed. A fullscreen window that no longer covers exactly
++      // the monitor (the display mode changed after the window was sized) is sized to it again.
++      const int32_t cheap[] = {
++        int32_t(m_presentParams.BackBufferWidth), int32_t(m_presentParams.BackBufferHeight),
++        int32_t(m_dstRect.right - m_dstRect.left), int32_t(m_dstRect.bottom - m_dstRect.top),
++        int32_t(info.imageExtent.width), int32_t(info.imageExtent.height) };
++      static int32_t s_cheap[std::size(cheap)] = { };
++      const bool cheapChanged = std::memcmp(cheap, s_cheap, sizeof(cheap)) != 0;
++
++      if (cheapChanged || m_frameId % 60 == 0) {
++        std::memcpy(s_cheap, cheap, sizeof(cheap));
++        RECT win = { };
++        ::GetWindowRect(m_window, &win);
++
++        MONITORINFO mi = { };
++        mi.cbSize = sizeof(mi);
++        ::GetMonitorInfoW(GetDefaultMonitor(), &mi);
++
++        static RECT s_win = { }, s_mon = { };
++        const bool placeChanged = cheapChanged
++          || std::memcmp(&win, &s_win, sizeof(RECT)) || std::memcmp(&mi.rcMonitor, &s_mon, sizeof(RECT));
++        s_win = win;
++        s_mon = mi.rcMonitor;
++
++        if (placeChanged) {
++          RECT client = { };
++          ::GetClientRect(m_window, &client);
++
++          DEVMODEW dm = { };
++          dm.dmSize = sizeof(dm);
++          ::EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &dm);
++
++          Logger::info(str::format("MxO picture: back buffer ", m_presentParams.BackBufferWidth, "x", m_presentParams.BackBufferHeight,
++            m_presentParams.Windowed ? " windowed" : " fullscreen",
++            ", source ", srcRect.offset.x, ",", srcRect.offset.y, " ", srcRect.extent.width, "x", srcRect.extent.height,
++            ", present region ", m_dstRect.left, ",", m_dstRect.top, "-", m_dstRect.right, ",", m_dstRect.bottom,
++            ", surface ", info.imageExtent.width, "x", info.imageExtent.height,
++            ", drawn at ", dstRect.offset.x, ",", dstRect.offset.y, " ", dstRect.extent.width, "x", dstRect.extent.height,
++            "; window ", win.left, ",", win.top, "-", win.right, ",", win.bottom, " client ", client.right, "x", client.bottom,
++            ", monitor ", mi.rcMonitor.left, ",", mi.rcMonitor.top, "-", mi.rcMonitor.right, ",", mi.rcMonitor.bottom,
++            ", display mode ", dm.dmPelsWidth, "x", dm.dmPelsHeight));
++        }
++
++        if (!m_presentParams.Windowed && !::IsIconic(m_window)
++         && std::memcmp(&win, &mi.rcMonitor, sizeof(RECT)) != 0) {
++          // Asynchronous: the window may belong to a thread that is waiting for this one.
++          ::SetWindowPos(m_window, HWND_TOPMOST, mi.rcMonitor.left, mi.rcMonitor.top,
++            mi.rcMonitor.right - mi.rcMonitor.left, mi.rcMonitor.bottom - mi.rcMonitor.top,
++            SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
++          Logger::info(str::format("MxO: fullscreen window sized to the monitor, ",
++            mi.rcMonitor.right - mi.rcMonitor.left, "x", mi.rcMonitor.bottom - mi.rcMonitor.top));
++        }
++      }
++
        m_blitter->presentImage(m_context.ptr(),
          m_imageViews.at(imageIndex), dstRect,
          swapImageView, srcRect);
@@ -1994,8 +2073,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
  
        if (i + 1 >= SyncInterval)
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/meson.build b/src/d3d9/meson.build
---- a/src/d3d9/meson.build	2026-11-18 00:00:00
-+++ b/src/d3d9/meson.build	2026-11-18 00:00:00
+--- a/src/d3d9/meson.build	2026-11-19 00:00:00
++++ b/src/d3d9/meson.build	2026-11-19 00:00:00
 @@ -11,6 +11,7 @@
  
  d3d9_src = [
@@ -2005,8 +2084,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
    'd3d9_adapter.cpp',
    'd3d9_monitor.cpp',
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/dxso/dxso_compiler.cpp b/src/dxso/dxso_compiler.cpp
---- a/src/dxso/dxso_compiler.cpp	2026-11-18 00:00:00
-+++ b/src/dxso/dxso_compiler.cpp	2026-11-18 00:00:00
+--- a/src/dxso/dxso_compiler.cpp	2026-11-19 00:00:00
++++ b/src/dxso/dxso_compiler.cpp	2026-11-19 00:00:00
 @@ -253,7 +253,7 @@
      info.inputMask = m_inputMask;
      info.outputMask = m_outputMask;
@@ -2147,8 +2226,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
  
      m_rsBlock = SetupRenderStateBlock(m_module, count);
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/dxso/dxso_options.cpp b/src/dxso/dxso_options.cpp
---- a/src/dxso/dxso_options.cpp	2026-07-15 12:37:28
-+++ b/src/dxso/dxso_options.cpp	2026-11-18 22:02:40
+--- a/src/dxso/dxso_options.cpp	2026-11-19 00:00:00
++++ b/src/dxso/dxso_options.cpp	2026-11-19 00:00:00
 @@ -45,6 +45,9 @@
      alphaTestWiggleRoom = options.alphaTestWiggleRoom;
  
@@ -2161,8 +2240,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
  }
 \ No newline at end of file
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/dxso/dxso_options.h b/src/dxso/dxso_options.h
---- a/src/dxso/dxso_options.h	2026-07-15 12:37:28
-+++ b/src/dxso/dxso_options.h	2026-11-18 22:02:40
+--- a/src/dxso/dxso_options.h	2026-11-19 00:00:00
++++ b/src/dxso/dxso_options.h	2026-11-19 00:00:00
 @@ -57,6 +57,19 @@
  
      /// Whether or not we can rely on robustness2 to handle oob constant access
@@ -2185,8 +2264,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
  }
 \ No newline at end of file
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/dxvk/dxvk_buffer.cpp b/src/dxvk/dxvk_buffer.cpp
---- a/src/dxvk/dxvk_buffer.cpp	2026-11-18 00:00:00
-+++ b/src/dxvk/dxvk_buffer.cpp	2026-11-18 00:00:00
+--- a/src/dxvk/dxvk_buffer.cpp	2026-11-19 00:00:00
++++ b/src/dxvk/dxvk_buffer.cpp	2026-11-19 00:00:00
 @@ -1,6 +1,7 @@
  #include "dxvk_barrier.h"
  #include "dxvk_buffer.h"
@@ -2211,8 +2290,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      return handle;
    }
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/dxvk/dxvk_context.cpp b/src/dxvk/dxvk_context.cpp
---- a/src/dxvk/dxvk_context.cpp	2026-07-15 12:37:28
-+++ b/src/dxvk/dxvk_context.cpp	2026-11-18 22:02:40
+--- a/src/dxvk/dxvk_context.cpp	2026-11-19 00:00:00
++++ b/src/dxvk/dxvk_context.cpp	2026-11-19 00:00:00
 @@ -3,7 +3,11 @@
  #include <utility>
  
@@ -2347,8 +2426,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
  
        this->pauseTransformFeedback();
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/dxvk/dxvk_context.h b/src/dxvk/dxvk_context.h
---- a/src/dxvk/dxvk_context.h	2026-07-15 12:37:28
-+++ b/src/dxvk/dxvk_context.h	2026-11-18 22:02:40
+--- a/src/dxvk/dxvk_context.h	2026-11-19 00:00:00
++++ b/src/dxvk/dxvk_context.h	2026-11-19 00:00:00
 @@ -1067,6 +1067,8 @@
      DxvkBarrierSet          m_initBarriers;
      DxvkBarrierSet          m_execAcquires;
@@ -2359,8 +2438,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      DxvkBarrierControlFlags m_barrierControl;
      
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/dxvk/dxvk_debug_counters.h b/src/dxvk/dxvk_debug_counters.h
---- a/src/dxvk/dxvk_debug_counters.h	1970-01-01 01:00:00
-+++ b/src/dxvk/dxvk_debug_counters.h	2026-11-18 22:02:40
+--- a/src/dxvk/dxvk_debug_counters.h	2026-11-19 00:00:00
++++ b/src/dxvk/dxvk_debug_counters.h	2026-11-19 00:00:00
 @@ -0,0 +1,70 @@
 +#pragma once
 +
@@ -2433,8 +2512,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +}
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/dxvk/dxvk_graphics.cpp b/src/dxvk/dxvk_graphics.cpp
---- a/src/dxvk/dxvk_graphics.cpp	2026-11-18 00:00:00
-+++ b/src/dxvk/dxvk_graphics.cpp	2026-11-18 00:00:00
+--- a/src/dxvk/dxvk_graphics.cpp	2026-11-19 00:00:00
++++ b/src/dxvk/dxvk_graphics.cpp	2026-11-19 00:00:00
 @@ -2,6 +2,7 @@
  
  #include "dxvk_device.h"
@@ -2453,8 +2532,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
          this->writePipelineStateToCache(state, renderPass->format());
        }
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/dxvk/dxvk_memory.cpp b/src/dxvk/dxvk_memory.cpp
---- a/src/dxvk/dxvk_memory.cpp	2026-11-18 00:00:00
-+++ b/src/dxvk/dxvk_memory.cpp	2026-11-18 00:00:00
+--- a/src/dxvk/dxvk_memory.cpp	2026-11-19 00:00:00
++++ b/src/dxvk/dxvk_memory.cpp	2026-11-19 00:00:00
 @@ -2,6 +2,7 @@
  
  #include "dxvk_device.h"
@@ -2677,8 +2756,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      // Even if we have enough memory to spare, only keep
      // one chunk of each type around to save memory.
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/dxvk/dxvk_memory.h b/src/dxvk/dxvk_memory.h
---- a/src/dxvk/dxvk_memory.h	2026-11-18 00:00:00
-+++ b/src/dxvk/dxvk_memory.h	2026-11-18 00:00:00
+--- a/src/dxvk/dxvk_memory.h	2026-11-19 00:00:00
++++ b/src/dxvk/dxvk_memory.h	2026-11-19 00:00:00
 @@ -257,6 +257,8 @@
       */
      bool isCompatible(const Rc<DxvkMemoryChunk>& other) const;
@@ -2713,8 +2792,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
    };
    
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/dxvk/dxvk_resource.h b/src/dxvk/dxvk_resource.h
---- a/src/dxvk/dxvk_resource.h	2026-11-18 00:00:00
-+++ b/src/dxvk/dxvk_resource.h	2026-11-18 00:00:00
+--- a/src/dxvk/dxvk_resource.h	2026-11-19 00:00:00
++++ b/src/dxvk/dxvk_resource.h	2026-11-19 00:00:00
 @@ -41,6 +41,29 @@
          result |= m_useCountR.load() != 0;
        return result;
@@ -2755,8 +2834,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
    };
    
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/util/util_env.cpp b/src/util/util_env.cpp
---- a/src/util/util_env.cpp	2026-07-15 12:37:28
-+++ b/src/util/util_env.cpp	2026-11-18 22:02:40
+--- a/src/util/util_env.cpp	2026-11-19 00:00:00
++++ b/src/util/util_env.cpp	2026-11-19 00:00:00
 @@ -8,6 +8,9 @@
  #include <limits.h>
  #endif
@@ -2794,8 +2873,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
  
      static auto proc = reinterpret_cast<SetThreadDescriptionProc>(
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/util/util_env.h b/src/util/util_env.h
---- a/src/util/util_env.h	2026-07-15 12:37:28
-+++ b/src/util/util_env.h	2026-11-18 22:02:40
+--- a/src/util/util_env.h	2026-11-19 00:00:00
++++ b/src/util/util_env.h	2026-11-19 00:00:00
 @@ -1,5 +1,7 @@
  #pragma once
  
