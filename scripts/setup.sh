@@ -8,7 +8,7 @@
 #
 # Steps:
 #   bottle     what the game needs to start: Microsoft's shader compiler, DirectMusic and DirectSound
-#   build      build d3d9.dll from this bottle's own client.dll (needs the tools in BUILD.md)
+#   build      build d3d9.dll from this bottle's own client.dll (needs the tools in docs/building.md)
 #   install    install that d3d9.dll for the game executables, with the bottle settings it needs
 #   music      Revived only: undo the starter's "music = off" guard
 #   uninstall  the game executables go back to Wine's Direct3D 9 (DirectMusic stays; it is needed)
@@ -74,7 +74,7 @@ pick_bottle() {
   for d in "$BOTTLES"/*/; do
     [ -f "$d/cxbottle.conf" ] && list+=("$(basename "$d")")
   done
-  [ ${#list[@]} -gt 0 ] || die "no CrossOver bottles found; create one first (CROSSOVER.md, step 1)"
+  [ ${#list[@]} -gt 0 ] || die "no CrossOver bottles found; create one first (docs/crossover.md, step 1)"
   if [ ${#list[@]} = 1 ] || [ $YES = 1 ]; then
     BOTTLE=${list[0]}
   else

@@ -9,7 +9,7 @@ with a shortened draw distance to 55–89 fps at full draw distance.
 ## What you need
 
 - An Apple Silicon Mac with [CrossOver](https://www.codeweavers.com/crossover) (tested with 26.3).
-- A CrossOver bottle with the game installed: [CROSSOVER.md](CROSSOVER.md), step 1.
+- A CrossOver bottle with the game installed: [docs/crossover.md](docs/crossover.md), step 1.
 - The build tools, once: `brew install mingw-w64 meson ninja glslang`
 
 ## Set up
@@ -30,8 +30,8 @@ It asks which bottle to use and then goes through four steps, asking before each
 | Install | Installs it for every MxO game it found in the bottle, and lets the games share their pipeline caches so they stutter less. Everything else in the bottle keeps CrossOver's normal graphics. |
 | Music | Revived only: switches music back on if Revived's starter turned it off. |
 
-The first run downloads about 300 MB: Microsoft's DirectX packages and CodeWeavers' CrossOver
-source code.
+The first run downloads about 420 MB (Microsoft's DirectX packages, CodeWeavers' CrossOver
+source code and a compiler) and uses about 1.1 GB of disk space in the `build` folder.
 
 Then start the game from its launcher as usual.
 
@@ -64,11 +64,23 @@ a `.setup-backup` suffix.
 
 ## More
 
+For players:
+
 | | |
 |---|---|
-| [HOW-IT-WORKS.md](HOW-IT-WORKS.md) | why the game is slow on Apple Silicon, what was fixed, measurements, open problems |
-| [CROSSOVER.md](CROSSOVER.md) | setting up the bottle and the game by hand |
-| [BUILD.md](BUILD.md) | building and installing by hand, all switches, diagnostics |
+| [docs/crossover.md](docs/crossover.md) | setting up the bottle and the game by hand |
+| [docs/building.md](docs/building.md) | building and installing by hand, switches, going back |
+
+For developers and the game teams:
+
+| | |
+|---|---|
+| [docs/how-it-works.md](docs/how-it-works.md) | why the game is slow on Apple Silicon and what the fix is |
+| [docs/client-notes.md](docs/client-notes.md) | reverse-engineering notes on the client |
+| [docs/translator.md](docs/translator.md) | the x87 to SSE2 translator |
+| [docs/graphics.md](docs/graphics.md) | the graphics problems and their fixes |
+| [docs/measurements.md](docs/measurements.md) | method, results, open problems |
+| [docs/development.md](docs/development.md) | repository layout, diagnostics, profiling |
 | [tests/README.md](tests/README.md) | the tests that compare the translated math with the original |
 
-Licence: zlib, like DXVK, which this is built on; see `LICENSE` and HOW-IT-WORKS.md.
+Licence: zlib, like DXVK, which this is built on; see `LICENSE`.

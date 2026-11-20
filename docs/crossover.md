@@ -2,11 +2,11 @@
 
 This is how the test machine was set up: an Apple Silicon Mac, CrossOver 26, the MxO Rejacked
 launcher and the 7.6005 client. It covers getting the game to start at all. Making it fast is
-the next step, in [BUILD.md](BUILD.md).
+the next step, in [building.md](building.md).
 
 Out of the box the game does not work in CrossOver: you get an error box about pixel shaders,
 then a black screen, then a "Music System Failed to Initialize" error. Each has a specific fix,
-listed below. After step 1, `scripts/setup.sh` can do the rest for you (see BUILD.md).
+listed below. After step 1, `scripts/setup.sh` can do the rest for you ([building.md](building.md)).
 
 Paths used here:
 
@@ -132,8 +132,8 @@ Start "Rejacked Launcher" from the bottle in CrossOver, set the game folder to `
 its settings, sign in and press PLAY.
 
 At this point the game works but is slow: 8–18 fps in the loading area and around 15 fps in the
-world, with the game quietly cutting the draw distance. [BUILD.md](BUILD.md) describes how to
-build and install the DLL that fixes that, and [HOW-IT-WORKS.md](HOW-IT-WORKS.md) explains why it is slow.
+world, with the game quietly cutting the draw distance. [building.md](building.md) describes how to
+build and install the DLL that fixes that, and [how-it-works.md](how-it-works.md) explains why it is slow.
 
 ## Things that still go wrong
 
@@ -142,7 +142,7 @@ build and install the DLL that fixes that, and [HOW-IT-WORKS.md](HOW-IT-WORKS.md
 | The "Trace program: running" text in the character-creation intro disappears after a moment | Nothing; it is cosmetic and unsolved. |
 | "Jack out" seems to do nothing | The game counts down a few seconds while you stand still. Otherwise close the window. |
 | The game will not start after an external monitor was unplugged or switched to another input while the launcher was open | CrossOver has lost track of the displays. Quit the launcher and shut the bottle down (`"$WINE" --bottle MatrixOnline -- wineboot.exe --end-session --shutdown`), then start again. |
-| Draw distance changes by itself | That is the game's render throttle; see HOW-IT-WORKS.md. |
+| Draw distance changes by itself | That is the game's render throttle; see [client-notes.md](client-notes.md#the-render-throttle). |
 | The game crashes after about a minute in the world | It ran out of address space. Add `"WINE_LARGE_ADDRESS_AWARE" = "1"` under `[EnvironmentVariables]` in `$BOTTLE/cxbottle.conf`. |
 | Low frame rate at high resolution with Rejacked | Untick "Use the new glow shader for 'Screen Filter: Over-Bright' (BETA)" in the Rejacked launcher; it halves the frame rate at 3440×1440. |
 
@@ -171,7 +171,7 @@ and `MusicSystemEnable = 1` in Revived's own `options.cfg`.
 Without the line above, Wine's DirectSound is used and Revived shows the "Music System Failed
 to Initialize" box. Do not try Wine's own DirectMusic instead: Revived froze at start with it.
 
-The DLL from this repository works with Revived; see BUILD.md.
+The DLL from this repository works with Revived; see [building.md](building.md).
 
 ## A note on safety
 

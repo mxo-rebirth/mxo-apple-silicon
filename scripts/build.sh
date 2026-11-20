@@ -72,6 +72,9 @@ rm -rf "$WORK/unpack"
 
 echo "== applying the patch"
 (cd "$WORK/dxvk" && patch -p1 -s < "$ROOT/dxvk/dxvk-d3d9-mxo.patch")
+# The tests include translator/mxo_x87_apply.h, the DLL its copy in the patch. They must be the same file.
+cmp -s "$ROOT/translator/mxo_x87_apply.h" "$WORK/dxvk/src/d3d9/d3d9_mxo_x87.h" \
+  || { echo "translator/mxo_x87_apply.h differs from src/d3d9/d3d9_mxo_x87.h in the patch" >&2; exit 1; }
 
 echo "== mapping the functions of client.dll (about a minute)"
 python3 -I "$ROOT/translator/discover.py" "$CLIENT" "$WORK/client.map"
@@ -107,4 +110,4 @@ else
   i686-w64-mingw32-strip -o "$WORK/d3d9.dll" "$WORK/dxvk/build.w32/src/d3d9/d3d9.dll"
 fi
 echo "== done: $WORK/d3d9.dll"
-echo "   install steps: BUILD.md"
+echo "   install steps: docs/building.md"

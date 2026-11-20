@@ -5,13 +5,13 @@ install a custom `d3d9.dll` into one CrossOver bottle and enable it for the game
 only. No game file is changed.
 
 This assumes the game already starts in CrossOver. If it does not yet, see
-[CROSSOVER.md](CROSSOVER.md) first.
+[crossover.md](crossover.md) first.
 
 ## Quick setup
 
 `scripts/setup.sh` does everything below, in order, asking before each step:
 
-1. **bottle**: what the game needs to start (CROSSOVER.md, section 2): the game's own shader
+1. **bottle**: what the game needs to start ([crossover.md](crossover.md), section 2): the game's own shader
    compiler, Microsoft's DirectMusic and DirectSound from the February 2010 DirectX package and
    the sound bank from the April 2006 one (both downloaded from Microsoft via the Internet
    Archive and checked against the checksums `winetricks` uses), and the large address space;
@@ -57,7 +57,7 @@ GCC as before.
 
 `client.dll` is the one in your game folder. The script
 
-1. downloads CodeWeavers' source for CrossOver 26.3.0 once (about 200 MB; pass a tarball you
+1. downloads CodeWeavers' source for CrossOver 26.3.0 once (about 140 MB; pass a tarball you
    already have as the second argument, or set `CROSSOVER_VERSION`),
 2. applies `dxvk/dxvk-d3d9-mxo.patch` to the DXVK in it,
 3. maps the functions of your `client.dll` and translates the routines named in
@@ -65,13 +65,13 @@ GCC as before.
 4. builds `build/d3d9.dll`.
 
 It takes five to ten minutes. `build/translate.log` says what was translated and what was
-skipped and why. With the `client.dll` this was developed on, all 470 routines translate.
+skipped and why. With the `client.dll` this was developed on, all 537 routines translate.
 One DLL serves both games: Revived's `client.dll` has the same code at the same addresses for
 all but one of them, and each routine is checked again when the game starts.
 
-The translator rounds with two instructions by default (see HOW-IT-WORKS.md). For the slower form
-that also matches the FPU outside the range of a `float`, add `--exact-range` to the `xlat.py`
-line in `scripts/build.sh`.
+The translator rounds with two instructions by default ([translator.md](translator.md#rounding)).
+For the slower form that also matches the FPU outside the range of a `float`, add `--exact-range`
+to the `xlat.py` line in `scripts/build.sh`.
 
 ## Install into a bottle
 
@@ -124,11 +124,12 @@ called `MatrixOnline`. Close the game and its launcher first.
 After the next start, `drive_c/Games/dxvk/matrix_d3d9.log` should contain a line like
 
 ```
-MxO fast math: 466 of 469 translated x87 routines installed (466 match this client.dll)
+MxO fast math: 535 of 538 translated x87 routines installed (535 match this client.dll)
 ```
 
-Routines that are not installed are listed with their address; that happens when something
-else has already modified them in memory.
+Routines that are not installed are listed with their address and the reason, usually that
+something else has already changed them in memory
+([client-notes.md](client-notes.md#routines-something-else-has-changed)).
 
 A CrossOver update can overwrite `syswow64/d3d9.dll`. The game then falls back to Wine's
 Direct3D 9 on its own; copy the DLL back to restore.
@@ -140,7 +141,8 @@ Environment variables, in `cxbottle.conf` under `[EnvironmentVariables]`:
 | Variable | Effect |
 |---|---|
 | `DXVK_MXO_X87=0` | keep the graphics fixes, do not install the translated routines. First thing to try if the game misbehaves in the world. |
-| `DXVK_MXO_FASTMATH=0` | no math replacement at all, including the two hand-written routines |
+| `DXVK_MXO_FASTMATH=0` | no math replacement at all, including the hand-written routines |
+| `DXVK_MXO_SQRT=0` | the game's `sqrt` import stays Wine's |
 | `DXVK_LOCK_RENAME_COPY=0` | buffer locks wait for the GPU again |
 | `DXVK_HOIST_UPLOADS=0` | texture and buffer uploads interrupt the render pass again |
 | `DXVK_PREFAULT_MAPPED_MEMORY=0` | no pre-touching of mapped memory |
@@ -154,14 +156,8 @@ Environment variables, in `cxbottle.conf` under `[EnvironmentVariables]`:
 | `DXVK_KEEP_EMPTY_CHUNKS_MB=N` | keep up to N MB of emptied CPU-visible memory per memory type for reuse (default 256; 0 = DXVK's behaviour) |
 | `DXVK_WARM_MEMORY_MB=N` | a background thread prepares N MB of already-touched memory per memory type (default 0 = off; it was never needed once freed memory is kept) |
 
-Files in `C:\Games\dxvk` (`drive_c/Games/dxvk`), read when the game starts:
-
-| File | Effect |
-|---|---|
-| `x87max.txt` | a number N: install only the first N translated routines (0 = none). For finding a misbehaving routine by halving. |
-| `debug.flag` | empty file. Every 5 s the log gets the frame rate, the render throttle, DXVK's per-frame statistics, the game's calls per frame, memory activity and which DXVK routine interrupted render passes how often. Every frame slower than 40 ms gets a `SPIKE` line saying what happened in it (pipelines built, waits, uploads, new memory). While a frame is more than 200 ms late, a `STALL` line records where the game's main thread is, as `module+offset` call chains. Creating `shot.req` saves the next frame to `shot.bmp`; creating `drawlog.req` writes one `DRAW` line per draw call of the next frame (shaders, textures, render target, blending). |
-| `sample.flag` | empty file. A sampling profiler records where every thread is and who called it, and appends it to `samples.bin` every 10 s. It pauses every thread every 5 ms, which makes memory writes in the game much slower than they really are; do not judge frame rates with it. |
-| `sample-light.flag` | empty file. The same profiler, but only for the game's main thread and DXVK's own threads, every 20 ms. Distorts far less. |
+`x87max.txt` and the diagnostic files (`debug.flag`, the profiler) are described in
+[development.md](development.md#diagnostics).
 
 The `DXVK_HUD` overlay starts hidden; **Ctrl+Shift+F** in the game shows or hides it.
 
@@ -184,35 +180,6 @@ Stock graphics for the game, one command:
 delete the lines added to `cxbottle.conf`, and delete the `d3d9` value under
 `HKCU\Software\Wine\DllOverrides`.
 
-## Finding more routines to translate
+## Tests and development
 
-1. Create `C:\Games\dxvk\sample.flag`, play for a few minutes, quit.
-2. Build once so that `build/client.map` and the unstripped DLL exist, then:
-
-   ```sh
-   python3 translator/profile2.py "$BOTTLE/drive_c/Games/dxvk/samples.bin" build/client.map \
-       build/dxvk/build.w32/src/d3d9/d3d9.dll \
-       /Applications/CrossOver.app/Contents/SharedSupport/CrossOver/lib/wine/i386-windows
-   ```
-
-   It prints, per thread, where the time went (game code, translated routines, graphics
-   layer, Vulkan, waits and their callers) and writes `samples.bin.hot`: the game routines
-   containing x87 code, by sample count.
-3. Add those routines to the list and let the translator fill in length and hash:
-
-   ```sh
-   python3 translator/xlat.py pe client.dll MxoX /tmp/out.inc --map build/client.map \
-       --write-list translator/routines.list @translator/routines.list @samples.bin.hot
-   ```
-
-   Routines the translator refuses are left out of the written list. Keep the list cumulative:
-   a routine that is already replaced no longer shows up in a profile of `client.dll`.
-
-For a different build of `client.dll`, the addresses in the list will not match and nothing is
-translated (the hashes guard against translating the wrong code). Start from a profile, and
-find the float-to-integer helper for the `ftol` line: it is the routine all float-to-int casts
-call with the value on the FPU stack.
-
-## Tests
-
-See [`tests/README.md`](tests/README.md).
+[tests/README.md](../tests/README.md) and [development.md](development.md).

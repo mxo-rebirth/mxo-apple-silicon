@@ -46,7 +46,7 @@ the game part writes `fuzz.txt` in the current folder.
 The synthetic part runs three passes. With ordinary inputs and on the other-thread path it must report
 zero mismatches. The pass with huge, tiny, zero, infinite and NaN inputs reports zero only for a
 translation made with `--exact-range`; the default, faster form differs there where a value leaves the
-float range (see HOW-IT-WORKS.md), and its counts must not change from one translator version to the
+float range ([docs/translator.md](../docs/translator.md#rounding)), and its counts must not change from one translator version to the
 next. A translated caller reaches the translation of its callee directly, so such a difference in a
 callee shows in its callers too.
 
