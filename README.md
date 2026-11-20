@@ -83,4 +83,9 @@ For developers and the game teams:
 | [docs/development.md](docs/development.md) | repository layout, diagnostics, profiling |
 | [tests/README.md](tests/README.md) | the tests that compare the translated math with the original |
 
-Licence: zlib, like DXVK, which this is built on; see `LICENSE`.
+## Licence
+
+zlib: [LICENSE](LICENSE). The patch in `dxvk/` is a modified part of
+[DXVK](https://github.com/doitsujin/dxvk), which has the same licence:
+[dxvk/LICENSE](dxvk/LICENSE). The Matrix Online belongs to its owners; this repository contains
+none of it.

@@ -100,7 +100,8 @@ Which graphics fixes apply outside CodeWeavers' DXVK on macOS is in
 
 ## Licence and credits
 
-DXVK is by Philip Rebohle, Joshua Ashton and contributors, under the zlib/libpng licence; the
-patch here is a derivative of it and carries the same licence, as does the rest of this
-repository (see `LICENSE`). The DXVK source it applies to is the one CodeWeavers publish for
-CrossOver. The Matrix Online is the property of its owners; this repository contains none of it.
+DXVK is by Philip Rebohle, Joshua Ashton and contributors, under the zlib/libpng licence
+([dxvk/LICENSE](../dxvk/LICENSE)). The patch here is a derivative of it and carries the same
+licence, as does the rest of this repository ([LICENSE](../LICENSE)). The DXVK source it applies
+to is the one CodeWeavers publish for CrossOver. The Matrix Online is the property of its
+owners; this repository contains none of it.
