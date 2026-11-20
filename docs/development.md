@@ -88,6 +88,7 @@ with the value on the FPU stack.
 
 `bench/d3d9bench.rs` is a single-file Direct3D 9 test program (no standard library, 32-bit
 Windows). It was used to reproduce the buffer-lock and texture-upload stalls outside the game.
+It needs Rust 1.82 or newer.
 
 ```sh
 rustup target add i686-pc-windows-msvc
@@ -97,8 +98,36 @@ rustc --edition 2021 --target i686-pc-windows-msvc -C opt-level=2 -C panic=abort
 ```
 
 ```
-d3d9bench.exe <vp 0=hw 1=sw 2=mixed> <width> <height> <draws/frame> <seconds> <tex-fmt 0=A8R8G8B8 1=DXT1>
+d3d9bench.exe [vp] [width] [height] [draws] [seconds] [texture] [flags] [mode]
 ```
+
+| Argument | Meaning | Default |
+|---|---|---|
+| `vp` | vertex processing: 0 hardware, 1 software, 2 mixed | 0 |
+| `width`, `height` | back buffer size | 1280, 720 |
+| `draws` | world draw calls per frame | 2000 |
+| `seconds` | length of the timed run | 4 |
+| `texture` | 0 A8R8G8B8, 1 DXT1 | 0 |
+| `flags` | a sum of: 1 topmost window, 2 UI quads through a dynamic vertex buffer, 4 no UI quads, 8 fullscreen | 0 |
+| `mode` | what each world draw does | 0 |
+
+| Mode | Each world draw |
+|---|---|
+| 0 | fixed function, the mesh from a static vertex buffer |
+| 1 | vertex shader, the transform passed as shader constants |
+| 2 | a quad rewritten through `Lock` without flags on a dynamic buffer |
+| 3 | a quad appended to a dynamic buffer: `NOOVERWRITE`, `DISCARD` when it wraps |
+| 4 | a quad rewritten through `Lock` with `DISCARD` on a dynamic buffer |
+| 5 | a quad rewritten through `Lock` on a managed buffer |
+| 6 | a managed texture locked and written before the draw |
+| 7 | a quad through `DrawIndexedPrimitiveUP` |
+| 8, 9 | as 1, with a `ps_1_1` or a `ps_2_0` pixel shader |
+| 10 | texture streaming: every 8 draws a managed texture with 3 mip levels is filled |
+| 11 | as 10, and the draws use the filled texture |
+
+It prints a `RESULT` line with the frame rate and the time per part of a frame, and a `PIXELS`
+line that says whether the world and the UI reached the back buffer. When a call that the chosen
+mode depends on fails, it stops with exit code 6.
 
 Run it in a bottle with the DLL override set for `d3d9bench.exe`.
 

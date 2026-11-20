@@ -1,33 +1,65 @@
-// Minimal Direct3D 9 fixed-function test / draw-call benchmark (no_std, 32-bit Windows).
-// usage: d3d9bench.exe <vp 0=hw 1=sw 2=mixed> <width> <height> <draws/frame> <seconds> <tex-fmt 0=A8R8G8B8 1=DXT1>
+// d3d9bench: a single-file Direct3D 9 draw-call benchmark and smoke test (no standard library, 32-bit Windows).
+//
+// usage: d3d9bench.exe [vp] [width] [height] [draws] [seconds] [texture] [flags] [mode]
+//
+//   vp       vertex processing: 0 hardware (default), 1 software, 2 mixed
+//   width    back buffer width, default 1280
+//   height   back buffer height, default 720
+//   draws    world draw calls per frame, default 2000
+//   seconds  length of the timed run, default 4
+//   texture  0 A8R8G8B8 (default), 1 DXT1
+//   flags    a sum of: 1 topmost window, brought to the front
+//                      2 UI quads through a dynamic vertex buffer instead of DrawPrimitiveUP
+//                      4 no UI quads
+//                      8 fullscreen
+//   mode     what each world draw does, default 0:
+//             0 fixed function, the mesh from a static vertex buffer
+//             1 vertex shader, the transform passed as shader constants
+//             2 a quad rewritten through Lock without flags on a dynamic buffer
+//             3 a quad appended to a dynamic buffer: NOOVERWRITE, DISCARD when it wraps
+//             4 a quad rewritten through Lock with DISCARD on a dynamic buffer
+//             5 a quad rewritten through Lock on a managed buffer
+//             6 a managed texture locked and written before the draw
+//             7 a quad through DrawIndexedPrimitiveUP
+//             8 as 1, with a ps_1_1 pixel shader
+//             9 as 1, with a ps_2_0 pixel shader
+//            10 texture streaming: every 8 draws a managed texture with 3 mip levels is filled
+//            11 as 10, and the draws use the filled texture
+//
+// The arguments are numbers in this order. A RESULT line gives the timings and a PIXELS line a check of
+// the back buffer, which expects it to be at least 830 x 100.
+//
+// Exit code: 0, or 1 bad arguments, 2 no window, 3 no Direct3D, 4 no device, 6 a call the run depends on
+// failed, 99 a panic. 5 is left out: it is what Wine reports when a program crashes.
 #![no_std]
 #![no_main]
-#![allow(non_snake_case, dead_code, static_mut_refs)]
 
 use core::ffi::c_void;
-use core::mem::transmute;
+use core::mem::{size_of, transmute, zeroed};
 use core::ptr::{null, null_mut, read_volatile, write_volatile};
 
 type P = *mut c_void;
 
+// ---- what the C runtime would provide ------------------------------------------------------------------
+
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo) -> ! {
-    unsafe { ExitProcess(99) }
+    unsafe { ExitProcess(EXIT_PANIC) }
 }
 
-#[no_mangle]
+// The MSVC target refers to these wherever floats are used and unwind tables are emitted.
+#[unsafe(no_mangle)]
 pub static _fltused: i32 = 0;
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn __CxxFrameHandler3() {}
 
-// 64-bit division helpers the MSVC target expects from the C runtime (only reached from panic formatting)
+// 64-bit division, which the MSVC target leaves to the C runtime. The timing sums use it.
 fn udivmod(mut n: u64, d: u64) -> (u64, u64) {
     if d == 0 {
         return (0, 0);
     }
     let (mut q, mut r) = (0u64, 0u64);
-    let mut i = 0;
-    while i < 64 {
+    for _ in 0..64 {
         r = (r << 1) | (n >> 63);
         n <<= 1;
         q <<= 1;
@@ -35,7 +67,6 @@ fn udivmod(mut n: u64, d: u64) -> (u64, u64) {
             r -= d;
             q |= 1;
         }
-        i += 1;
     }
     (q, r)
 }
@@ -56,48 +87,44 @@ core::arch::global_asm!(
     r = sym aullrem,
 );
 
-#[no_mangle]
+// Byte loops through volatile accesses, so the compiler cannot turn a loop back into a call to the function
+// it is in. The copies in the timed loop (modes 2 to 5 and the UI vertex buffer) run through memcpy as well.
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn memset(d: *mut u8, c: i32, n: usize) -> *mut u8 {
-    let mut i = 0;
-    while i < n {
+    for i in 0..n {
         write_volatile(d.add(i), c as u8);
-        i += 1;
     }
     d
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn memcpy(d: *mut u8, s: *const u8, n: usize) -> *mut u8 {
-    let mut i = 0;
-    while i < n {
+    for i in 0..n {
         write_volatile(d.add(i), read_volatile(s.add(i)));
-        i += 1;
     }
     d
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn memmove(d: *mut u8, s: *const u8, n: usize) -> *mut u8 {
     if (d as usize) <= (s as usize) {
         return memcpy(d, s, n);
     }
-    let mut i = n;
-    while i > 0 {
-        i -= 1;
+    for i in (0..n).rev() {
         write_volatile(d.add(i), read_volatile(s.add(i)));
     }
     d
 }
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn memcmp(a: *const u8, b: *const u8, n: usize) -> i32 {
-    let mut i = 0;
-    while i < n {
+    for i in 0..n {
         let (x, y) = (read_volatile(a.add(i)), read_volatile(b.add(i)));
         if x != y {
             return x as i32 - y as i32;
         }
-        i += 1;
     }
     0
 }
+
+// ---- Win32 -----------------------------------------------------------------------------------------------
 
 #[repr(C)]
 struct WNDCLASSA {
@@ -129,6 +156,107 @@ struct RECT {
     r: i32,
     b: i32,
 }
+
+#[link(name = "kernel32", kind = "raw-dylib", import_name_type = "undecorated")]
+unsafe extern "system" {
+    fn ExitProcess(code: u32) -> !;
+    fn GetStdHandle(n: u32) -> P;
+    fn WriteFile(h: P, buf: *const u8, n: u32, written: *mut u32, ov: P) -> i32;
+    fn GetTickCount() -> u32;
+    fn GetModuleHandleA(n: *const u8) -> P;
+    fn GetCommandLineA() -> *const u8;
+    fn QueryPerformanceCounter(v: *mut i64) -> i32;
+    fn QueryPerformanceFrequency(v: *mut i64) -> i32;
+}
+#[link(name = "user32", kind = "raw-dylib", import_name_type = "undecorated")]
+unsafe extern "system" {
+    fn RegisterClassA(wc: *const WNDCLASSA) -> u16;
+    fn CreateWindowExA(
+        ex: u32, cls: *const u8, name: *const u8, style: u32, x: i32, y: i32, w: i32, h: i32,
+        parent: P, menu: P, inst: P, param: P,
+    ) -> P;
+    fn DefWindowProcA(h: P, m: u32, w: usize, l: isize) -> isize;
+    fn PeekMessageA(msg: *mut MSG, h: P, min: u32, max: u32, remove: u32) -> i32;
+    fn TranslateMessage(msg: *const MSG) -> i32;
+    fn DispatchMessageA(msg: *const MSG) -> isize;
+    fn AdjustWindowRect(r: *mut RECT, style: u32, menu: i32) -> i32;
+    fn SetForegroundWindow(h: P) -> i32;
+}
+#[link(name = "d3d9", kind = "raw-dylib", import_name_type = "undecorated")]
+unsafe extern "system" {
+    fn Direct3DCreate9(sdk: u32) -> P;
+}
+
+const STD_OUTPUT_HANDLE: u32 = 0xFFFF_FFF5;
+const PM_REMOVE: u32 = 1;
+const WS_POPUP: u32 = 0x8000_0000;
+const WS_VISIBLE: u32 = 0x1000_0000;
+const WS_CAPTION: u32 = 0x00C0_0000;
+const WS_SYSMENU: u32 = 0x0008_0000;
+const WS_MINIMIZEBOX: u32 = 0x0002_0000;
+const WS_EX_TOPMOST: u32 = 8;
+
+const EXIT_BAD_ARGUMENTS: u32 = 1;
+const EXIT_NO_WINDOW: u32 = 2;
+const EXIT_NO_DIRECT3D: u32 = 3;
+const EXIT_NO_DEVICE: u32 = 4;
+const EXIT_CALL_FAILED: u32 = 6;
+const EXIT_PANIC: u32 = 99;
+
+// ---- Direct3D 9 ------------------------------------------------------------------------------------------
+
+/// D3DPRESENT_PARAMETERS
+#[repr(C)]
+struct PresentParams {
+    width: u32,
+    height: u32,
+    format: u32,
+    count: u32,
+    multisample: u32,
+    multisample_quality: u32,
+    swap_effect: u32,
+    window: P,
+    windowed: i32,
+    auto_depth_stencil: i32,
+    depth_stencil_format: u32,
+    flags: u32,
+    refresh_rate: u32,
+    interval: u32,
+}
+/// D3DLOCKED_RECT
+#[repr(C)]
+struct LockedRect {
+    pitch: i32,
+    bits: *mut u8,
+}
+impl LockedRect {
+    const EMPTY: LockedRect = LockedRect { pitch: 0, bits: null_mut() };
+}
+/// D3DLIGHT9
+#[repr(C)]
+struct Light {
+    kind: u32,
+    diffuse: [f32; 4],
+    specular: [f32; 4],
+    ambient: [f32; 4],
+    position: [f32; 3],
+    direction: [f32; 3],
+    range: f32,
+    falloff: f32,
+    attenuation: [f32; 3],
+    theta: f32,
+    phi: f32,
+}
+/// D3DMATERIAL9
+#[repr(C)]
+struct Material {
+    diffuse: [f32; 4],
+    ambient: [f32; 4],
+    specular: [f32; 4],
+    emissive: [f32; 4],
+    power: f32,
+}
+/// A UI vertex: transformed position, colour, texture coordinate (FVF_UI).
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct UiVert {
@@ -141,130 +269,399 @@ struct UiVert {
     v: f32,
 }
 
-#[link(name = "kernel32", kind = "raw-dylib", import_name_type = "undecorated")]
-extern "system" {
-    fn ExitProcess(code: u32) -> !;
-    fn GetStdHandle(n: u32) -> P;
-    fn WriteFile(h: P, buf: *const u8, n: u32, written: *mut u32, ov: P) -> i32;
-    fn GetTickCount() -> u32;
-    fn GetModuleHandleA(n: *const u8) -> P;
-    fn GetCommandLineA() -> *const u8;
-    fn QueryPerformanceCounter(v: *mut i64) -> i32;
-    fn QueryPerformanceFrequency(v: *mut i64) -> i32;
-}
-#[link(name = "user32", kind = "raw-dylib", import_name_type = "undecorated")]
-extern "system" {
-    fn RegisterClassA(wc: *const WNDCLASSA) -> u16;
-    fn CreateWindowExA(ex: u32, cls: *const u8, name: *const u8, style: u32, x: i32, y: i32, w: i32, h: i32, parent: P, menu: P, inst: P, param: P) -> P;
-    fn DefWindowProcA(h: P, m: u32, w: usize, l: isize) -> isize;
-    fn PeekMessageA(msg: *mut MSG, h: P, min: u32, max: u32, remove: u32) -> i32;
-    fn TranslateMessage(msg: *const MSG) -> i32;
-    fn DispatchMessageA(msg: *const MSG) -> isize;
-    fn AdjustWindowRect(r: *mut RECT, style: u32, menu: i32) -> i32;
-    fn SetForegroundWindow(h: P) -> i32;
-}
-#[link(name = "d3d9", kind = "raw-dylib", import_name_type = "undecorated")]
-extern "system" {
-    fn Direct3DCreate9(sdk: u32) -> P;
+// Direct3D reads these as they are laid out here.
+const _: () = assert!(size_of::<PresentParams>() == 56);
+const _: () = assert!(size_of::<LockedRect>() == 8);
+const _: () = assert!(size_of::<Light>() == 104);
+const _: () = assert!(size_of::<Material>() == 68);
+const _: () = assert!(size_of::<UiVert>() == UI_STRIDE as usize);
+
+// Values of d3d9.h and d3d9types.h, named as there without the D3D prefix.
+const SDK_VERSION: u32 = 32;
+const ADAPTER_DEFAULT: u32 = 0;
+const DEVTYPE_HAL: u32 = 1;
+const CREATE_SOFTWARE_VERTEXPROCESSING: u32 = 0x20;
+const CREATE_HARDWARE_VERTEXPROCESSING: u32 = 0x40;
+const CREATE_MIXED_VERTEXPROCESSING: u32 = 0x80;
+const SWAPEFFECT_DISCARD: u32 = 1;
+const PRESENT_INTERVAL_IMMEDIATE: u32 = 0x8000_0000;
+const FMT_A8R8G8B8: u32 = 21;
+const FMT_X8R8G8B8: u32 = 22;
+const FMT_D24S8: u32 = 75;
+const FMT_INDEX16: u32 = 101;
+const FMT_DXT1: u32 = 0x3154_5844;
+const POOL_DEFAULT: u32 = 0;
+const POOL_MANAGED: u32 = 1;
+const POOL_SYSTEMMEM: u32 = 2;
+const USAGE_WRITEONLY: u32 = 0x8;
+const USAGE_DYNAMIC: u32 = 0x200;
+const LOCK_READONLY: u32 = 0x10;
+const LOCK_NOOVERWRITE: u32 = 0x1000;
+const LOCK_DISCARD: u32 = 0x2000;
+const FVF_XYZ: u32 = 0x002;
+const FVF_XYZRHW: u32 = 0x004;
+const FVF_NORMAL: u32 = 0x010;
+const FVF_DIFFUSE: u32 = 0x040;
+const FVF_TEX1: u32 = 0x100;
+const CLEAR_TARGET: u32 = 1;
+const CLEAR_ZBUFFER: u32 = 2;
+const TS_VIEW: u32 = 2;
+const TS_PROJECTION: u32 = 3;
+const TS_WORLD: u32 = 256;
+const RS_ZENABLE: u32 = 7;
+const RS_SRCBLEND: u32 = 19;
+const RS_DESTBLEND: u32 = 20;
+const RS_CULLMODE: u32 = 22;
+const RS_ALPHABLENDENABLE: u32 = 27;
+const RS_LIGHTING: u32 = 137;
+const RS_AMBIENT: u32 = 139;
+const BLEND_SRCALPHA: u32 = 5;
+const BLEND_INVSRCALPHA: u32 = 6;
+const CULL_NONE: u32 = 1;
+const SAMP_MAGFILTER: u32 = 5;
+const SAMP_MINFILTER: u32 = 6;
+const TEXF_LINEAR: u32 = 2;
+const TSS_COLOROP: u32 = 1;
+const TSS_COLORARG1: u32 = 2;
+const TSS_COLORARG2: u32 = 3;
+const TSS_ALPHAOP: u32 = 4;
+const TSS_ALPHAARG1: u32 = 5;
+const TSS_ALPHAARG2: u32 = 6;
+const TOP_MODULATE: u32 = 4;
+const TA_DIFFUSE: u32 = 0;
+const TA_TEXTURE: u32 = 2;
+const PT_TRIANGLELIST: u32 = 4;
+const PT_TRIANGLESTRIP: u32 = 5;
+const LIGHT_DIRECTIONAL: u32 = 3;
+
+/// The Direct3D methods the benchmark calls. Each is named once here with its vtable slot (the order of
+/// d3d9.h) and its signature, so a call site cannot pair a slot with the wrong arguments.
+mod d3d {
+    use super::{transmute, Light, LockedRect, Material, PresentParams, UiVert, P};
+
+    macro_rules! methods {
+        ($($name:ident = $slot:literal ($($a:ident: $t:ty),*);)*) => {$(
+            #[inline(always)]
+            pub unsafe fn $name(this: P $(, $a: $t)*) -> i32 {
+                let slot = *(*(this as *const *const P)).add($slot);
+                let f: unsafe extern "system" fn(P $(, $t)*) -> i32 = transmute(slot);
+                f(this $(, $a)*)
+            }
+        )*};
+    }
+
+    methods! {
+        // IDirect3D9
+        create_device = 16 (adapter: u32, kind: u32, focus: P, flags: u32, params: *mut PresentParams, out: *mut P);
+        // IDirect3DDevice9
+        present = 17 (src: P, dst: P, window: P, dirty: P);
+        create_texture = 23 (w: u32, h: u32, levels: u32, usage: u32, format: u32, pool: u32, out: *mut P, shared: P);
+        create_vertex_buffer = 26 (bytes: u32, usage: u32, fvf: u32, pool: u32, out: *mut P, shared: P);
+        get_render_target_data = 32 (target: P, dst: P);
+        create_offscreen_plain_surface = 36 (w: u32, h: u32, format: u32, pool: u32, out: *mut P, shared: P);
+        get_render_target = 38 (index: u32, out: *mut P);
+        begin_scene = 41 ();
+        end_scene = 42 ();
+        clear = 43 (count: u32, rects: P, flags: u32, color: u32, z: f32, stencil: u32);
+        set_transform = 44 (state: u32, matrix: *const f32);
+        set_material = 49 (material: *const Material);
+        set_light = 51 (index: u32, light: *const Light);
+        light_enable = 53 (index: u32, on: i32);
+        set_render_state = 57 (state: u32, value: u32);
+        set_texture = 65 (stage: u32, texture: P);
+        set_texture_stage_state = 67 (stage: u32, state: u32, value: u32);
+        set_sampler_state = 69 (sampler: u32, state: u32, value: u32);
+        draw_primitive = 81 (kind: u32, first_vertex: u32, count: u32);
+        draw_primitive_up = 83 (kind: u32, count: u32, vertices: *const UiVert, stride: u32);
+        draw_indexed_primitive_up = 84 (kind: u32, min_index: u32, vertex_count: u32, count: u32,
+            indices: *const u16, index_format: u32, vertices: *const f32, stride: u32);
+        set_fvf = 89 (fvf: u32);
+        create_vertex_shader = 91 (code: *const u32, out: *mut P);
+        set_vertex_shader = 92 (shader: P);
+        set_vertex_shader_constant_f = 94 (first: u32, data: *const f32, vectors: u32);
+        set_stream_source = 100 (stream: u32, buffer: P, offset: u32, stride: u32);
+        create_pixel_shader = 106 (code: *const u32, out: *mut P);
+        set_pixel_shader = 107 (shader: P);
+        // IDirect3DVertexBuffer9
+        vb_lock = 11 (offset: u32, size: u32, data: *mut *mut u8, flags: u32);
+        vb_unlock = 12 ();
+        // IDirect3DTexture9
+        tex_lock_rect = 19 (level: u32, locked: *mut LockedRect, rect: P, flags: u32);
+        tex_unlock_rect = 20 (level: u32);
+        // IDirect3DSurface9
+        surface_lock_rect = 13 (locked: *mut LockedRect, rect: P, flags: u32);
+    }
 }
 
-static mut OUT: P = null_mut();
-static mut T_SCENE: u32 = 0;
-static mut T_PRESENT: u32 = 0;
-static mut T_PART: [u32; 5] = [0; 5];
-static mut T_UI: [u32; 3] = [0; 3];
-static mut UI_MODE: u32 = 0;
-static mut UIVB: P = null_mut();
-static mut WMODE: u32 = 0;
-static mut DYNVB: P = null_mut();
-static mut MANVB: P = null_mut();
-static mut SPARE: [P; 2048] = [core::ptr::null_mut(); 2048];
-static mut SPAREIDX: usize = 0;
-static mut VSH: P = null_mut();
-static mut PSH: [P; 2] = [null_mut(); 2];
-// ps_1_1: tex t0; mul r0, t0, v0
-static PS11_CODE: [u32; 8] = [0xFFFF0101, 0x00000042, 0xB00F0000, 0x00000005, 0x800F0000, 0xB0E40000, 0x90E40000, 0x0000FFFF];
-// ps_2_0: dcl t0.xy; dcl_2d s0; texld r0, t0, s0; mov oC0, r0
-static PS20_CODE: [u32; 15] = [
-    0xFFFF0200, 0x0200001F, 0x80000000, 0xB0030000, 0x0200001F, 0x90000000, 0xA00F0800,
-    0x03000042, 0x800F0000, 0xB0E40000, 0xA0E40800, 0x02000001, 0x800F0800, 0x80E40000, 0x0000FFFF,
-];
-static mut PROJ: [f32; 4] = [0.0; 4];
+// ---- what the benchmark draws ----------------------------------------------------------------------------
+
+/// What each world draw does: the last argument.
+mod mode {
+    pub const SHADER: u32 = 1;
+    pub const LOCK: u32 = 2;
+    pub const APPEND: u32 = 3;
+    pub const LOCK_DISCARD: u32 = 4;
+    pub const LOCK_MANAGED: u32 = 5;
+    pub const TOUCH_TEXTURE: u32 = 6;
+    pub const INDEXED_UP: u32 = 7;
+    pub const SHADER_PS11: u32 = 8;
+    pub const SHADER_PS20: u32 = 9;
+    pub const STREAM: u32 = 10;
+    pub const STREAM_DRAW: u32 = 11;
+
+    pub fn uses_vertex_shader(mode: u32) -> bool {
+        matches!(mode, SHADER | SHADER_PS11 | SHADER_PS20)
+    }
+    pub fn streams_textures(mode: u32) -> bool {
+        matches!(mode, STREAM | STREAM_DRAW)
+    }
+}
+
+/// How the UI quads are drawn.
+#[derive(Clone, Copy, PartialEq)]
+enum Ui {
+    UserPointer,
+    VertexBuffer,
+    None,
+}
+
+const CLEAR_COLOR: u32 = 0xFF20_3040;
+const RGB: u32 = 0x00FF_FFFF;
+const WHITE: u32 = 0xFFFF_FFFF;
+const MAGENTA: u32 = 0xFFFF_00FF;
+/// The dark squares of the two checkerboard textures.
+const DARK: [u32; 2] = [0xFFB0_B0B0, 0xFF80_C0FF];
+const DARK_RGB565: [u16; 2] = [0xB596, 0x861F];
+
+const FVF_WORLD: u32 = FVF_XYZ | FVF_NORMAL | FVF_TEX1;
+const FVF_UI: u32 = FVF_XYZRHW | FVF_DIFFUSE | FVF_TEX1;
+const WORLD_STRIDE: u32 = 32; // position, normal, texture coordinate: 8 floats
+const UI_STRIDE: u32 = 28;
+const QUAD_BYTES: u32 = 6 * WORLD_STRIDE;
+const UI_QUAD_BYTES: u32 = 4 * UI_STRIDE;
+const UI_QUADS: u32 = 24;
+const DYNAMIC_QUADS: u32 = 4096;
+const MANAGED_QUADS: u32 = 16;
+const SPARE_TEXTURES: usize = 2048;
+const TEX_SIZE: u32 = 64;
+const TEX_CELL: usize = 8;
+const STREAM_LEVELS: u32 = 3;
+const WARM_UP_MS: u32 = 1500;
+/// Larger back buffers are refused: a backend that accepts one anyway hands back memory that is not there.
+const MAX_SIZE: u32 = 16384;
+
+const GRID: usize = 8;
+const MESH_VERTS: usize = GRID * GRID * 6;
+const MESH_FLOATS: usize = MESH_VERTS * 8;
+const MESH_TRIANGLES: u32 = (MESH_VERTS / 3) as u32;
+/// GRID x GRID quads in the XY plane, one unit across, facing the camera.
+static MESH: [f32; MESH_FLOATS] = mesh();
+
+const fn mesh() -> [f32; MESH_FLOATS] {
+    let mut m = [0.0f32; MESH_FLOATS];
+    let s = 1.0 / GRID as f32;
+    let mut n = 0;
+    let mut gy = 0;
+    while gy < GRID {
+        let mut gx = 0;
+        while gx < GRID {
+            let (x0, y0) = (gx as f32 * s - 0.5, gy as f32 * s - 0.5);
+            let (x1, y1) = (x0 + s, y0 + s);
+            let corners = [(x0, y0), (x0, y1), (x1, y0), (x1, y0), (x0, y1), (x1, y1)];
+            let mut k = 0;
+            while k < 6 {
+                let (x, y) = corners[k];
+                let o = n * 8;
+                m[o] = x;
+                m[o + 1] = y;
+                m[o + 5] = -1.0;
+                m[o + 6] = x + 0.5;
+                m[o + 7] = y + 0.5;
+                n += 1;
+                k += 1;
+            }
+            gx += 1;
+        }
+        gy += 1;
+    }
+    m
+}
+
 static QUAD: [f32; 48] = [
-    -0.5, -0.5, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, -0.5, 0.5, 0.0, 0.0, 0.0, -1.0, 0.0, 1.0, 0.5, -0.5, 0.0, 0.0, 0.0, -1.0, 1.0, 0.0,
-    0.5, -0.5, 0.0, 0.0, 0.0, -1.0, 1.0, 0.0, -0.5, 0.5, 0.0, 0.0, 0.0, -1.0, 0.0, 1.0, 0.5, 0.5, 0.0, 0.0, 0.0, -1.0, 1.0, 1.0,
+    -0.5, -0.5, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, -0.5, 0.5, 0.0, 0.0, 0.0, -1.0, 0.0, 1.0,
+    0.5, -0.5, 0.0, 0.0, 0.0, -1.0, 1.0, 0.0, 0.5, -0.5, 0.0, 0.0, 0.0, -1.0, 1.0, 0.0,
+    -0.5, 0.5, 0.0, 0.0, 0.0, -1.0, 0.0, 1.0, 0.5, 0.5, 0.0, 0.0, 0.0, -1.0, 1.0, 1.0,
 ];
-static QUADI: [f32; 32] = [
+static QUAD_INDEXED: [f32; 32] = [
     -0.5, -0.5, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, -0.5, 0.5, 0.0, 0.0, 0.0, -1.0, 0.0, 1.0,
     0.5, -0.5, 0.0, 0.0, 0.0, -1.0, 1.0, 0.0, 0.5, 0.5, 0.0, 0.0, 0.0, -1.0, 1.0, 1.0,
 ];
-static QIDX: [u16; 6] = [0, 1, 2, 2, 1, 3];
+static QUAD_INDICES: [u16; 6] = [0, 1, 2, 2, 1, 3];
+
 // vs_1_1: dcl_position v0; dcl_normal v1; dcl_texcoord v2; m4x4 oPos, v0, c0; mov oT0, v2; mov oD0, c4
 static VS_CODE: [u32; 21] = [
-    0xFFFE0101, 0x0000001F, 0x80000000, 0x900F0000, 0x0000001F, 0x80000003, 0x900F0001, 0x0000001F, 0x80000005, 0x900F0002,
-    0x00000014, 0xC00F0000, 0x90E40000, 0xA0E40000, 0x00000001, 0xE00F0000, 0x90E40002, 0x00000001, 0xD00F0000, 0xA0E40004, 0x0000FFFF,
+    0xFFFE0101, 0x0000001F, 0x80000000, 0x900F0000, 0x0000001F, 0x80000003, 0x900F0001,
+    0x0000001F, 0x80000005, 0x900F0002, 0x00000014, 0xC00F0000, 0x90E40000, 0xA0E40000,
+    0x00000001, 0xE00F0000, 0x90E40002, 0x00000001, 0xD00F0000, 0xA0E40004, 0x0000FFFF,
 ];
-unsafe fn qpc() -> u32 {
-    let mut v: i64 = 0;
-    QueryPerformanceCounter(&mut v);
-    v as u32
-}
-const GRID: usize = 8; // mesh = GRID x GRID quads
-const MESH_VERTS: usize = GRID * GRID * 6;
-static mut MESH: [f32; MESH_VERTS * 8] = [0.0; MESH_VERTS * 8];
+// ps_1_1: tex t0; mul r0, t0, v0
+static PS11_CODE: [u32; 8] =
+    [0xFFFF0101, 0x00000042, 0xB00F0000, 0x00000005, 0x800F0000, 0xB0E40000, 0x90E40000, 0x0000FFFF];
+// ps_2_0: dcl t0.xy; dcl_2d s0; texld r0, t0, s0; mov oC0, r0
+static PS20_CODE: [u32; 15] = [
+    0xFFFF0200, 0x0200001F, 0x80000000, 0xB0030000, 0x0200001F, 0x90000000, 0xA00F0800, 0x03000042,
+    0x800F0000, 0xB0E40000, 0xA0E40800, 0x02000001, 0x800F0800, 0x80E40000, 0x0000FFFF,
+];
 
-unsafe fn ps(s: &[u8]) {
-    let mut w = 0u32;
-    WriteFile(OUT, s.as_ptr(), s.len() as u32, &mut w, null_mut());
+/// Performance-counter ticks spent in each part of the frames, summed over the timed run.
+struct Timing {
+    clear: u64,
+    begin: u64,
+    world: u64,
+    ui: u64,
+    end: u64,
+    scene: u64,
+    present: u64,
+    ui_state: u64,
+    ui_first_quad: u64,
+    ui_other_quads: u64,
 }
-unsafe fn pu(mut v: u32) {
-    let mut b = [0u8; 10];
+impl Timing {
+    const ZERO: Timing = Timing {
+        clear: 0,
+        begin: 0,
+        world: 0,
+        ui: 0,
+        end: 0,
+        scene: 0,
+        present: 0,
+        ui_state: 0,
+        ui_first_quad: 0,
+        ui_other_quads: 0,
+    };
+}
+
+/// Everything a frame needs besides the device.
+struct Bench {
+    mode: u32,
+    ui: Ui,
+    height: u32,
+    draws: u32,
+    mesh_vb: P,
+    dynamic_vb: P,
+    managed_vb: P,
+    ui_vb: P,
+    textures: [P; 2],
+    spare: [P; SPARE_TEXTURES],
+    spare_next: usize,
+    vertex_shader: P,
+    pixel_shaders: [P; 2],
+    proj: [f32; 4],
+    time: Timing,
+}
+
+// A static, because it is too large for the stack without the C runtime's stack probe. main makes the one
+// reference to it.
+static mut BENCH: Bench = Bench {
+    mode: 0,
+    ui: Ui::UserPointer,
+    height: 0,
+    draws: 0,
+    mesh_vb: null_mut(),
+    dynamic_vb: null_mut(),
+    managed_vb: null_mut(),
+    ui_vb: null_mut(),
+    textures: [null_mut(); 2],
+    spare: [null_mut(); SPARE_TEXTURES],
+    spare_next: 0,
+    vertex_shader: null_mut(),
+    pixel_shaders: [null_mut(); 2],
+    proj: [0.0; 4],
+    time: Timing::ZERO,
+};
+
+struct Options {
+    vertex_processing: u32,
+    width: u32,
+    height: u32,
+    draws: u32,
+    seconds: u32,
+    dxt1: bool,
+    topmost: bool,
+    ui: Ui,
+    fullscreen: bool,
+    mode: u32,
+}
+
+// ---- output ----------------------------------------------------------------------------------------------
+
+unsafe fn print(s: &[u8]) {
+    let mut written = 0u32;
+    WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), s.as_ptr(), s.len() as u32, &mut written, null_mut());
+}
+unsafe fn print_u32(mut v: u32) {
+    let mut b = [b'0'; 10];
     let mut i = 10;
-    if v == 0 {
-        ps(b"0");
-        return;
-    }
-    while v > 0 {
+    loop {
         i -= 1;
         b[i] = b'0' + (v % 10) as u8;
         v /= 10;
+        if v == 0 {
+            break;
+        }
     }
-    ps(&b[i..]);
+    print(&b[i..]);
 }
-unsafe fn ph(v: u32) {
-    let h = b"0123456789abcdef";
+unsafe fn print_hex(v: u32) {
+    let digits = b"0123456789abcdef";
     let mut b = [0u8; 8];
-    let mut i = 0;
-    while i < 8 {
-        b[i] = h[((v >> (28 - 4 * i)) & 15) as usize];
-        i += 1;
+    for (i, d) in b.iter_mut().enumerate() {
+        *d = digits[((v >> (28 - 4 * i)) & 15) as usize];
     }
-    ps(b"0x");
-    ps(&b);
+    print(b"0x");
+    print(&b);
 }
-unsafe fn step(name: &[u8], hr: i32) {
-    if hr != 0 {
-        ps(b"  FAIL ");
-        ps(name);
-        ps(b" hr=");
-        ph(hr as u32);
-        ps(b"\n");
+unsafe fn field(label: &[u8], v: u32) {
+    print(label);
+    print_u32(v);
+}
+
+/// Reports a failed call; Direct3D marks failure with a negative result. True if it failed.
+unsafe fn report(name: &[u8], hr: i32) -> bool {
+    if hr < 0 {
+        print(b"  FAIL ");
+        print(name);
+        print(b" hr=");
+        print_hex(hr as u32);
+        print(b"\n");
+    }
+    hr < 0
+}
+/// For a call the run depends on: what follows would use a null pointer or measure something else.
+unsafe fn require(name: &[u8], hr: i32) {
+    if report(name, hr) {
+        ExitProcess(EXIT_CALL_FAILED);
+    }
+}
+unsafe fn require_if(needed: bool, name: &[u8], hr: i32) {
+    if report(name, hr) && needed {
+        ExitProcess(EXIT_CALL_FAILED);
+    }
+}
+unsafe fn require_pointer(name: &[u8], p: *const u8) {
+    if p.is_null() {
+        print(b"  FAIL ");
+        print(name);
+        print(b" gave no memory\n");
+        ExitProcess(EXIT_CALL_FAILED);
     }
 }
 
-macro_rules! com {
-    ($obj:expr, $idx:expr, fn($($t:ty),*) -> $r:ty $(, $a:expr)*) => {{
-        let o: P = $obj;
-        let f: unsafe extern "system" fn(P $(, $t)*) -> $r = transmute(*(*(o as *const *const P)).add($idx));
-        f(o $(, $a)*)
-    }};
-}
+// ---- setup -----------------------------------------------------------------------------------------------
 
-unsafe extern "system" fn wndproc(h: P, m: u32, w: usize, l: isize) -> isize {
-    DefWindowProcA(h, m, w, l)
-}
-
-unsafe fn args(out: &mut [u32; 8]) {
+/// Reads up to eight numbers from the command line into `out`, after the program's name. Whatever follows
+/// the digits of an argument is skipped.
+unsafe fn numbers_from_command_line(out: &mut [u32; 8]) {
     let mut p = GetCommandLineA();
     if *p == b'"' {
         p = p.add(1);
@@ -279,519 +676,602 @@ unsafe fn args(out: &mut [u32; 8]) {
             p = p.add(1);
         }
     }
-    let mut i = 0;
-    loop {
+    for slot in out.iter_mut() {
         while *p == b' ' {
             p = p.add(1);
         }
-        if *p == 0 || i >= 8 {
+        if *p == 0 {
             break;
         }
         let mut v = 0u32;
-        while *p >= b'0' && *p <= b'9' {
-            v = v * 10 + (*p - b'0') as u32;
+        while (*p).is_ascii_digit() {
+            v = v.wrapping_mul(10).wrapping_add((*p - b'0') as u32);
             p = p.add(1);
         }
         while *p != 0 && *p != b' ' {
             p = p.add(1);
         }
-        out[i] = v;
-        i += 1;
+        *slot = v;
     }
 }
 
+unsafe fn options() -> Options {
+    let mut a = [0u32, 1280, 720, 2000, 4, 0, 0, 0];
+    numbers_from_command_line(&mut a);
+    let flags = a[6];
+    Options {
+        vertex_processing: a[0],
+        width: a[1],
+        height: a[2],
+        draws: a[3],
+        seconds: a[4],
+        dxt1: a[5] == 1,
+        topmost: flags & 1 != 0,
+        ui: match (flags >> 1) & 3 {
+            0 => Ui::UserPointer,
+            1 => Ui::VertexBuffer,
+            _ => Ui::None,
+        },
+        fullscreen: flags & 8 != 0,
+        mode: a[7],
+    }
+}
+
+unsafe extern "system" fn wndproc(h: P, m: u32, w: usize, l: isize) -> isize {
+    DefWindowProcA(h, m, w, l)
+}
+
 unsafe fn pump() {
-    let mut m: MSG = core::mem::zeroed();
-    while PeekMessageA(&mut m, null_mut(), 0, 0, 1) != 0 {
+    let mut m: MSG = zeroed();
+    while PeekMessageA(&mut m, null_mut(), 0, 0, PM_REMOVE) != 0 {
         TranslateMessage(&m);
         DispatchMessageA(&m);
     }
 }
 
-unsafe fn frame(dev: P, vb: P, tex: &[P; 2], w: u32, h: u32, draws: u32, present: bool) -> i32 {
-    let t0 = qpc();
-    com!(dev, 43, fn(u32, P, u32, u32, f32, u32) -> i32, 0, null_mut(), 3, 0xFF203040, 1.0, 0); // Clear
-    let ta = qpc();
-    com!(dev, 41, fn() -> i32); // BeginScene
-    let tb = qpc();
+unsafe fn create_window(o: &Options) -> P {
+    let instance = GetModuleHandleA(null());
+    let class = b"d3d9bench\0";
+    let wc = WNDCLASSA {
+        style: 0,
+        wndproc,
+        cls_extra: 0,
+        wnd_extra: 0,
+        inst: instance,
+        icon: null_mut(),
+        cursor: null_mut(),
+        bg: null_mut(),
+        menu: null(),
+        name: class.as_ptr(),
+    };
+    RegisterClassA(&wc);
+    let style = if o.fullscreen { WS_POPUP | WS_VISIBLE } else { WS_VISIBLE | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX };
+    let mut r = RECT { l: 0, t: 0, r: o.width as i32, b: o.height as i32 };
+    AdjustWindowRect(&mut r, style, 0);
+    let window = CreateWindowExA(
+        if o.topmost { WS_EX_TOPMOST } else { 0 },
+        class.as_ptr(),
+        b"d3d9 backend test\0".as_ptr(),
+        style,
+        60,
+        80,
+        r.r - r.l,
+        r.b - r.t,
+        null_mut(),
+        null_mut(),
+        instance,
+        null_mut(),
+    );
+    if window.is_null() {
+        print(b"FAIL CreateWindow\n");
+        ExitProcess(EXIT_NO_WINDOW);
+    }
+    if o.topmost {
+        SetForegroundWindow(window);
+    }
+    pump();
+    window
+}
 
-    // ---- "world": lit fixed-function meshes from a vertex buffer, one draw call each
-    com!(dev, 89, fn(u32) -> i32, 0x112); // SetFVF XYZ|NORMAL|TEX1
-    com!(dev, 100, fn(u32, P, u32, u32) -> i32, 0, vb, 0, 32); // SetStreamSource
-    com!(dev, 57, fn(u32, u32) -> i32, 137, 1); // LIGHTING
-    com!(dev, 57, fn(u32, u32) -> i32, 7, 1); // ZENABLE
-    com!(dev, 57, fn(u32, u32) -> i32, 27, 0); // ALPHABLENDENABLE
-    let mut m: [f32; 16] = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
-    if WMODE == 8 || WMODE == 9 {
-        com!(dev, 107, fn(P) -> i32, PSH[(WMODE - 8) as usize]); // SetPixelShader
+unsafe fn create_device(o: &Options, window: P) -> P {
+    let d3d9 = Direct3DCreate9(SDK_VERSION);
+    if d3d9.is_null() {
+        print(b"FAIL Direct3DCreate9\n");
+        ExitProcess(EXIT_NO_DIRECT3D);
     }
-    if WMODE == 1 || WMODE == 8 || WMODE == 9 {
-        let white = [1.0f32; 4];
-        com!(dev, 92, fn(P) -> i32, VSH); // SetVertexShader
-        com!(dev, 94, fn(u32, *const f32, u32) -> i32, 4, white.as_ptr(), 1);
+    let mut params = PresentParams {
+        width: o.width,
+        height: o.height,
+        format: FMT_X8R8G8B8,
+        count: 1,
+        multisample: 0,
+        multisample_quality: 0,
+        swap_effect: SWAPEFFECT_DISCARD,
+        window,
+        windowed: !o.fullscreen as i32,
+        auto_depth_stencil: 1,
+        depth_stencil_format: FMT_D24S8,
+        flags: 0,
+        refresh_rate: 0,
+        interval: PRESENT_INTERVAL_IMMEDIATE,
+    };
+    let vertex_processing = match o.vertex_processing {
+        0 => CREATE_HARDWARE_VERTEXPROCESSING,
+        1 => CREATE_SOFTWARE_VERTEXPROCESSING,
+        _ => CREATE_MIXED_VERTEXPROCESSING,
+    };
+    let mut dev: P = null_mut();
+    let hr = d3d::create_device(d3d9, ADAPTER_DEFAULT, DEVTYPE_HAL, window, vertex_processing, &mut params, &mut dev);
+    if hr < 0 || dev.is_null() {
+        print(b"FAIL CreateDevice hr=");
+        print_hex(hr as u32);
+        print(b"\n");
+        ExitProcess(EXIT_NO_DEVICE);
     }
-    let mut i = 0u32;
-    while i < draws {
-        let ix = i % 64;
-        let iy = (i / 64) % 36;
-        let iz = i / (64 * 36);
-        m[12] = (ix as f32 - 32.0) * 1.15;
-        m[13] = (iy as f32 - 18.0) * 1.15;
-        m[14] = 36.0 + iz as f32 * 4.0;
-        com!(dev, 44, fn(u32, *const f32) -> i32, 256, m.as_ptr()); // SetTransform(WORLD)
-        if i % 8 == 0 {
-            com!(dev, 65, fn(u32, P) -> i32, 0, tex[((i / 8) % 2) as usize]); // SetTexture
+    dev
+}
+
+/// Fills a locked A8R8G8B8 image of `size` x `size` pixels with squares of `cell` pixels in two colours.
+unsafe fn checkerboard(r: &LockedRect, size: usize, cell: usize, light: u32, dark: u32) {
+    for y in 0..size {
+        for x in 0..size {
+            let colour = if (x / cell + y / cell) % 2 == 0 { light } else { dark };
+            *(r.bits.add(y * r.pitch as usize + x * 4) as *mut u32) = colour;
         }
-        match WMODE {
-            1 | 8 | 9 => {
-                // programmable vertex shader, transform passed as per-draw shader constants
-                let c: [f32; 16] = [
-                    PROJ[0], 0.0, 0.0, m[12] * PROJ[0], 0.0, PROJ[1], 0.0, m[13] * PROJ[1],
-                    0.0, 0.0, PROJ[2], m[14] * PROJ[2] + PROJ[3], 0.0, 0.0, 1.0, m[14],
+    }
+}
+
+/// The same checkerboard as DXT1: blocks of 4 x 4 pixels in 8 bytes, two RGB565 colours and 16 two-bit
+/// indices, here all zero for the first colour.
+unsafe fn checkerboard_dxt1(r: &LockedRect, dark: u16) {
+    let blocks = TEX_SIZE as usize / 4;
+    for by in 0..blocks {
+        for bx in 0..blocks {
+            let colour: u16 = if (bx / 2 + by / 2) % 2 == 0 { 0xFFFF } else { dark };
+            let block = r.bits.add(by * r.pitch as usize + bx * 8);
+            *(block as *mut u16) = colour;
+            *(block.add(2) as *mut u16) = colour;
+            *(block.add(4) as *mut u32) = 0;
+        }
+    }
+}
+
+/// Creates the textures, vertex buffers and shaders. One that the chosen mode draws with must exist; the
+/// others are only reported.
+unsafe fn create_resources(b: &mut Bench, dev: P, o: &Options) {
+    let format = if o.dxt1 { FMT_DXT1 } else { FMT_A8R8G8B8 };
+    for t in 0..2 {
+        let texture = &mut b.textures[t];
+        require(b"CreateTexture", d3d::create_texture(dev, TEX_SIZE, TEX_SIZE, 1, 0, format, POOL_MANAGED, texture, null_mut()));
+        let mut r = LockedRect::EMPTY;
+        require(b"Tex.LockRect", d3d::tex_lock_rect(*texture, 0, &mut r, null_mut(), 0));
+        require_pointer(b"Tex.LockRect", r.bits);
+        if o.dxt1 {
+            checkerboard_dxt1(&r, DARK_RGB565[t]);
+        } else {
+            checkerboard(&r, TEX_SIZE as usize, TEX_CELL, WHITE, DARK[t]);
+        }
+        require(b"Tex.UnlockRect", d3d::tex_unlock_rect(*texture, 0));
+    }
+
+    let bytes = (MESH_FLOATS * size_of::<f32>()) as u32;
+    require(
+        b"CreateVertexBuffer",
+        d3d::create_vertex_buffer(dev, bytes, USAGE_WRITEONLY, FVF_WORLD, POOL_MANAGED, &mut b.mesh_vb, null_mut()),
+    );
+    let mut dst: *mut u8 = null_mut();
+    require(b"VB.Lock", d3d::vb_lock(b.mesh_vb, 0, bytes, &mut dst, 0));
+    require_pointer(b"VB.Lock", dst);
+    memcpy(dst, MESH.as_ptr() as *const u8, bytes as usize);
+    require(b"VB.Unlock", d3d::vb_unlock(b.mesh_vb));
+
+    let dynamic = USAGE_DYNAMIC | USAGE_WRITEONLY;
+    require_if(
+        matches!(b.mode, mode::LOCK | mode::APPEND | mode::LOCK_DISCARD),
+        b"CreateVertexBuffer(dyn)",
+        d3d::create_vertex_buffer(dev, QUAD_BYTES * DYNAMIC_QUADS, dynamic, FVF_WORLD, POOL_DEFAULT, &mut b.dynamic_vb, null_mut()),
+    );
+    if mode::streams_textures(b.mode) {
+        for spare in b.spare.iter_mut() {
+            require(
+                b"CreateTexture(spare)",
+                d3d::create_texture(dev, TEX_SIZE, TEX_SIZE, STREAM_LEVELS, 0, FMT_A8R8G8B8, POOL_MANAGED, spare, null_mut()),
+            );
+        }
+    }
+    require_if(
+        b.mode == mode::LOCK_MANAGED,
+        b"CreateVertexBuffer(managed)",
+        d3d::create_vertex_buffer(dev, QUAD_BYTES * MANAGED_QUADS, USAGE_WRITEONLY, FVF_WORLD, POOL_MANAGED, &mut b.managed_vb, null_mut()),
+    );
+    require_if(
+        mode::uses_vertex_shader(b.mode),
+        b"CreateVertexShader",
+        d3d::create_vertex_shader(dev, VS_CODE.as_ptr(), &mut b.vertex_shader),
+    );
+    require_if(
+        b.mode == mode::SHADER_PS11,
+        b"CreatePixelShader(ps_1_1)",
+        d3d::create_pixel_shader(dev, PS11_CODE.as_ptr(), &mut b.pixel_shaders[0]),
+    );
+    require_if(
+        b.mode == mode::SHADER_PS20,
+        b"CreatePixelShader(ps_2_0)",
+        d3d::create_pixel_shader(dev, PS20_CODE.as_ptr(), &mut b.pixel_shaders[1]),
+    );
+    require_if(
+        b.ui == Ui::VertexBuffer,
+        b"CreateVertexBuffer(ui)",
+        d3d::create_vertex_buffer(dev, UI_QUAD_BYTES, dynamic, FVF_UI, POOL_DEFAULT, &mut b.ui_vb, null_mut()),
+    );
+}
+
+/// Camera, light, material and the sampler and texture stage states, which stay as they are for the whole run.
+unsafe fn set_fixed_state(b: &mut Bench, dev: P, o: &Options) {
+    let ys = 1.7320508f32; // 60 degrees of vertical field of view
+    let xs = ys * o.height as f32 / o.width as f32;
+    let (zn, zf) = (1.0f32, 2000.0f32);
+    let (zscale, zoffset) = (zf / (zf - zn), -zn * zf / (zf - zn));
+    b.proj = [xs, ys, zscale, zoffset];
+    let proj: [f32; 16] = [xs, 0.0, 0.0, 0.0, 0.0, ys, 0.0, 0.0, 0.0, 0.0, zscale, 1.0, 0.0, 0.0, zoffset, 0.0];
+    let identity: [f32; 16] = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
+    d3d::set_transform(dev, TS_PROJECTION, proj.as_ptr());
+    d3d::set_transform(dev, TS_VIEW, identity.as_ptr());
+
+    let light = Light {
+        kind: LIGHT_DIRECTIONAL,
+        diffuse: [1.0; 4],
+        specular: [0.0; 4],
+        ambient: [0.0; 4],
+        position: [0.0; 3],
+        direction: [0.3, -0.3, 1.0],
+        range: 0.0,
+        falloff: 0.0,
+        attenuation: [0.0; 3],
+        theta: 0.0,
+        phi: 0.0,
+    };
+    report(b"SetLight", d3d::set_light(dev, 0, &light));
+    d3d::light_enable(dev, 0, 1);
+    let material = Material { diffuse: [1.0; 4], ambient: [1.0; 4], specular: [0.0; 4], emissive: [0.0; 4], power: 0.0 };
+    d3d::set_material(dev, &material);
+    d3d::set_render_state(dev, RS_AMBIENT, 0x0040_4040);
+    d3d::set_render_state(dev, RS_CULLMODE, CULL_NONE);
+    d3d::set_sampler_state(dev, 0, SAMP_MAGFILTER, TEXF_LINEAR);
+    d3d::set_sampler_state(dev, 0, SAMP_MINFILTER, TEXF_LINEAR);
+    d3d::set_texture_stage_state(dev, 0, TSS_COLOROP, TOP_MODULATE);
+    d3d::set_texture_stage_state(dev, 0, TSS_COLORARG1, TA_TEXTURE);
+    d3d::set_texture_stage_state(dev, 0, TSS_COLORARG2, TA_DIFFUSE);
+    d3d::set_texture_stage_state(dev, 0, TSS_ALPHAOP, TOP_MODULATE);
+    d3d::set_texture_stage_state(dev, 0, TSS_ALPHAARG1, TA_TEXTURE);
+    d3d::set_texture_stage_state(dev, 0, TSS_ALPHAARG2, TA_DIFFUSE);
+}
+
+// ---- a frame ---------------------------------------------------------------------------------------------
+
+unsafe fn ticks() -> u64 {
+    let mut v: i64 = 0;
+    QueryPerformanceCounter(&mut v);
+    v as u64
+}
+
+/// Copies QUAD into a locked vertex buffer, if the lock gave memory, and unlocks it.
+unsafe fn write_quad(buffer: P, offset: u32, flags: u32) {
+    let mut dst: *mut u8 = null_mut();
+    d3d::vb_lock(buffer, offset, QUAD_BYTES, &mut dst, flags);
+    if !dst.is_null() {
+        memcpy(dst, QUAD.as_ptr() as *const u8, QUAD_BYTES as usize);
+    }
+    d3d::vb_unlock(buffer);
+}
+
+/// The "world": lit meshes or quads, one draw call each, in the way the mode says.
+unsafe fn draw_world(b: &mut Bench, dev: P, readback: bool) {
+    d3d::set_fvf(dev, FVF_WORLD);
+    d3d::set_stream_source(dev, 0, b.mesh_vb, 0, WORLD_STRIDE);
+    d3d::set_render_state(dev, RS_LIGHTING, 1);
+    d3d::set_render_state(dev, RS_ZENABLE, 1);
+    d3d::set_render_state(dev, RS_ALPHABLENDENABLE, 0);
+    let shaders = mode::uses_vertex_shader(b.mode);
+    let pixel_shader = match b.mode {
+        mode::SHADER_PS11 => b.pixel_shaders[0],
+        mode::SHADER_PS20 => b.pixel_shaders[1],
+        _ => null_mut(),
+    };
+    if !pixel_shader.is_null() {
+        d3d::set_pixel_shader(dev, pixel_shader);
+    }
+    if shaders {
+        let white = [1.0f32; 4];
+        d3d::set_vertex_shader(dev, b.vertex_shader);
+        d3d::set_vertex_shader_constant_f(dev, 4, white.as_ptr(), 1);
+    }
+
+    let mut world: [f32; 16] = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
+    for i in 0..b.draws {
+        // a wall of 64 x 36 meshes, further walls behind it
+        let (x, y, z) = (i % 64, (i / 64) % 36, i / (64 * 36));
+        world[12] = (x as f32 - 32.0) * 1.15;
+        world[13] = (y as f32 - 18.0) * 1.15;
+        world[14] = 36.0 + z as f32 * 4.0;
+        d3d::set_transform(dev, TS_WORLD, world.as_ptr());
+        if i % 8 == 0 {
+            d3d::set_texture(dev, 0, b.textures[((i / 8) % 2) as usize]);
+        }
+        match b.mode {
+            mode::SHADER | mode::SHADER_PS11 | mode::SHADER_PS20 => {
+                // world and projection combined, as the rows of the vertex shader's matrix
+                let [xs, ys, zscale, zoffset] = b.proj;
+                let (tx, ty, tz) = (world[12], world[13], world[14]);
+                let constants: [f32; 16] = [
+                    xs, 0.0, 0.0, tx * xs, 0.0, ys, 0.0, ty * ys, 0.0, 0.0, zscale, tz * zscale + zoffset, 0.0, 0.0, 1.0, tz,
                 ];
-                com!(dev, 94, fn(u32, *const f32, u32) -> i32, 0, c.as_ptr(), 4); // SetVertexShaderConstantF
-                com!(dev, 81, fn(u32, u32, u32) -> i32, 4, 0, (MESH_VERTS / 3) as u32);
+                d3d::set_vertex_shader_constant_f(dev, 0, constants.as_ptr(), 4);
+                d3d::draw_primitive(dev, PT_TRIANGLELIST, 0, MESH_TRIANGLES);
             }
-            2 | 4 | 5 => {
-                // rewrite a quad through Lock/Unlock before every draw: dynamic (no flags), dynamic DISCARD, managed
-                let (b, fl) = if WMODE == 5 { (MANVB, 0u32) } else if WMODE == 4 { (DYNVB, 0x2000) } else { (DYNVB, 0) };
-                let mut dst: *mut u8 = null_mut();
-                com!(b, 11, fn(u32, u32, *mut *mut u8, u32) -> i32, 0, 192, &mut dst, fl);
-                if !dst.is_null() {
-                    memcpy(dst, QUAD.as_ptr() as *const u8, 192);
-                }
-                com!(b, 12, fn() -> i32);
-                com!(dev, 100, fn(u32, P, u32, u32) -> i32, 0, b, 0, 32);
-                com!(dev, 81, fn(u32, u32, u32) -> i32, 4, 0, 2);
+            mode::LOCK | mode::LOCK_DISCARD | mode::LOCK_MANAGED => {
+                let (buffer, flags) = match b.mode {
+                    mode::LOCK_MANAGED => (b.managed_vb, 0),
+                    mode::LOCK_DISCARD => (b.dynamic_vb, LOCK_DISCARD),
+                    _ => (b.dynamic_vb, 0),
+                };
+                write_quad(buffer, 0, flags);
+                d3d::set_stream_source(dev, 0, buffer, 0, WORLD_STRIDE);
+                d3d::draw_primitive(dev, PT_TRIANGLELIST, 0, 2);
             }
-            3 => {
-                // classic dynamic-buffer append: NOOVERWRITE, DISCARD when it wraps
-                let slot = i % 4096;
-                let mut dst: *mut u8 = null_mut();
-                com!(DYNVB, 11, fn(u32, u32, *mut *mut u8, u32) -> i32, slot * 192, 192, &mut dst, if slot == 0 { 0x2000 } else { 0x1000 });
-                if !dst.is_null() {
-                    memcpy(dst, QUAD.as_ptr() as *const u8, 192);
-                }
-                com!(DYNVB, 12, fn() -> i32);
-                com!(dev, 100, fn(u32, P, u32, u32) -> i32, 0, DYNVB, 0, 32);
-                com!(dev, 81, fn(u32, u32, u32) -> i32, 4, slot * 6, 2);
+            mode::APPEND => {
+                // the classic way to fill a dynamic buffer: the next free place, and a new buffer when it is full
+                let place = i % DYNAMIC_QUADS;
+                write_quad(b.dynamic_vb, place * QUAD_BYTES, if place == 0 { LOCK_DISCARD } else { LOCK_NOOVERWRITE });
+                d3d::set_stream_source(dev, 0, b.dynamic_vb, 0, WORLD_STRIDE);
+                d3d::draw_primitive(dev, PT_TRIANGLELIST, place * 6, 2);
             }
-            10 | 11 => {
-                // texture streaming: every 8 draws, fill a managed texture (3 mip levels) that this frame has
-                // not used yet. Mode 11 then draws with it; its contents alternate between frames (the
-                // checkerboard of tex[] on the frame that is read back, magenta otherwise), so an upload that
-                // runs at the wrong time shows up in the pixel check. Mode 10 only uploads.
+            mode::STREAM | mode::STREAM_DRAW => {
                 if i % 8 == 0 {
-                    let t = ((i / 8) % 2) as usize;
-                    // walk through the pool across frames, so a texture comes round again only after a few frames
-                    SPAREIDX = (SPAREIDX + 1) % 2048;
-                    let sp = SPARE[SPAREIDX];
-                    let mut level = 0u32;
-                    while level < 3 {
-                        let mut lr = [0u32; 2];
-                        com!(sp, 19, fn(u32, *mut u32, P, u32) -> i32, level, lr.as_mut_ptr(), null_mut(), 0);
-                        if lr[1] != 0 {
-                            let size = 64usize >> level;
-                            let cell = 8usize >> level;
-                            let (pitch, bits) = (lr[0] as usize, lr[1] as *mut u8);
-                            let mut y = 0usize;
-                            while y < size {
-                                let mut x = 0usize;
-                                while x < size {
-                                    let bright = ((x / cell) + (y / cell)) % 2 == 0;
-                                    let c: u32 = if present { 0xFFFF00FF } else if bright { 0xFFFFFFFF } else if t == 0 { 0xFFB0B0B0 } else { 0xFF80C0FF };
-                                    *(bits.add(y * pitch + x * 4) as *mut u32) = c;
-                                    x += 1;
-                                }
-                                y += 1;
+                    // The next texture of the pool, so one comes round again only after a few frames. Its
+                    // contents alternate: the checkerboard on the frame that is read back, magenta on the
+                    // others, so an upload that runs at the wrong time shows in the pixel check.
+                    b.spare_next = (b.spare_next + 1) % SPARE_TEXTURES;
+                    let texture = b.spare[b.spare_next];
+                    let dark = DARK[((i / 8) % 2) as usize];
+                    for level in 0..STREAM_LEVELS {
+                        let mut r = LockedRect::EMPTY;
+                        d3d::tex_lock_rect(texture, level, &mut r, null_mut(), 0);
+                        if !r.bits.is_null() {
+                            let (size, cell) = (TEX_SIZE as usize >> level, TEX_CELL >> level);
+                            if readback {
+                                checkerboard(&r, size, cell, WHITE, dark);
+                            } else {
+                                checkerboard(&r, size, cell, MAGENTA, MAGENTA);
                             }
                         }
-                        com!(sp, 20, fn(u32) -> i32, level);
-                        level += 1;
+                        d3d::tex_unlock_rect(texture, level);
                     }
-                    if WMODE == 11 {
-                        com!(dev, 65, fn(u32, P) -> i32, 0, sp); // SetTexture
+                    if b.mode == mode::STREAM_DRAW {
+                        d3d::set_texture(dev, 0, texture);
                     }
                 }
-                com!(dev, 81, fn(u32, u32, u32) -> i32, 4, 0, (MESH_VERTS / 3) as u32);
+                d3d::draw_primitive(dev, PT_TRIANGLELIST, 0, MESH_TRIANGLES);
             }
-            6 => {
-                // touch a managed texture before every draw
-                let mut lr = [0u32; 2];
-                com!(tex[0], 19, fn(u32, *mut u32, P, u32) -> i32, 0, lr.as_mut_ptr(), null_mut(), 0);
-                if lr[1] != 0 {
-                    *(lr[1] as *mut u32) = 0xFFFFFFFF;
+            mode::TOUCH_TEXTURE => {
+                let mut r = LockedRect::EMPTY;
+                d3d::tex_lock_rect(b.textures[0], 0, &mut r, null_mut(), 0);
+                if !r.bits.is_null() {
+                    *(r.bits as *mut u32) = WHITE;
                 }
-                com!(tex[0], 20, fn(u32) -> i32, 0);
-                com!(dev, 81, fn(u32, u32, u32) -> i32, 4, 0, (MESH_VERTS / 3) as u32);
+                d3d::tex_unlock_rect(b.textures[0], 0);
+                d3d::draw_primitive(dev, PT_TRIANGLELIST, 0, MESH_TRIANGLES);
             }
-            7 => {
-                com!(dev, 84, fn(u32, u32, u32, u32, *const u16, u32, *const f32, u32) -> i32, 4, 0, 4, 2, QIDX.as_ptr(), 101, QUADI.as_ptr(), 32); // DrawIndexedPrimitiveUP
+            mode::INDEXED_UP => {
+                d3d::draw_indexed_primitive_up(
+                    dev, PT_TRIANGLELIST, 0, 4, 2, QUAD_INDICES.as_ptr(), FMT_INDEX16, QUAD_INDEXED.as_ptr(), WORLD_STRIDE,
+                );
             }
             _ => {
-                com!(dev, 81, fn(u32, u32, u32) -> i32, 4, 0, (MESH_VERTS / 3) as u32); // DrawPrimitive TRIANGLELIST
+                d3d::draw_primitive(dev, PT_TRIANGLELIST, 0, MESH_TRIANGLES);
             }
         }
-        i += 1;
     }
-    if WMODE == 1 || WMODE == 8 || WMODE == 9 {
-        com!(dev, 92, fn(P) -> i32, null_mut());
+    if shaders {
+        d3d::set_vertex_shader(dev, null_mut());
     }
-    if WMODE == 8 || WMODE == 9 {
-        com!(dev, 107, fn(P) -> i32, null_mut());
+    if !pixel_shader.is_null() {
+        d3d::set_pixel_shader(dev, null_mut());
     }
+}
 
-    let tc = qpc();
-    // ---- "UI": pre-transformed, alpha-blended quads (same vertex layout the game's UI uses)
-    com!(dev, 89, fn(u32) -> i32, 0x144); // SetFVF XYZRHW|DIFFUSE|TEX1
-    com!(dev, 57, fn(u32, u32) -> i32, 137, 0);
-    com!(dev, 57, fn(u32, u32) -> i32, 7, 0);
-    com!(dev, 57, fn(u32, u32) -> i32, 27, 1);
-    com!(dev, 57, fn(u32, u32) -> i32, 19, 5); // SRCBLEND = SRCALPHA
-    com!(dev, 57, fn(u32, u32) -> i32, 20, 6); // DESTBLEND = INVSRCALPHA
-    com!(dev, 65, fn(u32, P) -> i32, 0, tex[0]);
-    let ts = qpc();
-    T_UI[0] = T_UI[0].wrapping_add(ts.wrapping_sub(tc));
-    let mut q = 0u32;
-    while q < 24 {
-        let x0 = 10.0 + q as f32 * 34.0;
-        let y0 = h as f32 - 44.0;
+/// The "UI": a row of pre-transformed, alpha-blended quads in the vertex layout the game's UI uses.
+/// `start` is the time the world was finished.
+unsafe fn draw_ui(b: &mut Bench, dev: P, start: u64) {
+    d3d::set_fvf(dev, FVF_UI);
+    d3d::set_render_state(dev, RS_LIGHTING, 0);
+    d3d::set_render_state(dev, RS_ZENABLE, 0);
+    d3d::set_render_state(dev, RS_ALPHABLENDENABLE, 1);
+    d3d::set_render_state(dev, RS_SRCBLEND, BLEND_SRCALPHA);
+    d3d::set_render_state(dev, RS_DESTBLEND, BLEND_INVSRCALPHA);
+    d3d::set_texture(dev, 0, b.textures[0]);
+    b.time.ui_state += ticks().wrapping_sub(start);
+
+    for q in 0..UI_QUADS {
+        let (x0, y0) = (10.0 + q as f32 * 34.0, b.height as f32 - 44.0);
         let (x1, y1) = (x0 + 28.0, y0 + 28.0);
-        let c = 0xC0FFFFFFu32;
-        let v = [
+        let c = 0xC0FF_FFFFu32;
+        let quad = [
             UiVert { x: x0, y: y0, z: 0.0, rhw: 1.0, c, u: 0.0, v: 0.0 },
             UiVert { x: x1, y: y0, z: 0.0, rhw: 1.0, c, u: 1.0, v: 0.0 },
             UiVert { x: x0, y: y1, z: 0.0, rhw: 1.0, c, u: 0.0, v: 1.0 },
             UiVert { x: x1, y: y1, z: 0.0, rhw: 1.0, c, u: 1.0, v: 1.0 },
         ];
-        let tq = qpc();
-        if UI_MODE == 1 {
-            // same quad through a dynamic vertex buffer: Lock(DISCARD) / copy / Unlock / DrawPrimitive
-            let mut dst: *mut u8 = null_mut();
-            com!(UIVB, 11, fn(u32, u32, *mut *mut u8, u32) -> i32, 0, 112, &mut dst, 0x2000);
-            memcpy(dst, v.as_ptr() as *const u8, 112);
-            com!(UIVB, 12, fn() -> i32);
-            com!(dev, 100, fn(u32, P, u32, u32) -> i32, 0, UIVB, 0, 28);
-            com!(dev, 81, fn(u32, u32, u32) -> i32, 5, 0, 2);
-        } else if UI_MODE == 0 {
-            com!(dev, 83, fn(u32, u32, *const UiVert, u32) -> i32, 5, 2, v.as_ptr(), 28); // DrawPrimitiveUP TRIANGLESTRIP
+        let before = ticks();
+        match b.ui {
+            Ui::UserPointer => {
+                d3d::draw_primitive_up(dev, PT_TRIANGLESTRIP, 2, quad.as_ptr(), UI_STRIDE);
+            }
+            Ui::VertexBuffer => {
+                let mut dst: *mut u8 = null_mut();
+                d3d::vb_lock(b.ui_vb, 0, UI_QUAD_BYTES, &mut dst, LOCK_DISCARD);
+                if !dst.is_null() {
+                    memcpy(dst, quad.as_ptr() as *const u8, UI_QUAD_BYTES as usize);
+                }
+                d3d::vb_unlock(b.ui_vb);
+                d3d::set_stream_source(dev, 0, b.ui_vb, 0, UI_STRIDE);
+                d3d::draw_primitive(dev, PT_TRIANGLESTRIP, 0, 2);
+            }
+            Ui::None => {}
         }
-        let idx = if q == 0 { 1 } else { 2 };
-        T_UI[idx] = T_UI[idx].wrapping_add(qpc().wrapping_sub(tq));
-        q += 1;
+        let spent = ticks().wrapping_sub(before);
+        if q == 0 {
+            b.time.ui_first_quad += spent;
+        } else {
+            b.time.ui_other_quads += spent;
+        }
     }
-    let _ = w;
-    let td = qpc();
-    com!(dev, 42, fn() -> i32); // EndScene
-    let t1 = qpc();
-    T_PART[0] = T_PART[0].wrapping_add(ta.wrapping_sub(t0));
-    T_PART[1] = T_PART[1].wrapping_add(tb.wrapping_sub(ta));
-    T_PART[2] = T_PART[2].wrapping_add(tc.wrapping_sub(tb));
-    T_PART[3] = T_PART[3].wrapping_add(td.wrapping_sub(tc));
-    T_PART[4] = T_PART[4].wrapping_add(t1.wrapping_sub(td));
-    let hr = if present {
-        com!(dev, 17, fn(P, P, P, P) -> i32, null_mut(), null_mut(), null_mut(), null_mut())
-    } else {
-        0
-    };
-    let t2 = qpc();
-    T_SCENE = T_SCENE.wrapping_add(t1.wrapping_sub(t0));
-    T_PRESENT = T_PRESENT.wrapping_add(t2.wrapping_sub(t1));
+}
+
+/// Draws one frame and adds its timings to `b.time`. The frame whose back buffer is read afterwards is
+/// not presented. Returns the result of Present.
+unsafe fn frame(b: &mut Bench, dev: P, readback: bool) -> i32 {
+    let t0 = ticks();
+    d3d::clear(dev, 0, null_mut(), CLEAR_TARGET | CLEAR_ZBUFFER, CLEAR_COLOR, 1.0, 0);
+    let t1 = ticks();
+    d3d::begin_scene(dev);
+    let t2 = ticks();
+    draw_world(b, dev, readback);
+    let t3 = ticks();
+    draw_ui(b, dev, t3);
+    let t4 = ticks();
+    d3d::end_scene(dev);
+    let t5 = ticks();
+    let hr = if readback { 0 } else { d3d::present(dev, null_mut(), null_mut(), null_mut(), null_mut()) };
+    let t6 = ticks();
+
+    let t = &mut b.time;
+    t.clear += t1.wrapping_sub(t0);
+    t.begin += t2.wrapping_sub(t1);
+    t.world += t3.wrapping_sub(t2);
+    t.ui += t4.wrapping_sub(t3);
+    t.end += t5.wrapping_sub(t4);
+    t.scene += t5.wrapping_sub(t0);
+    t.present += t6.wrapping_sub(t5);
     hr
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn mainCRTStartup() -> ! {
-    OUT = GetStdHandle(0xFFFF_FFF5);
-    let mut a = [0u32, 1280, 720, 2000, 4, 0, 0, 0];
-    args(&mut a);
-    let (vp, w, h, draws, secs, texfmt, flags) = (a[0], a[1], a[2], a[3], a[4], a[5], a[6]);
-    UI_MODE = (flags >> 1) & 3;
-    WMODE = a[7];
-    ps(b"d3d9bench vp=");
-    pu(vp);
-    ps(b" ");
-    pu(w);
-    ps(b"x");
-    pu(h);
-    ps(b" draws/frame=");
-    pu(draws);
-    ps(b" tris/draw=");
-    pu((MESH_VERTS / 3) as u32);
-    ps(b"\n");
+// ---- the run ---------------------------------------------------------------------------------------------
 
-    let inst = GetModuleHandleA(null());
-    let cls = b"d3d9bench\0";
-    let wc = WNDCLASSA { style: 0, wndproc, cls_extra: 0, wnd_extra: 0, inst, icon: null_mut(), cursor: null_mut(), bg: null_mut(), menu: null(), name: cls.as_ptr() };
-    RegisterClassA(&wc);
-    let style = if flags & 8 != 0 { 0x90000000u32 } else { 0x10CA0000u32 }; // WS_POPUP|WS_VISIBLE for fullscreen
-    let mut r = RECT { l: 0, t: 0, r: w as i32, b: h as i32 };
-    AdjustWindowRect(&mut r, style, 0);
-    let hwnd = CreateWindowExA(if flags & 1 != 0 { 8 } else { 0 }, cls.as_ptr(), b"d3d9 backend test\0".as_ptr(), style, 60, 80, r.r - r.l, r.b - r.t, null_mut(), null_mut(), inst, null_mut());
-    if hwnd.is_null() {
-        ps(b"FAIL CreateWindow\n");
-        ExitProcess(2);
-    }
-    if flags & 1 != 0 {
-        SetForegroundWindow(hwnd);
-    }
-    pump();
-
-    let d3d = Direct3DCreate9(32);
-    if d3d.is_null() {
-        ps(b"FAIL Direct3DCreate9\n");
-        ExitProcess(3);
-    }
-    let mut pp = [0u32; 14];
-    pp[0] = w;
-    pp[1] = h;
-    pp[2] = 22; // X8R8G8B8
-    pp[3] = 1;
-    pp[6] = 1; // SWAPEFFECT_DISCARD
-    pp[7] = hwnd as u32;
-    pp[8] = if flags & 8 != 0 { 0 } else { 1 }; // windowed
-    pp[9] = 1; // auto depth stencil
-    pp[10] = 75; // D24S8
-    pp[13] = 0x8000_0000; // PRESENT_INTERVAL_IMMEDIATE
-    let flags = match vp {
-        0 => 0x40,
-        1 => 0x20,
-        _ => 0x80,
-    };
-    let mut dev: P = null_mut();
-    let hr = com!(d3d, 16, fn(u32, u32, P, u32, *mut u32, *mut P) -> i32, 0, 1, hwnd, flags, pp.as_mut_ptr(), &mut dev);
-    if hr != 0 || dev.is_null() {
-        ps(b"FAIL CreateDevice hr=");
-        ph(hr as u32);
-        ps(b"\n");
-        ExitProcess(4);
-    }
-
-    // two checkerboard textures
-    let mut tex: [P; 2] = [null_mut(); 2];
-    let mut t = 0usize;
-    while t < 2 {
-        let fmt = if texfmt == 1 { 0x31545844 } else { 21 };
-        step(b"CreateTexture", com!(dev, 23, fn(u32, u32, u32, u32, u32, u32, *mut P, P) -> i32, 64, 64, 1, 0, fmt, 1, &mut tex[t], null_mut()));
-        let mut lr = [0u32; 2];
-        step(b"Tex.LockRect", com!(tex[t], 19, fn(u32, *mut u32, P, u32) -> i32, 0, lr.as_mut_ptr(), null_mut(), 0));
-        let pitch = lr[0] as usize;
-        let bits = lr[1] as *mut u8;
-        if texfmt == 1 {
-            // DXT1: 16x16 blocks of 8 bytes: two RGB565 colours + 4x4 2-bit indices
-            let mut b = 0usize;
-            while b < 256 {
-                let bright = ((b % 16) / 2 + (b / 16) / 2) % 2 == 0;
-                let c0: u16 = if bright { 0xFFFF } else if t == 0 { 0xB596 } else { 0x861F };
-                let blk = bits.add((b / 16) * pitch + (b % 16) * 8);
-                *(blk as *mut u16) = c0;
-                *(blk.add(2) as *mut u16) = c0;
-                *(blk.add(4) as *mut u32) = 0;
-                b += 1;
-            }
-        } else {
-            let mut y = 0usize;
-            while y < 64 {
-                let mut x = 0usize;
-                while x < 64 {
-                    let bright = ((x / 8) + (y / 8)) % 2 == 0;
-                    let c: u32 = if bright { 0xFFFFFFFF } else if t == 0 { 0xFFB0B0B0 } else { 0xFF80C0FF };
-                    *(bits.add(y * pitch + x * 4) as *mut u32) = c;
-                    x += 1;
-                }
-                y += 1;
-            }
-        }
-        step(b"Tex.UnlockRect", com!(tex[t], 20, fn(u32) -> i32, 0));
-        t += 1;
-    }
-
-    // mesh: GRID x GRID quads in the XY plane, 1x1 units, facing the camera
-    let mut n = 0usize;
-    let mut gy = 0usize;
-    while gy < GRID {
-        let mut gx = 0usize;
-        while gx < GRID {
-            let s = 1.0 / GRID as f32;
-            let (x0, y0) = (gx as f32 * s - 0.5, gy as f32 * s - 0.5);
-            let (x1, y1) = (x0 + s, y0 + s);
-            let c = [(x0, y0), (x0, y1), (x1, y0), (x1, y0), (x0, y1), (x1, y1)];
-            let mut k = 0;
-            while k < 6 {
-                let o = n * 8;
-                MESH[o] = c[k].0;
-                MESH[o + 1] = c[k].1;
-                MESH[o + 2] = 0.0;
-                MESH[o + 3] = 0.0;
-                MESH[o + 4] = 0.0;
-                MESH[o + 5] = -1.0;
-                MESH[o + 6] = c[k].0 + 0.5;
-                MESH[o + 7] = c[k].1 + 0.5;
-                n += 1;
-                k += 1;
-            }
-            gx += 1;
-        }
-        gy += 1;
-    }
-    let bytes = (MESH_VERTS * 32) as u32;
-    let mut vb: P = null_mut();
-    step(b"CreateVertexBuffer", com!(dev, 26, fn(u32, u32, u32, u32, *mut P, P) -> i32, bytes, 8, 0x112, 1, &mut vb, null_mut()));
-    let mut dst: *mut u8 = null_mut();
-    step(b"VB.Lock", com!(vb, 11, fn(u32, u32, *mut *mut u8, u32) -> i32, 0, bytes, &mut dst, 0));
-    memcpy(dst, MESH.as_ptr() as *const u8, bytes as usize);
-    step(b"VB.Unlock", com!(vb, 12, fn() -> i32));
-
-    step(b"CreateVertexBuffer(dyn)", com!(dev, 26, fn(u32, u32, u32, u32, *mut P, P) -> i32, 192 * 4096, 0x208, 0x112, 0, &mut DYNVB, null_mut()));
-    if WMODE == 10 || WMODE == 11 {
-        let mut k = 0usize;
-        while k < 2048 {
-            com!(dev, 23, fn(u32, u32, u32, u32, u32, u32, *mut P, P) -> i32, 64, 64, 3, 0, 21, 1, &mut SPARE[k], null_mut());
-            k += 1;
-        }
-    }
-    step(b"CreateVertexBuffer(managed)", com!(dev, 26, fn(u32, u32, u32, u32, *mut P, P) -> i32, 192 * 16, 8, 0x112, 1, &mut MANVB, null_mut()));
-    step(b"CreateVertexShader", com!(dev, 91, fn(*const u32, *mut P) -> i32, VS_CODE.as_ptr(), &mut VSH));
-    step(b"CreatePixelShader(ps_1_1)", com!(dev, 106, fn(*const u32, *mut P) -> i32, PS11_CODE.as_ptr(), &mut PSH[0]));
-    step(b"CreatePixelShader(ps_2_0)", com!(dev, 106, fn(*const u32, *mut P) -> i32, PS20_CODE.as_ptr(), &mut PSH[1]));
-    step(b"CreateVertexBuffer(ui)", com!(dev, 26, fn(u32, u32, u32, u32, *mut P, P) -> i32, 112, 0x208, 0x144, 0, &mut UIVB, null_mut()));
-    // camera, light, material, sampler/stage setup
-    let ys = 1.7320508f32;
-    let xs = ys * h as f32 / w as f32;
-    let (zn, zf) = (1.0f32, 2000.0f32);
-    PROJ = [xs, ys, zf / (zf - zn), -zn * zf / (zf - zn)];
-    let proj: [f32; 16] = [xs, 0.0, 0.0, 0.0, 0.0, ys, 0.0, 0.0, 0.0, 0.0, zf / (zf - zn), 1.0, 0.0, 0.0, -zn * zf / (zf - zn), 0.0];
-    let ident: [f32; 16] = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
-    com!(dev, 44, fn(u32, *const f32) -> i32, 3, proj.as_ptr());
-    com!(dev, 44, fn(u32, *const f32) -> i32, 2, ident.as_ptr());
-    let mut light = [0f32; 26];
-    light[0] = f32::from_bits(3); // D3DLIGHT_DIRECTIONAL
-    light[1] = 1.0;
-    light[2] = 1.0;
-    light[3] = 1.0;
-    light[4] = 1.0;
-    light[16] = 0.3;
-    light[17] = -0.3;
-    light[18] = 1.0;
-    step(b"SetLight", com!(dev, 51, fn(u32, *const f32) -> i32, 0, light.as_ptr()));
-    com!(dev, 53, fn(u32, i32) -> i32, 0, 1);
-    let mut mat = [0f32; 17];
-    let mut k = 0;
-    while k < 8 {
-        mat[k] = 1.0;
-        k += 1;
-    }
-    com!(dev, 49, fn(*const f32) -> i32, mat.as_ptr());
-    com!(dev, 57, fn(u32, u32) -> i32, 139, 0x00404040); // AMBIENT
-    com!(dev, 57, fn(u32, u32) -> i32, 22, 1); // CULLMODE none
-    com!(dev, 69, fn(u32, u32, u32) -> i32, 0, 5, 2); // MAGFILTER linear
-    com!(dev, 69, fn(u32, u32, u32) -> i32, 0, 6, 2); // MINFILTER linear
-    com!(dev, 67, fn(u32, u32, u32) -> i32, 0, 1, 4); // COLOROP modulate
-    com!(dev, 67, fn(u32, u32, u32) -> i32, 0, 2, 2); // COLORARG1 texture
-    com!(dev, 67, fn(u32, u32, u32) -> i32, 0, 3, 0); // COLORARG2 diffuse
-    com!(dev, 67, fn(u32, u32, u32) -> i32, 0, 4, 4); // ALPHAOP modulate
-    com!(dev, 67, fn(u32, u32, u32) -> i32, 0, 5, 2);
-    com!(dev, 67, fn(u32, u32, u32) -> i32, 0, 6, 0);
-
-    // warm-up, then timed run
-    let t0 = GetTickCount();
-    let mut phr = 0;
-    while GetTickCount().wrapping_sub(t0) < 1500 {
-        phr = frame(dev, vb, &tex, w, h, draws, true);
+/// Warms up, then draws frames for `seconds`. Returns the number of frames and the milliseconds they took.
+unsafe fn run(b: &mut Bench, dev: P, seconds: u32) -> (u32, u32) {
+    let start = GetTickCount();
+    let mut hr = 0;
+    while GetTickCount().wrapping_sub(start) < WARM_UP_MS {
+        hr = frame(b, dev, false);
         pump();
     }
-    step(b"Present (warm-up)", phr);
-    let t1 = GetTickCount();
-    T_SCENE = 0;
-    T_PRESENT = 0;
-    T_PART = [0; 5];
-    T_UI = [0; 3];
-    let mut frames = 0u32;
-    let mut el = 0u32;
-    while el < secs * 1000 {
-        phr = frame(dev, vb, &tex, w, h, draws, true);
+    report(b"Present (warm-up)", hr);
+
+    b.time = Timing::ZERO;
+    let start = GetTickCount();
+    let (mut frames, mut ms) = (0u32, 0u32);
+    while ms < seconds.saturating_mul(1000) {
+        hr = frame(b, dev, false);
         pump();
         frames += 1;
-        el = GetTickCount().wrapping_sub(t1);
+        ms = GetTickCount().wrapping_sub(start);
     }
-    step(b"Present", phr);
-    ps(b"RESULT frames=");
-    pu(frames);
-    ps(b" ms=");
-    pu(el);
-    ps(b" fps=");
-    pu(if el > 0 { frames * 1000 / el } else { 0 });
-    ps(b" draw-calls/s=");
-    pu(if el > 0 { (frames * 1000 / el) * (draws + 24) } else { 0 });
-    let mut f: i64 = 0;
-    QueryPerformanceFrequency(&mut f);
-    let per_us = (f as u32) / 1_000_000;
-    if frames > 0 && per_us > 0 {
-        ps(b" | per-frame us: scene=");
-        pu(T_SCENE / frames / per_us);
-        ps(b" present=");
-        pu(T_PRESENT / frames / per_us);
-        ps(b" [clear=");
-        pu(T_PART[0] / frames / per_us);
-        ps(b" begin=");
-        pu(T_PART[1] / frames / per_us);
-        ps(b" world=");
-        pu(T_PART[2] / frames / per_us);
-        ps(b" ui=");
-        pu(T_PART[3] / frames / per_us);
-        ps(b" end=");
-        pu(T_PART[4] / frames / per_us);
-        ps(b"] ui: state=");
-        pu(T_UI[0] / frames / per_us);
-        ps(b" first-quad=");
-        pu(T_UI[1] / frames / per_us);
-        ps(b" other-23=");
-        pu(T_UI[2] / frames / per_us);
-    }
-    ps(b"\n");
+    report(b"Present", hr);
+    (frames, ms)
+}
 
-    // read the back buffer: did anything other than the clear colour get drawn?
-    frame(dev, vb, &tex, w, h, draws, false);
-    let mut rt: P = null_mut();
-    let mut surf: P = null_mut();
-    step(b"GetRenderTarget", com!(dev, 38, fn(u32, *mut P) -> i32, 0, &mut rt));
-    step(b"CreateOffscreenPlainSurface", com!(dev, 36, fn(u32, u32, u32, u32, *mut P, P) -> i32, w, h, 22, 2, &mut surf, null_mut()));
-    let hr = com!(dev, 32, fn(P, P) -> i32, rt, surf);
-    step(b"GetRenderTargetData", hr);
-    if hr == 0 {
-        let mut lr = [0u32; 2];
-        step(b"Surf.LockRect", com!(surf, 13, fn(*mut u32, P, u32) -> i32, lr.as_mut_ptr(), null_mut(), 0x10));
-        let (pitch, bits) = (lr[0] as usize, lr[1] as *const u8);
-        let mut world = 0u32;
-        let mut ui = 0u32;
-        let mut sy = 0u32;
-        while sy < 16 {
-            let mut sx = 0u32;
-            while sx < 16 {
-                let (x, y) = ((w * (2 * sx + 1) / 32) as usize, ((h - 60) * (2 * sy + 1) / 32) as usize);
-                if *(bits.add(y * pitch + x * 4) as *const u32) & 0xFFFFFF != 0x203040 {
-                    world += 1;
-                }
-                sx += 1;
-            }
-            sy += 1;
-        }
-        let mut q = 0usize;
-        while q < 24 {
-            let (x, y) = (10 + q * 34 + 14, h as usize - 30);
-            if *(bits.add(y * pitch + x * 4) as *const u32) & 0xFFFFFF != 0x203040 {
-                ui += 1;
-            }
-            q += 1;
-        }
-        let centre = *(bits.add((h as usize / 2) * pitch + (w as usize / 2) * 4) as *const u32);
-        ps(b"PIXELS world-samples-drawn=");
-        pu(world);
-        ps(b"/256 ui-quads-drawn=");
-        pu(ui);
-        ps(b"/24 centre=");
-        ph(centre);
-        ps(b"\n");
+unsafe fn print_result(b: &Bench, frames: u32, ms: u32) {
+    let per_second = |n: u64| if ms > 0 { (n * 1000 / ms as u64) as u32 } else { 0 };
+    let ui_draws = if b.ui == Ui::None { 0 } else { UI_QUADS };
+    field(b"RESULT frames=", frames);
+    field(b" ms=", ms);
+    field(b" fps=", per_second(frames as u64));
+    field(b" draw-calls/s=", per_second(frames as u64 * (b.draws as u64 + ui_draws as u64)));
+
+    let mut frequency: i64 = 0;
+    QueryPerformanceFrequency(&mut frequency);
+    let ticks_per_frame_second = frequency as u64 * frames as u64;
+    if ticks_per_frame_second > 0 {
+        let us = |ticks: u64| (ticks.saturating_mul(1_000_000) / ticks_per_frame_second) as u32;
+        let t = &b.time;
+        field(b" | per-frame us: scene=", us(t.scene));
+        field(b" present=", us(t.present));
+        field(b" [clear=", us(t.clear));
+        field(b" begin=", us(t.begin));
+        field(b" world=", us(t.world));
+        field(b" ui=", us(t.ui));
+        field(b" end=", us(t.end));
+        field(b"] ui: state=", us(t.ui_state));
+        field(b" first-quad=", us(t.ui_first_quad));
+        field(b" other-23=", us(t.ui_other_quads));
     }
+    print(b"\n");
+}
+
+/// Draws one more frame and reads the back buffer: did anything other than the clear colour get drawn?
+unsafe fn check_pixels(b: &mut Bench, dev: P, o: &Options) {
+    frame(b, dev, true);
+    let mut target: P = null_mut();
+    let mut copy: P = null_mut();
+    require(b"GetRenderTarget", d3d::get_render_target(dev, 0, &mut target));
+    require(
+        b"CreateOffscreenPlainSurface",
+        d3d::create_offscreen_plain_surface(dev, o.width, o.height, FMT_X8R8G8B8, POOL_SYSTEMMEM, &mut copy, null_mut()),
+    );
+    require(b"GetRenderTargetData", d3d::get_render_target_data(dev, target, copy));
+    let mut r = LockedRect::EMPTY;
+    require(b"Surf.LockRect", d3d::surface_lock_rect(copy, &mut r, null_mut(), LOCK_READONLY));
+    require_pointer(b"Surf.LockRect", r.bits);
+
+    let (w, h) = (o.width as usize, o.height as usize);
+    let pixel = |x: usize, y: usize| *(r.bits.add(y * r.pitch as usize + x * 4) as *const u32);
+    let drawn = |x: usize, y: usize| pixel(x, y) & RGB != CLEAR_COLOR & RGB;
+    // a 16 x 16 grid over the picture above the UI row, then the middle of each UI quad
+    let mut world = 0u32;
+    for sy in 0..16 {
+        for sx in 0..16 {
+            world += drawn(w * (2 * sx + 1) / 32, h.saturating_sub(60) * (2 * sy + 1) / 32) as u32;
+        }
+    }
+    let mut ui = 0u32;
+    for q in 0..UI_QUADS as usize {
+        ui += drawn(10 + q * 34 + 14, h.saturating_sub(30)) as u32;
+    }
+    field(b"PIXELS world-samples-drawn=", world);
+    field(b"/256 ui-quads-drawn=", ui);
+    print(b"/24 centre=");
+    print_hex(pixel(w / 2, h / 2));
+    print(b"\n");
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mainCRTStartup() -> ! {
+    let o = options();
+    field(b"d3d9bench vp=", o.vertex_processing);
+    field(b" ", o.width);
+    field(b"x", o.height);
+    field(b" draws/frame=", o.draws);
+    field(b" tris/draw=", MESH_TRIANGLES);
+    field(b" mode=", o.mode);
+    print(b"\n");
+    if o.width > MAX_SIZE || o.height > MAX_SIZE {
+        print(b"FAIL size: at most 16384 x 16384\n");
+        ExitProcess(EXIT_BAD_ARGUMENTS);
+    }
+
+    let window = create_window(&o);
+    let dev = create_device(&o, window);
+    let b = &mut *(&raw mut BENCH);
+    b.mode = o.mode;
+    b.ui = o.ui;
+    b.height = o.height;
+    b.draws = o.draws;
+    create_resources(b, dev, &o);
+    set_fixed_state(b, dev, &o);
+
+    let (frames, ms) = run(b, dev, o.seconds);
+    print_result(b, frames, ms);
+    check_pixels(b, dev, &o);
     ExitProcess(0)
 }
