@@ -98,7 +98,33 @@ static double rndRange(double lo, double hi) { return lo + (hi - lo) * double(rn
 
 static int g_reached = 0;   // shaped calls whose first output was written by the original
 
+static void putGlobalFloat(uint32_t rva, float v) {   // in the image's writable data, restored before every call
+  const size_t off = size_t(rva) - size_t(g_data - g_base);
+  if (off + 4 <= g_dataSize) memcpy(g_dataInit + off, &v, 4);
+}
+
+static float rndShapeFloat() {   // ordinary values, sometimes repeated exactly
+  static float last = 0.0f;
+  if (rnd32() % 8 == 0) return last;
+  return last = float(int32_t(rnd32() % 200001) - 100000) / float(1 + rnd32() % 100);
+}
+
 static void shapeInput(const GameFn& g) {
+  if (g.rva == 0x4859d0) {
+    // sort comparator: two pointers to element pointers; each element has a box at +24..+2c (min) and +30..+38
+    // (max); compared along the direction held in globals at 0xa76a08..0xa76a10
+    const size_t objA = BlockSize * 9, objB = BlockSize * 10;
+    g_init[BlockSize * 1 / 4] = uint32_t(uintptr_t(g_arena)) + objA;
+    g_init[BlockSize * 2 / 4] = uint32_t(uintptr_t(g_arena)) + (rnd32() % 16 ? objB : objA);
+    for (size_t o = 0x24; o <= 0x38; o += 4) {
+      float a = rndShapeFloat(), b = rnd32() % 6 ? rndShapeFloat() : a;
+      memcpy((uint8_t*)g_init + objA + o, &a, 4);
+      memcpy((uint8_t*)g_init + objB + o, &b, 4);
+    }
+    for (uint32_t r = 0xa76a08; r <= 0xa76a10; r += 4)
+      putGlobalFloat(r, rnd32() % 5 ? rndShapeFloat() / 1000.0f : 0.0f);
+    return;
+  }
   if (g.rva != 0x47ddb0) return;
   const size_t grid = BlockSize * 8, pos = BlockSize * 1;
   g_init[2] = uint32_t(uintptr_t(g_arena)) + grid;
@@ -143,6 +169,7 @@ static DWORD WINAPI gameWorker(void* param) {
     Result ra = runOne(g_base + g.rva, g, args);
     memcpy(g_resA, g_arena, BlockSize * Blocks);
     if (g.rva == 0x47ddb0 && g_resA[BlockSize * 2 / 4] != 0xffffffffu && !ra.crashed) g_reached++;
+    if (g.rva == 0x4859d0 && !ra.crashed) g_reached++;
     memcpy(g_dataA, g_data, g_dataSize);
     memcpy(g_data, g_dataInit, g_dataSize);
     memcpy(g_arena, g_init, BlockSize * Blocks);
