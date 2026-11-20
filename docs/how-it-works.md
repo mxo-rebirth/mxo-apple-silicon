@@ -51,12 +51,15 @@ Fullscreen 3440×1440, maximum detail, full draw distance, music on, Apple M4:
 | Entering the world | about 50 s at 3–8 fps | no stall |
 | Map open | 10 fps | about 5 fps below the world |
 
+Two "before" figures are stock CrossOver: the 15 fps in the world and the loading area. The
+others are from early builds of this DLL, before the fix for each problem.
+
 The game's main thread is now the limit; the GPU is idle a third to half of the time. Method,
 numbers per build and open problems: [measurements.md](measurements.md).
 
 ## Limits
 
-- Not tested: long sessions, combat, interiors, other districts, any other Mac.
+- Not tested: long sessions, interiors, other districts, any other Mac.
 - The translation trades the FPU's extended exponent range for speed. Results match for every
   value a `float` can hold; `xlat.py --exact-range` reproduces the full range at a cost.
 - It patches `client.dll` in memory. That is also what cheats do; see the questions below.

@@ -125,4 +125,4 @@ What is left in "Wine and system code":
 - **One unexplained freeze** at the loading screen with an early build. It has not recurred.
 - **Thirteen routines** translate but cannot be verified by the tests, so they stay original
   ([client-notes.md](client-notes.md#routines-we-identified)).
-- **Not tested:** long sessions, combat, interiors, other districts, any other Mac.
+- **Not tested:** long sessions, interiors, other districts, any other Mac.
