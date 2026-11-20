@@ -117,7 +117,9 @@ called `MatrixOnline`. Close the game and its launcher first.
    The first two are required: without the first, DXVK froze in most runs; without the second,
    the game ran out of its 2 GB of address space and crashed after about a minute in the world.
    The test machine also has `"WINEMSYNC" = "1"`, and `"DXVK_HUD" = "fps,frametimes,gpuload"`
-   provides a frame-rate overlay (hidden until Ctrl+Shift+F).
+   provides a frame-rate overlay (hidden until Ctrl+Shift+F). `"DXVK_FRAME_RATE" = "90"` limits
+   the frame rate: without a limit the game reaches up to 200 fps in light scenes, which only
+   makes heat and fan noise.
 
 4. Leave the bottle's Graphics setting in CrossOver on **Auto**, not DXVK.
 

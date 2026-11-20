@@ -5,6 +5,7 @@
 #   scripts/setup.sh                      everything, asking before each step
 #   scripts/setup.sh --yes                everything, no questions (first bottle found)
 #   scripts/setup.sh --bottle NAME step…  only the named steps, in the named bottle
+#   scripts/setup.sh --fps 120 install    another frame-rate limit (default 90, 0 for none)
 #
 # Steps:
 #   bottle     what the game needs to start: Microsoft's shader compiler, DirectMusic and DirectSound
@@ -35,6 +36,7 @@ YES=0
 BOTTLE=""
 DLL=""
 EXTRA_EXES=""
+FPS=90
 STEPS=""
 
 while [ $# -gt 0 ]; do
@@ -43,6 +45,7 @@ while [ $# -gt 0 ]; do
     --bottle) BOTTLE="$2"; shift ;;
     --dll) DLL="$2"; shift ;;
     --exe) EXTRA_EXES="$EXTRA_EXES $2"; shift ;;
+    --fps) FPS="$2"; shift ;;
     -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
     bottle|build|install|music|uninstall) STEPS="$STEPS $1" ;;
     *) echo "unknown argument: $1 (see --help)" >&2; exit 1 ;;
@@ -61,6 +64,7 @@ ask() {   # ask "question" -> 0 for yes
   case "$answer" in n|N|no|No) return 1 ;; *) return 0 ;; esac
 }
 
+case "$FPS" in ''|*[!0-9]*) die "--fps takes a number, 0 for no limit" ;; esac
 [ -x "$WINE" ] || die "CrossOver not found in /Applications"
 
 # --- bottle -------------------------------------------------------------------------------------
@@ -264,6 +268,12 @@ step_install() {
   set_env DXVK_LOG_PATH C:/Games/dxvk
   set_env DXVK_STATE_CACHE_PATH C:/Games/dxvk
   if ask "Provide a frame-rate overlay in the game (hidden until Ctrl+Shift+F)?"; then set_env DXVK_HUD fps,frametimes,gpuload; fi
+  # without a limit the game draws up to 200 fps in light scenes, which only makes heat and fan noise
+  if [ "$FPS" -gt 0 ] && ask "Limit the frame rate to $FPS fps (quieter fans)?"; then
+    set_env DXVK_FRAME_RATE "$FPS"
+  else
+    unset_env DXVK_FRAME_RATE
+  fi
   # every executable starts with the pipelines the others have already built
   local caches=() c
   for c in "$DRIVE/Games/dxvk"/*.dxvk-cache; do [ -f "$c" ] && caches+=("$c"); done
@@ -311,7 +321,7 @@ step_uninstall() {
   if [ -f "$SYS/d3d9.dll.setup-backup" ]; then
     cp "$SYS/d3d9.dll.setup-backup" "$SYS/d3d9.dll"
   fi
-  for v in DXVK_LOG_PATH DXVK_STATE_CACHE_PATH DXVK_HUD; do unset_env "$v"; done
+  for v in DXVK_LOG_PATH DXVK_STATE_CACHE_PATH DXVK_HUD DXVK_FRAME_RATE; do unset_env "$v"; done
   info "done; DirectMusic, DirectSound and the large address space stay, the game needs them"
 }
 

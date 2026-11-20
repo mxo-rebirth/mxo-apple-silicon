@@ -39,6 +39,9 @@ Then start the game from its launcher as usual.
 
 - **Ctrl+Shift+F** in the game shows or hides the frame-rate counter (if you chose it during
   setup). It starts hidden.
+- **Fan noise:** the setup offers to limit the frame rate to 90 fps. Without a limit the game
+  reaches up to 200 fps in light scenes, which only makes heat. For another limit run
+  `scripts/setup.sh --fps 120 install`; `--fps 0` removes it.
 - **Another project's client:** if its game executable is not `matrix.exe` or `mxorev.exe`, name
   it: `scripts/setup.sh --exe name.exe`.
 - **Rejacked:** untick "Use the new glow shader for 'Screen Filter: Over-Bright' (BETA)" in the
