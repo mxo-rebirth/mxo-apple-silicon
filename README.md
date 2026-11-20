@@ -1,7 +1,7 @@
 # The Matrix Online on Apple Silicon Macs
 
-Makes The Matrix Online run fast in CrossOver on Apple Silicon Macs, for MxO Rejacked, MxO Revived
-and other projects that use the 2009 client.
+Makes The Matrix Online run fast in CrossOver on Apple Silicon Macs. It is for any project that
+uses the 2009 client; it was tested with MxO Rejacked and MxO Revived.
 
 On the test machine (M4, fullscreen 3440×1440, maximum detail) the game went from about 15 fps
 with a shortened draw distance to 55–89 fps at full draw distance.
@@ -39,6 +39,8 @@ Then start the game from its launcher as usual.
 
 - **Ctrl+Shift+F** in the game shows or hides the frame-rate counter (if you chose it during
   setup). It starts hidden.
+- **Another project's client:** if its game executable is not `matrix.exe` or `mxorev.exe`, name
+  it: `scripts/setup.sh --exe name.exe`.
 - **Rejacked:** untick "Use the new glow shader for 'Screen Filter: Over-Bright' (BETA)" in the
   launcher. It halves the frame rate at high resolutions.
 - **Close memory-hungry apps** before playing. When the Mac is short of memory, the game can
