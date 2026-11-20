@@ -117,7 +117,7 @@ called `MatrixOnline`. Close the game and its launcher first.
    The first two are required: without the first, DXVK froze in most runs; without the second,
    the game ran out of its 2 GB of address space and crashed after about a minute in the world.
    The test machine also has `"WINEMSYNC" = "1"`, and `"DXVK_HUD" = "fps,frametimes,gpuload"`
-   puts a frame-rate overlay in the corner.
+   provides a frame-rate overlay (hidden until Ctrl+Shift+F).
 
 4. Leave the bottle's Graphics setting in CrossOver on **Auto**, not DXVK.
 
@@ -163,7 +163,7 @@ Files in `C:\Games\dxvk` (`drive_c/Games/dxvk`), read when the game starts:
 | `sample.flag` | empty file. A sampling profiler records where every thread is and who called it, and appends it to `samples.bin` every 10 s. It pauses every thread every 5 ms, which makes memory writes in the game much slower than they really are; do not judge frame rates with it. |
 | `sample-light.flag` | empty file. The same profiler, but only for the game's main thread and DXVK's own threads, every 20 ms. Distorts far less. |
 
-In the game, **Ctrl+Shift+F** shows or hides the `DXVK_HUD` overlay.
+The `DXVK_HUD` overlay starts hidden; **Ctrl+Shift+F** in the game shows or hides it.
 
 The game's own setting, in `options.cfg`:
 

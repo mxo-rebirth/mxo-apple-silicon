@@ -38,7 +38,7 @@ Then start the game from its launcher as usual.
 ## Tips
 
 - **Ctrl+Shift+F** in the game shows or hides the frame-rate counter (if you chose it during
-  setup).
+  setup). It starts hidden.
 - **Rejacked:** untick "Use the new glow shader for 'Screen Filter: Over-Bright' (BETA)" in the
   launcher. It halves the frame rate at high resolutions.
 - **Close memory-hungry apps** before playing. When the Mac is short of memory, the game can

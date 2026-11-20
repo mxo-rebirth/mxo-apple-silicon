@@ -1598,7 +1598,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      else if (message == WM_SIZE)
      {
        D3DDEVICE_CREATION_PARAMETERS create_parms;
-@@ -184,6 +213,567 @@
+@@ -184,6 +213,575 @@
    };
  
  
@@ -1623,11 +1623,19 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +  static DWORD s_presentThreadId = 0;
 +
-+  // Ctrl+Shift+F shows or hides the DXVK_HUD overlay
-+  static std::atomic<bool> s_hudHidden = { false };
++  // The DXVK_HUD overlay starts hidden; Ctrl+Shift+F shows or hides it. The keys are looked at ten times a
++  // second, not on every frame: each look is a call into Wine's input handling.
++  static std::atomic<bool> s_hudHidden = { true };
 +
 +  static void UpdateHudToggle() {
-+    static bool s_wasDown = false;
++    static bool  s_wasDown  = false;
++    static DWORD s_lastLook = 0;
++    const DWORD now = ::GetTickCount();
++
++    if (now - s_lastLook < 100)
++      return;
++
++    s_lastLook = now;
 +    const bool down = (::GetAsyncKeyState(VK_CONTROL) & 0x8000) && (::GetAsyncKeyState(VK_SHIFT) & 0x8000)
 +                   && (::GetAsyncKeyState('F') & 0x8000);
 +    if (down && !s_wasDown)
@@ -2166,11 +2174,12 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
    D3D9SwapChainEx::D3D9SwapChainEx(
            D3D9DeviceEx*          pDevice,
            D3DPRESENT_PARAMETERS* pPresentParams,
-@@ -255,6 +845,11 @@
+@@ -255,6 +853,12 @@
            HWND     hDestWindowOverride,
      const RGNDATA* pDirtyRegion,
            DWORD    dwFlags) {
-+    UpdateHudToggle();
++    if (m_hud != nullptr)   // only when DXVK_HUD asked for an overlay
++      UpdateHudToggle();
 +    DebugFrameTools(m_parent, m_backBuffers.empty() ? nullptr : m_backBuffers[0].ptr());
 +    StartSamplerOnce();
 +    CheckMxoFastMathFpu();
@@ -2178,7 +2187,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      D3D9DeviceLock lock = m_parent->LockDevice();
  
      uint32_t presentInterval = m_presentParams.PresentationInterval;
-@@ -852,11 +1447,103 @@
+@@ -852,11 +1456,103 @@
          {  int32_t(m_dstRect.left),                    int32_t(m_dstRect.top)                    },
          { uint32_t(m_dstRect.right - m_dstRect.left), uint32_t(m_dstRect.bottom - m_dstRect.top) } };
  

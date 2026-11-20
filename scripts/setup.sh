@@ -263,7 +263,7 @@ step_install() {
   set_env WINE_LARGE_ADDRESS_AWARE 1
   set_env DXVK_LOG_PATH C:/Games/dxvk
   set_env DXVK_STATE_CACHE_PATH C:/Games/dxvk
-  if ask "Show a frame-rate overlay in the game (Ctrl+Shift+F hides it)?"; then set_env DXVK_HUD fps,frametimes,gpuload; fi
+  if ask "Provide a frame-rate overlay in the game (hidden until Ctrl+Shift+F)?"; then set_env DXVK_HUD fps,frametimes,gpuload; fi
   # every executable starts with the pipelines the others have already built
   local caches=() c
   for c in "$DRIVE/Games/dxvk"/*.dxvk-cache; do [ -f "$c" ] && caches+=("$c"); done
