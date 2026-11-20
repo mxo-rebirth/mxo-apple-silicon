@@ -41,7 +41,14 @@ if [ "${MXO_COMPILER:-clang}" != gcc ] && [ ! -x "$LLVM_MINGW/bin/i686-w64-mingw
     "https://github.com/mstorsjo/llvm-mingw/releases/download/$LLVM_MINGW_VERSION/llvm-mingw-$LLVM_MINGW_VERSION-ucrt-macos-universal.tar.xz"
   echo "$LLVM_MINGW_SHA256  $archive.part" | shasum -a 256 -c - >/dev/null || { echo "llvm-mingw checksum mismatch" >&2; exit 1; }
   mv "$archive.part" "$archive"
-  tar -xJf "$archive" -C "$WORK/toolchain"
+  # Unpacked next to its final place and renamed when complete, so an interrupted run never leaves a toolchain
+  # folder that looks installed.
+  unpack="$WORK/toolchain/unpacking"
+  rm -rf "${unpack:?}" "${LLVM_MINGW:?}"
+  mkdir -p "$unpack"
+  tar -xJf "$archive" -C "$unpack"
+  mv "$unpack/$(basename "$LLVM_MINGW")" "$LLVM_MINGW"
+  rm -rf "${unpack:?}"
   rm -f "$archive"
 fi
 

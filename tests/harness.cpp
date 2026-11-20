@@ -18,7 +18,7 @@ extern "C" {
   extern uint32_t XT_tid, XT_imagebase;
   void t1(); void t2(); void t3(); void t4(); void t5(); void t6(); void t7(); void t8(); void t8h(); void t9(); void t10(); void t11();
 #ifdef WITH_GAME
-  extern uint32_t MxoX_funcs[], MxoX_absfix[], MxoX_relfix[], MxoX_deps[];
+  extern uint32_t MxoX_funcs[], MxoX_absfix[], MxoX_relfix[], MxoX_deps[], MxoX_crtslots[];
   extern uint8_t  MxoX_code_begin[], MxoX_code_end[];
   extern uint32_t MxoX_tid, MxoX_imagebase;
 #endif

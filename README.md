@@ -4,7 +4,7 @@ Makes The Matrix Online run fast in CrossOver on Apple Silicon Macs, for MxO Rej
 and other projects that use the 2009 client.
 
 On the test machine (M4, fullscreen 3440×1440, maximum detail) the game went from about 15 fps
-with a shortened draw distance to 44–64 fps at full draw distance.
+with a shortened draw distance to 55–89 fps at full draw distance.
 
 ## What you need
 

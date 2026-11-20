@@ -40,7 +40,15 @@ MXO_CLIENT_DLL='C:\Games\MxO\client.dll' \
 wine --bottle MatrixOnline -- 'C:\somewhere\xtest.exe' 100 game        # game routines, 100 cases each
 ```
 
-The synthetic part must report zero mismatches.
+`xtest.exe <iterations> synth` runs only the synthetic part. Run one test program at a time per folder:
+the game part writes `fuzz.txt` in the current folder.
+
+The synthetic part runs three passes. With ordinary inputs and on the other-thread path it must report
+zero mismatches. The pass with huge, tiny, zero, infinite and NaN inputs reports zero only for a
+translation made with `--exact-range`; the default, faster form differs there where a value leaves the
+float range (see HOW-IT-WORKS.md), and its counts must not change from one translator version to the
+next. A translated caller reaches the translation of its callee directly, so such a difference in a
+callee shows in its callers too.
 
 With `MXO_PLAIN=1` the game part fills the scratch area with ordinary float values only (no integers,
 pointers, huge or tiny numbers). The translation keeps values in the float range, so on such input it
@@ -50,7 +58,13 @@ run to completion that way, because many need pointers to work on.
 With `MXO_SHAPE=1` some routines get plausible input instead of random memory, because random memory
 rarely gets far into them. So far that is the map routine at `0x47DDB0` (world position to map grid
 cell): a map object with sane bounds, grid size and cell size, and positions mostly inside the map. The
-`reached=` count in `fuzz.txt` says how many calls got all the way to the result.
+`reached=` count in `fuzz.txt` says how many calls got all the way to the result. The sort comparator at
+`0x4859D0` gets two elements with boxes and a direction in the image's globals; those globals are put back
+to what the image holds before the next routine runs.
+
+The image is loaded without its imports. Originals that call msvcr71's `floor` or `ceil` would crash
+where their translations compute the result in place, so those two import slots get the real functions;
+the translator's table (`MxoX_crtslots`) says where they are.
 
 The game part calls each routine blind: random floats, a few small integers and pointers into a
 scratch area, with no idea what the routine expects. Many routines crash on that (in both
@@ -64,7 +78,9 @@ What matters is the list of routines where the two versions *differ*. On the ref
   on ordinary values they are identical;
 - `eax` left over from `fnstsw ax` can differ in the bits that report the FPU stack pointer
   when a callee that should have returned a float did not;
-- when two NaNs meet, x87 and SSE2 keep a different one.
+- when two NaNs meet, x87 and SSE2 keep a different one;
+- a routine that returns a `bool` in `al` can leave a different `ah` (the status word is no longer put
+  into `ax` where nothing reads it), and a routine that returns a float leaves whatever `eax` held.
 
 ## sqrt
 
@@ -72,9 +88,6 @@ What matters is the list of routines where the two versions *differ*. On the ref
 Wine's own `sqrt`: random and edge-case inputs, values whose root lies exactly halfway between two
 floats, under seven FPU control words. It must report zero differences; it also prints the time per
 call of both (about 500 ns for Wine's x87 version under Rosetta, about 50 ns for the replacement).
-
-`xtest.exe <iterations> synth` runs only the synthetic part. Run one test program at a time per folder:
-the game part writes `fuzz.txt` in the current folder.
 
 ## floor and ceil
 

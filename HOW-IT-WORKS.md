@@ -27,10 +27,10 @@ machine from their own `client.dll`.
   25%, to chase 30 fps. A slow machine therefore shows "15–20 fps" at any speed, just with less
   world drawn. Frame-rate comparisons mean little unless the throttle is held at a fixed value.
 - **Result so far:** fullscreen at 3440×1440 with maximum detail, in the world: Rejacked
-  44–64 fps and Revived 44–57 fps, both with music. Before this work the same machine showed
-  8–18 fps in the loading area and around 15 fps in the world, with the draw distance cut. The
-  GPU is now busy 93–100% of the time, so the graphics chip itself is the limit at that
-  resolution. Details and caveats are under [Results](#results).
+  55–89 fps (74 on average), with music; Revived was last measured at 42–65 fps with an earlier
+  build. Before this work the same machine showed 8–18 fps in the loading area and around 15 fps
+  in the world, with the draw distance cut. The game's main thread is now the limit: the GPU is
+  idle a third to half of the time. Details and caveats are under [Results](#results).
 - **Two more problems were specific to this DXVK version on Apple GPUs** and cost far more than
   expected: every draw copied all 8,192 software vertex shader constants (128 KB), and memory
   that the game freed was handed back to the system and requested again, which is slow under
@@ -203,8 +203,9 @@ Direct3D 9. No game file is modified on disk.
 | Address space | `WINE_LARGE_ADDRESS_AWARE=1` in the bottle's environment gives the 32-bit game 4 GB |
 | Triangle fans | Metal has no triangle fans, so MoltenVK turns every fan draw into a small compute job first, which interrupts the drawing pass. The game draws its map as about 800 fans per frame (10 fps with the map open). Fans are now drawn as indexed triangle lists with a prepared index buffer: map 10 to 30 fps, and in the world the GPU went from fully busy to about 45% idle |
 | Work sent to the GPU mid-frame | DXVK submitted work after many buffer unlocks; each submission ends the drawing pass. Those hints now submit only when the GPU has nothing queued |
-| Compiler | Homebrew's 32-bit GCC uses setjmp/longjmp exceptions: registering and unregistering an unwind frame on nearly every function call, through Wine's thread-local storage. Built with llvm-mingw (DWARF unwinding, no cost until something throws), the DLL's share of the main thread fell from 14% to 7%. The translated routines assemble to the same instructions |
+| Compiler | Homebrew's 32-bit GCC uses setjmp/longjmp exceptions: registering and unregistering an unwind frame on nearly every function call, through Wine's thread-local storage. Built with llvm-mingw (DWARF unwinding, no cost until something throws), the DLL's share of the main thread fell from 12% to 6%. The translated routines assemble to the same instructions |
 | `sqrt` | The game calls `MSVCR71!sqrt`, which Wine implements with the x87 `fsqrt`; Rosetta emulates it at about 500 ns per call, 3% of the main thread. The client's import of it now points at an SSE2 version (50 ns) that gives the same bits: it computes only when the thread runs at 24-bit or 53-bit precision with rounding to nearest, the input is positive and finite, and (at 24 bits) the result is a normal float that does not sit exactly halfway between two floats; anything else goes to Wine's `sqrt`. `DXVK_MXO_SQRT=0` turns it off |
+| Window sized before the display mode switch finished | Under Wine the switch to another display mode completes after DXVK has sized the fullscreen window, so a 3440×1440 window on the 800×600 login screen showed only its top left part. The window is sized to the monitor again when `WM_DISPLAYCHANGE` arrives. A check every 60 frames does the same in case that message never comes: at most three times per display mode, so a window that cannot take the monitor's size is not fought over. Neither path touches a device created with `D3DCREATE_NOWINDOWCHANGES`, and neither acts on a failed or empty monitor query |
 | Stalls under memory pressure | memory shared with the GPU stays locked in RAM (`VirtualLock`), so macOS cannot compress or swap it out; it is released when the memory is freed |
 
 ### Replacing the x87 routines
@@ -233,13 +234,18 @@ Direct3D 9. No game file is modified on disk.
   labels and returns, where every register holds a double again. Because a 24-bit result
   rounded once more to 24 bits does not change, this gives the same bits as computing in double
   and rounding: 527 routines now need 55,500 instructions instead of 78,600, and conversions
-  between float and double fell from 27,600 to 6,100.
+  between float and double fell from 27,600 to 6,100. Two floats are also compared as floats
+  (`ucomiss`): widening both to double first changes neither their order nor whether one is a
+  NaN. One difference from the x87 that the tests cannot see, because they treat every NaN as
+  equal: a signalling NaN that is loaded from a `float` and stored again keeps its bits, where
+  the x87 would turn it into a quiet NaN.
 - **Compares branch directly.** The original reads the FPU status word (`fnstsw ax`), tests bits of `ah`
   and jumps. Rebuilding that status word from an SSE compare takes `lahf` and parity flags, which Rosetta
   computes in software. Where the code only tests `ah` and jumps, and flow analysis shows that neither the
   flags nor the bytes of `ax` holding the status word are read again before being overwritten, the
-  translation branches on the SSE compare itself (1,316 of 1,607 places in the current list). A routine
-  that returns a `bool` in `al` may then return a different, unused `ah`.
+  translation branches on the SSE compare itself (1,365 of 1,698 places in the current list). This is done
+  only for tests of the three condition bits; a test of any other bit of `ah` (the FPU stack pointer) keeps
+  the full status word. A routine that returns a `bool` in `al` may then return a different, unused `ah`.
 - **`floor` and `ceil`** called through the client's import table are computed in place with SSE4.1
   `roundsd`, which gives the same bits as msvcr71's functions. The installer keeps such a routine original
   if the import slot does not hold msvcr71's own function.
@@ -347,22 +353,22 @@ the limit. What is left are single slow frames: mostly frames with 4,000–6,000
 plus a few hundred-millisecond pauses while signing in or loading, and one 0.6-second pause in
 the world with no graphics activity at all (so it comes from the game itself).
 
-With single precision in 527 routines (v26), same settings, about 3,000–4,500 draw calls per
-frame:
+Later builds, Rejacked, same settings. The figures come from `scripts/fps-summary.py`, which takes the
+five-second windows of the frame log with more than 2,500 draw calls per frame:
 
-| | In the world |
-|---|---|
-| Rejacked | 42–74 fps, 62 on average |
-| Revived | 42–65 fps, 58 on average |
+| Build | Change | In the world | Draw calls per frame | Frame time per 1,000 draw calls |
+|---|---|---|---|---|
+| v26 | single precision in 527 routines | 42–74 fps, 59 on average | 3,600 | 4.7 ms |
+| v28 | map grid lookup translated, llvm-mingw build | 48–88 fps, 63 on average | 4,000 | 4.0 ms |
+| v30 | `sqrt` replacement | 54–82 fps, 69 on average | 3,700 | 3.9 ms |
+| v33 | compare branches, `floor` and `ceil` in place, float returns in `xmm0` | 60–87 fps, 73 on average | 3,600 | 3.8 ms |
+| v36 | floats compared as floats | 55–89 fps, 74 on average | 3,600 | 3.8 ms |
 
-With the map's grid lookup translated (v27) and the llvm-mingw build (v28), Rejacked averaged 67
-fps in the world, against 61–62 before, at about 3,300 draw calls per frame. Opening the map now
-costs about 5 fps (it was 15–20): one routine, at `0x47DDB0`, had taken 18% of the main thread
-with the map open.
-
-With the `sqrt` replacement (v30) and the translator changes above (v33), translated routines went from
-43% to 38.5% of the main thread, and Rejacked's average in the world went from 67 to 69–78 fps
-depending on the scene.
+The scenes differ between sessions, so the frame time per draw call is the better comparison. Revived was
+last measured with v26: 42–65 fps, 58 on average. Opening the map costs about 5 fps since v27 (it was
+15–20): one routine, at `0x47DDB0`, had taken 18% of the main thread with the map open. The game's math
+(translated and hand-written routines together) went from 46.5% of the main thread with v30 to 40.7%
+with v33.
 
 Settings that changed the numbers:
 

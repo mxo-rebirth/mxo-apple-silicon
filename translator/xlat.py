@@ -341,6 +341,7 @@ class Translator:
         self.tabledeps = []  # (rva, size) of original switch tables the translations were made from
         self.info = []
         self.edgeconv = 0     # float-to-double conversions placed at branches and branch targets (fast mode)
+        self.fused = 0        # status word reads turned into direct branches on the compare
         self.inlined = []     # (import slot rva, routine rva, INLINE_IMPORTS number) of imports computed in place
         self.xr_targets = set()   # routines translated callers call directly, result in xmm0 (see translate's xr)
         self.xrdeps = set()   # (caller rva, callee rva) of such calls
@@ -415,17 +416,12 @@ class Translator:
 
     # ---- emission --------------------------------------------------------------------------
     def rnd(self, x):
-        """Rounds x to a 24-bit significand, nearest-even.
+        """Rounds the double in x to a 24-bit significand, nearest-even, keeping the x87 exponent range
+        (--exact-range): add and subtract 1.5 * 2^(exponent + 29) with the sign of x. Needs only T1; no flags.
 
-        Default: convert to float and back. Both are full-width forms, which the translator under
-        Rosetta handles in one step each. This equals the x87 result whenever the value lies in the
-        float range; beyond it the x87 keeps a finite value or a normal tiny one, where this gives
-        infinity or a float denormal.
-
-        With exact: add and subtract 1.5 * 2^(exponent + 29) with the sign of x, which keeps the
-        x87 exponent range. Needs only T1; no flags."""
-        if not self.exact:
-            return ['cvtpd2ps %s, %s' % (x, x), 'cvtps2pd %s, %s' % (x, x)]
+        Fast mode converts to float instead (see rounded() in translate): the same result whenever the value
+        lies in the float range; beyond it the x87 keeps a finite value or a normal tiny one, where the float
+        gives infinity or a denormal."""
         p = self.prefix
         return ['movapd %s, %s' % (T1, x),
                 'andpd %s, XMMWORD PTR [_%s_signexp]' % (T1, p),
@@ -612,11 +608,12 @@ class Translator:
         self.fpret_all[s] = (any(i.kind == 'ret' for n, i in live)
                              and all(depth[n] == 1 for n, i in live if i.kind == 'ret')
                              and not any(i.kind == 'ijmp' or (i.kind == 'jmp' and not (s <= i.target < e)) for n, i in live))
-        cs = [None]      # how a pending compare is held: 'pair' = operands in T1/T2, 'stash' = status image in T2
+        cs = [None]      # how a pending compare is held: 'pair' = operands in T1/T2 as doubles, 'pairf' = as floats,
+                         # 'stash' = status image in T2
         nfall = 0
 
         def t1_used():
-            if cs[0] == 'pair':
+            if cs[0] in ('pair', 'pairf'):
                 cs[0] = None
 
         def reg(d, k):
@@ -655,7 +652,6 @@ class Translator:
         idx_of = {i.rva: k for k, i in enumerate(ins)}
         fused_skip = set()          # tests folded into a preceding status word read
         fused_jump = {}             # their jcc: index -> (outcomes taken, target)
-        self.fused = getattr(self, 'fused', 0)
 
         def fuse(n, d):
             """At a status word read right after a compare: a direct branch on the compare when the code only tests
@@ -666,7 +662,7 @@ class Translator:
             if f is None:
                 return False
             taken, target, k = f
-            o.append('ucomisd %s, %s' % (T1, T2))
+            o.append('%s %s, %s' % ('ucomiss' if cs[0] == 'pairf' else 'ucomisd', T1, T2))
             fused_skip.add(k)                       # the test
             fused_jump[k + 1] = (taken, target)     # the jcc: emitted there, after any FPU register moves
             self.fused += 1
@@ -695,12 +691,19 @@ class Translator:
                 continue        # never executed (padding, data)
             falls[0] = not (i.kind in ('jmp', 'ret', 'ijmp', 'switch'))
 
-            def compare(a, bload, af=False, i=i, n=n):
-                """st0 (in a; a float if af) against the value that bload puts into T2 as a double."""
+            def compare(a, bload, af=False, bfload=None, i=i, n=n):
+                """st0 (in a; a float if af) against the value that bload puts into T2 as a double. If that value
+                is a float too, bfload puts it into T2 as it is."""
                 mova = 'cvtps2pd' if af else 'movapd'
                 if self.compare_use(ins, n, targets) != 'stash':
-                    memfix(['%s %s, %s' % (mova, T1, a)] + bload)
-                    cs[0] = 'pair'
+                    if af and bfload is not None and not os.environ.get('XLAT_NO_COMISS'):
+                        # two floats are compared as floats: widening both to double first changes neither their
+                        # order nor whether one is a NaN
+                        memfix(['movaps %s, %s' % (T1, a)] + bfload)
+                        cs[0] = 'pairf'
+                    else:
+                        memfix(['%s %s, %s' % (mova, T1, a)] + bload)
+                        cs[0] = 'pair'
                     return
                 # FP code runs between this compare and the status word read: work the condition bits out now,
                 # without touching flags or eax, and keep them in T2 (the only register that code leaves alone)
@@ -723,19 +726,34 @@ class Translator:
                         o.append(lab + ':')
                         self.absfix.append(lab + ' - 4')
 
-            if i.kind == 'x87' and fast:
+            if i.kind == 'x87':
+                # One path for both modes. Fast mode tracks per register whether it holds a float ('f') or a double
+                # ('d'). With --exact-range every value stays a double: kind[] is all 'd', to_d() emits nothing and
+                # the float cases below never apply. Apart from that the modes differ in how a result is rounded
+                # to 24 bits (rounded()) and in a few instruction forms.
                 name, arg = i.x87
                 m = i.mem
                 if i.relocs and len(i.relocs) != 1:
                     raise Fail('x87 instruction with %d relocations at %x' % (len(i.relocs), i.rva))
                 top = d - 1                     # xmm index of st0
                 x = reg(d, 0)
+                mov = 'movaps' if fast else 'movapd'
                 fop = {'add': 'addps', 'sub': 'subps', 'mul': 'mulps', 'div': 'divss'}
+
+                def rounded(j):
+                    """xmm j holds the double result of an operation that the x87 rounds to 24 bits."""
+                    r = 'xmm%d' % j
+                    if fast:
+                        o.append('cvtpd2ps %s, %s' % (r, r))
+                        kind[j] = 'f'
+                    else:
+                        o.extend(self.rnd(r))
+
                 if name == 'fnop':
                     continue
                 if name == 'fld_m':
                     dst = 'xmm%d' % d
-                    if arg == 32:
+                    if arg == 32 and fast:
                         memfix(['movss %s, %s' % (dst, m)])
                         kind[d] = 'f'
                     else:
@@ -750,14 +768,18 @@ class Translator:
                         nfall += 1
                     kind[d] = 'd'
                 elif name == 'fld_r':
-                    o.append('movaps xmm%d, %s' % (d, reg(d, arg)))
+                    o.append('%s xmm%d, %s' % (mov, d, reg(d, arg)))
                     kind[d] = kind[top - arg]
                 elif name == 'fld1':
-                    o.append('movss xmm%d, DWORD PTR [_%s_onef]' % (d, p))
-                    kind[d] = 'f'
+                    if fast:
+                        o.append('movss xmm%d, DWORD PTR [_%s_onef]' % (d, p))
+                        kind[d] = 'f'
+                    else:
+                        o.append('movsd xmm%d, QWORD PTR [_%s_one]' % (d, p))
+                        kind[d] = 'd'
                 elif name == 'fldz':
-                    o.append('xorps xmm%d, xmm%d' % (d, d))
-                    kind[d] = 'f'
+                    o.append('%s xmm%d, xmm%d' % ('xorps' if fast else 'xorpd', d, d))
+                    kind[d] = 'f' if fast else 'd'
                 elif name in ('fldpi', 'fldl2e', 'fldln2', 'fldlg2', 'fldl2t'):
                     o.append('movsd xmm%d, QWORD PTR [_%s_%s]' % (d, p, name[3:]))
                     kind[d] = 'd'
@@ -786,12 +808,12 @@ class Translator:
                         nfall += 1
                 elif name in ('fst_r', 'fstp_r'):
                     if arg:
-                        o.append('movaps %s, %s' % (reg(d, arg), x))
+                        o.append('%s %s, %s' % (mov, reg(d, arg), x))
                         kind[top - arg] = kind[top]
                 elif name == 'fxch':
                     if arg:
-                        o.extend(['movaps %s, %s' % (T1, x), 'movaps %s, %s' % (x, reg(d, arg)),
-                                  'movaps %s, %s' % (reg(d, arg), T1)])
+                        o.extend(['%s %s, %s' % (mov, T1, x), '%s %s, %s' % (mov, x, reg(d, arg)),
+                                  '%s %s, %s' % (mov, reg(d, arg), T1)])
                         kind[top], kind[top - arg] = kind[top - arg], kind[top]
                         t1_used()
                 elif name == 'fchs':
@@ -808,8 +830,10 @@ class Translator:
                     if kind[top] == 'f':
                         o.append('sqrtss %s, %s' % (x, x))
                     else:
-                        o.extend(['sqrtsd %s, %s' % (x, x), 'cvtpd2ps %s, %s' % (x, x)])
-                    kind[top] = 'f'
+                        o.append('sqrtsd %s, %s' % (x, x))
+                        rounded(top)
+                        if not fast:
+                            t1_used()
                 elif name in ('fsin', 'fcos', 'frndint'):
                     to_d(top)
                     o.extend(['lea esp, [esp-8]', 'movsd QWORD PTR [esp], %s' % x, 'fld QWORD PTR [esp]', name,
@@ -832,9 +856,10 @@ class Translator:
                     kind[d] = 'd'
                     nfall += 1
                 elif name == 'ftst':
-                    compare(x, ['xorpd %s, %s' % (T2, T2)], kind[top] == 'f')
+                    compare(x, ['xorpd %s, %s' % (T2, T2)], kind[top] == 'f', ['xorps %s, %s' % (T2, T2)])
                 elif name == 'compp':
-                    compare(x, ['%s %s, %s' % (movd(top - 1), T2, reg(d, 1))], kind[top] == 'f')
+                    compare(x, ['%s %s, %s' % (movd(top - 1), T2, reg(d, 1))], kind[top] == 'f',
+                            ['movaps %s, %s' % (T2, reg(d, 1))] if kind[top - 1] == 'f' else None)
                 elif name in ('comi', 'comip'):
                     if kind[top] == 'f' and kind[top - arg] == 'f':
                         o.append('ucomiss %s, %s' % (x, reg(d, arg)))
@@ -850,10 +875,10 @@ class Translator:
                             o.append('orpd %s, XMMWORD PTR [_%s_sw_top+%d]' % (T1, p, 16 * sw_top))
                         o.extend(['lea esp, [esp-4]', 'movd DWORD PTR [esp], %s' % T1, 'mov ah, BYTE PTR [esp]',
                                   'lea esp, [esp+4]'])
-                    elif cs[0] == 'pair' and fuse(n, d):
+                    elif cs[0] in ('pair', 'pairf') and fuse(n, d):
                         pass
-                    elif cs[0] == 'pair':
-                        seq = ['ucomisd %s, %s' % (T1, T2), 'lahf', 'and ah, 0x45']
+                    elif cs[0] in ('pair', 'pairf'):
+                        seq = ['%s %s, %s' % ('ucomiss' if cs[0] == 'pairf' else 'ucomisd', T1, T2), 'lahf', 'and ah, 0x45']
                         if sw_top:
                             seq.append('or ah, 0x%02x' % (sw_top << 3))
                         if self.flags_dead(ins, n + 1):
@@ -868,7 +893,8 @@ class Translator:
                         if kd == 'mi' and arg != 32:
                             _bad(i)
                         if op in ('com', 'comp'):
-                            compare(x, self.load(T2, kd, arg, m), kind[top] == 'f')
+                            compare(x, self.load(T2, kd, arg, m), kind[top] == 'f',
+                                    ['movss %s, %s' % (T2, m)] if kd == 'm' and arg == 32 else None)
                         elif kd == 'm' and arg == 32 and kind[top] == 'f':
                             memfix(['movss %s, %s' % (T1, m)])
                             if op.endswith('r'):
@@ -883,11 +909,11 @@ class Translator:
                                 o.extend(self.arith(op[:-1], T1, x) + ['movapd %s, %s' % (x, T1)])
                             else:
                                 o.extend(self.arith(op, x, T1))
-                            o.append('cvtpd2ps %s, %s' % (x, x))
-                            kind[top] = 'f'
+                            rounded(top)
                             t1_used()
                     elif kd == 'r0' and op in ('com', 'comp'):
-                        compare(x, ['%s %s, %s' % (movd(top - arg), T2, reg(d, arg))], kind[top] == 'f')
+                        compare(x, ['%s %s, %s' % (movd(top - arg), T2, reg(d, arg))], kind[top] == 'f',
+                                ['movaps %s, %s' % (T2, reg(d, arg))] if kind[top - arg] == 'f' else None)
                     else:
                         # r0: st0 = st0 op sti      ri/rp: sti = sti op st0      ...r: operands swapped
                         if kd == 'r0':
@@ -909,147 +935,7 @@ class Translator:
                                          + ['movapd %s, %s' % (dst, T1)])
                             else:
                                 o.extend(self.arith(op, dst, src))
-                            o.append('cvtpd2ps %s, %s' % (dst, dst))
-                        kind[jd] = 'f'
-                        t1_used()
-                continue
-
-            if i.kind == 'x87':
-                name, arg = i.x87
-                m = i.mem
-                if i.relocs and len(i.relocs) != 1:
-                    raise Fail('x87 instruction with %d relocations at %x' % (len(i.relocs), i.rva))
-                if name == 'fnop':
-                    continue
-                if name == 'fld_m':
-                    dst = 'xmm%d' % d
-                    memfix(self.load(dst, 'm', arg, m))
-                elif name == 'fild_m':
-                    dst = 'xmm%d' % d
-                    if arg == 32:
-                        memfix(self.load(dst, 'mi', 32, m))
-                    else:
-                        memfix(['fild %s' % m] + spill_load(dst))
-                        nfall += 1
-                elif name == 'fld_r':
-                    o.append('movapd xmm%d, %s' % (d, reg(d, arg)))
-                elif name == 'fld1':
-                    o.append('movsd xmm%d, QWORD PTR [_%s_one]' % (d, p))
-                elif name == 'fldz':
-                    o.append('xorpd xmm%d, xmm%d' % (d, d))
-                elif name in ('fldpi', 'fldl2e', 'fldln2', 'fldlg2', 'fldl2t'):
-                    o.append('movsd xmm%d, QWORD PTR [_%s_%s]' % (d, p, name[3:]))
-                elif name in ('fst_m', 'fstp_m'):
-                    if arg == 32:
-                        # A popping float store right after the rounding: the store's own conversion
-                        # to float rounds the same way, and the popped value is never read again.
-                        x = reg(d, 0)
-                        if (name == 'fstp_m' and not self.exact
-                                and o[-2:] == ['cvtpd2ps %s, %s' % (x, x), 'cvtps2pd %s, %s' % (x, x)]):
-                            del o[-2:]
-                        memfix(['cvtpd2ps %s, %s' % (T1, x), 'movss %s, %s' % (m, T1)])
-                    else:
-                        memfix(['movsd %s, %s' % (m, reg(d, 0))])
-                    if arg == 32:
-                        t1_used()
-                elif name in ('fist_m', 'fistp_m'):
-                    if arg == 32:
-                        memfix(['cvtpd2dq %s, %s' % (T1, reg(d, 0)), 'movd %s, %s' % (m, T1)])
-                        t1_used()
-                    else:
-                        if name == 'fist_m':
-                            _bad(i)
-                        memfix(spill_push(reg(d, 0)) + ['fistp %s' % m])
-                        nfall += 1
-                elif name in ('fst_r', 'fstp_r'):
-                    if arg:
-                        o.append('movapd %s, %s' % (reg(d, arg), reg(d, 0)))
-                elif name == 'fxch':
-                    if arg:
-                        o.extend(['movapd %s, %s' % (T1, reg(d, 0)), 'movapd %s, %s' % (reg(d, 0), reg(d, arg)),
-                                  'movapd %s, %s' % (reg(d, arg), T1)])
-                        t1_used()
-                elif name == 'fchs':
-                    o.append('xorpd %s, XMMWORD PTR [_%s_signmask]' % (reg(d, 0), p))
-                elif name == 'fabs':
-                    o.append('andpd %s, XMMWORD PTR [_%s_absmask]' % (reg(d, 0), p))
-                elif name == 'fsqrt':
-                    o.append('sqrtsd %s, %s' % (reg(d, 0), reg(d, 0)))
-                    o.extend(self.rnd(reg(d, 0)))
-                    t1_used()
-                elif name in ('fsin', 'fcos', 'frndint'):
-                    x = reg(d, 0)
-                    o.extend(['lea esp, [esp-8]', 'movsd QWORD PTR [esp], %s' % x, 'fld QWORD PTR [esp]', name,
-                              'fstp QWORD PTR [esp]', 'movsd %s, QWORD PTR [esp]' % x, 'lea esp, [esp+8]'])
-                    nfall += 1
-                elif name in ('fpatan', 'fyl2x'):
-                    a, b = reg(d, 1), reg(d, 0)
-                    o.extend(['lea esp, [esp-16]', 'movsd QWORD PTR [esp+8], %s' % a, 'movsd QWORD PTR [esp], %s' % b,
-                              'fld QWORD PTR [esp+8]', 'fld QWORD PTR [esp]', name, 'fstp QWORD PTR [esp]',
-                              'movsd %s, QWORD PTR [esp]' % a, 'lea esp, [esp+16]'])
-                    nfall += 1
-                elif name in ('fptan', 'fsincos'):
-                    x, new = reg(d, 0), 'xmm%d' % d
-                    o.extend(['lea esp, [esp-16]', 'movsd QWORD PTR [esp], %s' % x, 'fld QWORD PTR [esp]', name,
-                              'fstp QWORD PTR [esp]', 'fstp QWORD PTR [esp+8]', 'movsd %s, QWORD PTR [esp]' % new,
-                              'movsd %s, QWORD PTR [esp+8]' % x, 'lea esp, [esp+16]'])
-                    nfall += 1
-                elif name == 'ftst':
-                    compare(reg(d, 0), ['xorpd %s, %s' % (T2, T2)])
-                elif name == 'compp':
-                    compare(reg(d, 0), ['movapd %s, %s' % (T2, reg(d, 1))])
-                elif name in ('comi', 'comip'):
-                    o.append('ucomisd %s, %s' % (reg(d, 0), reg(d, arg)))
-                elif name == 'fnstsw_ax':
-                    top = (8 - d) & 7
-                    if cs[0] == 'stash':
-                        o.append('movapd %s, %s' % (T1, T2))
-                        if top:
-                            o.append('orpd %s, XMMWORD PTR [_%s_sw_top+%d]' % (T1, p, 16 * top))
-                        o.extend(['lea esp, [esp-4]', 'movd DWORD PTR [esp], %s' % T1, 'mov ah, BYTE PTR [esp]',
-                                  'lea esp, [esp+4]'])
-                    elif cs[0] == 'pair' and fuse(n, d):
-                        pass
-                    elif cs[0] == 'pair':
-                        seq = ['ucomisd %s, %s' % (T1, T2), 'lahf', 'and ah, 0x45']
-                        if top:
-                            seq.append('or ah, 0x%02x' % (top << 3))
-                        if self.flags_dead(ins, n + 1):
-                            o.extend(seq)
-                        else:
-                            o.extend(['pushfd'] + seq + ['popfd'])
-                    else:
-                        raise Fail('status word read without a preceding compare at %x' % i.rva)
-                else:
-                    kind, op = name.split('_', 1)
-                    if kind in ('m', 'mi'):
-                        if kind == 'mi' and arg != 32:
-                            _bad(i)
-                        x = reg(d, 0)
-                        if op in ('com', 'comp'):
-                            compare(x, self.load(T2, kind, arg, m))
-                        else:
-                            memfix(self.load(T1, kind, arg, m))
-                            if op.endswith('r'):
-                                o.extend(self.arith(op[:-1], T1, x) + ['movapd %s, %s' % (x, T1)])
-                            else:
-                                o.extend(self.arith(op, x, T1))
-                            o.extend(self.rnd(x))
-                            t1_used()
-                    elif kind == 'r0' and op in ('com', 'comp'):
-                        compare(reg(d, 0), ['movapd %s, %s' % (T2, reg(d, arg))])
-                    else:
-                        # r0: st0 = st0 op sti      ri/rp: sti = sti op st0      ...r: operands swapped
-                        if kind == 'r0':
-                            dst, src = reg(d, 0), reg(d, arg)
-                        else:
-                            dst, src = reg(d, arg), reg(d, 0)
-                        if op.endswith('r'):
-                            o.extend(['movapd %s, %s' % (T1, src)] + self.arith(op[:-1], T1, dst)
-                                     + ['movapd %s, %s' % (dst, T1)])
-                        else:
-                            o.extend(self.arith(op, dst, src))
-                        o.extend(self.rnd(dst))
+                            rounded(jd)
                         t1_used()
                 continue
 
@@ -1333,6 +1219,8 @@ class Translator:
         if not (self.ax_dead(ins, k + 2, idx) and self.ax_dead(ins, idx[j.target], idx)):
             return None
         mask = int(m.group(1), 0)
+        if mask & ~0x45:
+            return None                 # tests other bits of ah (the FPU stack top): keep the full status word
         taken = set()
         for name, bits in (('G', 0x00), ('L', 0x01), ('E', 0x40), ('U', 0x45)):
             v = bits & mask
@@ -1401,7 +1289,9 @@ class Translator:
             return False
         return False
 
-    # import functions computed in place: name -> (number in the installer's table, roundsd rounding mode)
+    # msvcr71.dll functions whose import slots the installer and the tests need to find: name -> number
+    CRT_SLOTS = {'floor': 0, 'ceil': 1, 'sqrt': 2}
+    # those computed in place: name -> (number, roundsd rounding mode)
     INLINE_IMPORTS = {'floor': (0, 9), 'ceil': (1, 10)}
 
     def inline_import(self, i):
@@ -1496,6 +1386,14 @@ class Translator:
         for slot, rva, k in self.inlined:
             L.append('.long 0x%x, 0x%x, %d' % (slot, rva, k))
         L += ['.long 0, 0, 0']
+        # where client.dll's import table holds msvcr71.dll's floor (0), ceil (1) and sqrt (2): slot, number.
+        # The installer points the sqrt slot at its own version; the tests give the unresolved image real
+        # floor and ceil. This is the only place the import table is read.
+        L += ['.globl _%s_crtslots' % p, '_%s_crtslots:' % p]
+        for slot, (dll, fn) in sorted(img.imports.items()):
+            if dll == 'msvcr71.dll' and fn in self.CRT_SLOTS:
+                L.append('.long 0x%x, %d' % (slot, self.CRT_SLOTS[fn]))
+        L += ['.long 0, 0']
         # direct calls into the xmm0-returning variant of another translated routine: caller, callee. The installer
         # installs a caller only together with its callees.
         L += ['.globl _%s_xrdeps' % p, '_%s_xrdeps:' % p]
@@ -1587,6 +1485,8 @@ def main():
             if s in seen0 or s in skip:
                 continue
             seen0.add(s)
+            if len(ok0) >= maxcount:
+                continue
             try:
                 t0.translate(s, e)
                 size = t0.funcs[-1][1]
@@ -1595,7 +1495,9 @@ def main():
             except Fail:
                 pass
         t.xr_targets = {b for b in t0.fpcalls if b in ok0 and t0.fpret_all.get(b)}
-    limits = {s: e for s, e, weight, check in jobs}
+    limits = {}
+    for s, e, weight, check in jobs:
+        limits.setdefault(s, e)         # a routine listed twice is translated with its first limit
     ok = 0
     okw = totw = 0
     reasons = {}
@@ -1632,7 +1534,10 @@ def main():
     if t.xr_targets - okset:
         raise SystemExit('internal error: direct-call targets not translated: %s' % sorted(t.xr_targets - okset))
     for b in sorted(t.xr_targets):
-        t.translate(b, limits[b], xr=True)
+        try:
+            t.translate(b, limits[b], xr=True)
+        except Fail as f:
+            raise SystemExit('internal error: no direct-call entry for %x: %s' % (b, f))
     if writelist:
         with open(writelist, 'w') as f:
             f.write('# Routines of client.dll to translate: start limit weight size hash (hex; weight = profile samples).\n')
@@ -1658,7 +1563,7 @@ def main():
     print('%d of %d functions translated; sample weight covered %d of %d' % (ok, len(seen), okw, totw))
     if not t.exact:
         print('compare branches fused: %d; floor/ceil calls computed in place: %d; direct float-returning calls: %d to %d routines'
-              % (getattr(t, 'fused', 0), len(t.inlined), len(t.xrdeps), len(t.xr_targets)))
+              % (t.fused, len(t.inlined), len(t.xrdeps), len(t.xr_targets)))
         print('float-to-double conversions at branches: %d; instructions emitted: %d'
               % (t.edgeconv, sum(1 for l in t.out if not l.endswith(':') and not l.startswith('.'))))
     for k, v in sorted(reasons.items(), key=lambda kv: -kv[1][1])[:25]:

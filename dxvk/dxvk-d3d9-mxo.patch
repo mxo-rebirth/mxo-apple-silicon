@@ -601,7 +601,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_mxo_fastmath.cpp b/src/d3d9/d3d9_mxo_fastmath.cpp
 --- a/src/d3d9/d3d9_mxo_fastmath.cpp	2026-11-19 00:00:00
 +++ b/src/d3d9/d3d9_mxo_fastmath.cpp	2026-11-19 00:00:00
-@@ -0,0 +1,505 @@
+@@ -0,0 +1,522 @@
 +#include <windows.h>
 +#include <tlhelp32.h>
 +
@@ -625,7 +625,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +#include "d3d9_mxo_x87.inc"
 +
 +extern "C" {
-+  extern uint32_t MxoX_funcs[], MxoX_absfix[], MxoX_relfix[], MxoX_deps[], MxoX_inlined[], MxoX_xrdeps[];
++  extern uint32_t MxoX_funcs[], MxoX_absfix[], MxoX_relfix[], MxoX_deps[], MxoX_inlined[], MxoX_xrdeps[], MxoX_crtslots[];
 +  extern uint8_t  MxoX_code_begin[], MxoX_code_end[];
 +  extern uint32_t MxoX_tid, MxoX_imagebase;
 +}
@@ -817,38 +817,30 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +    Logger::info(str::format("MxO fast math: matrix multiply ", replaced[0] ? "replaced" : "left alone",
 +      ", quaternion to matrix ", replaced[1] ? "replaced" : "left alone"));
 +
-+    // MSVCR71!sqrt, through client.dll's import table: only if the slot still holds the runtime's own
-+    // sqrt (an add-on may have hooked it). DXVK_MXO_SQRT=0 leaves it alone.
++    // MSVCR71!sqrt: client.dll's import slot for it (from the translator's table, so it is the slot of the
++    // client.dll this build was made from) is pointed at MxoSqrtSSE, but only if it holds the runtime's own sqrt.
++    // An add-on may have hooked it, and a different client.dll may keep something else there.
++    // DXVK_MXO_SQRT=0 leaves it alone.
 +    if (env::getEnvVar("DXVK_MXO_SQRT") != "0") {
-+      const char* result = "left alone (import not found)";
++      const char* result = "left alone (no import slot known)";
 +      HMODULE crt = ::GetModuleHandleA("msvcr71.dll");
 +      auto crtSqrt = crt ? reinterpret_cast<uint32_t>(::GetProcAddress(crt, "sqrt")) : 0u;
-+      const auto& dir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
 +
-+      if (crtSqrt && dir.VirtualAddress && dir.VirtualAddress < imageSize) {
-+        for (auto imp = reinterpret_cast<const IMAGE_IMPORT_DESCRIPTOR*>(base + dir.VirtualAddress); imp->Name; imp++) {
-+          if (_stricmp(reinterpret_cast<const char*>(base + imp->Name), "msvcr71.dll") || !imp->OriginalFirstThunk)
-+            continue;
++      for (const uint32_t* e = MxoX_crtslots; e[0]; e += 2) {
++        if (e[1] != 2 || e[0] > imageSize || imageSize - e[0] < 4)
++          continue;
 +
-+          auto names = reinterpret_cast<const uint32_t*>(base + imp->OriginalFirstThunk);
-+          auto slots = reinterpret_cast<uint32_t*>(base + imp->FirstThunk);
++        auto slot = reinterpret_cast<uint32_t*>(base + e[0]);
++        result = "left alone (the import slot does not hold msvcr71's sqrt)";
 +
-+          for (uint32_t k = 0; names[k]; k++) {
-+            if ((names[k] & 0x80000000u) || std::strcmp(reinterpret_cast<const char*>(base + names[k] + 2), "sqrt"))
-+              continue;
++        if (crtSqrt && *slot == crtSqrt) {
++          MxoSqrtOriginal = crtSqrt;
++          DWORD oldProtect = 0;
 +
-+            result = "left alone (import hooked)";
-+
-+            if (slots[k] == crtSqrt) {
-+              MxoSqrtOriginal = crtSqrt;
-+              DWORD oldProtect = 0;
-+
-+              if (::VirtualProtect(&slots[k], 4, PAGE_READWRITE, &oldProtect)) {
-+                reinterpret_cast<std::atomic<uint32_t>*>(&slots[k])->store(reinterpret_cast<uint32_t>(&MxoSqrtSSE));
-+                ::VirtualProtect(&slots[k], 4, oldProtect, &oldProtect);
-+                result = "replaced";
-+              }
-+            }
++          if (::VirtualProtect(slot, 4, PAGE_READWRITE, &oldProtect)) {
++            reinterpret_cast<std::atomic<uint32_t>*>(slot)->store(reinterpret_cast<uint32_t>(&MxoSqrtSSE));
++            ::VirtualProtect(slot, 4, oldProtect, &oldProtect);
++            result = "replaced";
 +          }
 +        }
 +      }
@@ -1002,15 +994,34 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +      if (!inlineBlocked.empty())
 +        Logger::info(str::format("MxO fast math: ", inlineBlocked.size(), " floor/ceil uses keep their routine original (import hooked or missing)"));
 +
-+      for (auto f = reinterpret_cast<const MxoXFunc*>(MxoX_funcs); f->size; f++) {
-+        if (total++ >= limit)
-+          continue;
++      // Which routines go in. "matching" counts every routine whose code in memory is the code its translation
++      // was made from; each reason for leaving a matching routine out is logged with its own count.
++      std::string paired;
++      uint32_t overLimit = 0, needDeps = 0, pairedCount = 0;
 +
-+        if ((f->flags & 1) && !depsIntact)
++      for (auto f = reinterpret_cast<const MxoXFunc*>(MxoX_funcs); f->size; f++) {
++        const uint32_t index = total++;
++
++        if (!MxoXMatches(base, imageSize, MxoX_imagebase, *f)) {
++          if (differing.size() < 80)
++            differing += str::format(" ", std::hex, f->rva);
 +          continue;
++        }
++
++        matching++;
++
++        if (index >= limit) {
++          overLimit++;
++          continue;
++        }
++
++        if ((f->flags & 1) && !depsIntact) {
++          needDeps++;
++          continue;
++        }
 +
 +        if (std::find(inlineBlocked.begin(), inlineBlocked.end(), f->rva) != inlineBlocked.end())
-+          continue;
++          continue;   // logged above
 +
 +        auto ref = std::lower_bound(addonRefs.begin(), addonRefs.end(), f->rva);
 +        if (ref != addonRefs.end() && *ref < f->rva + f->size) {
@@ -1019,10 +1030,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +          continue;
 +        }
 +
-+        if (MxoXMatches(base, imageSize, MxoX_imagebase, *f))
-+          todo.push_back(f);
-+        else if (differing.size() < 80)
-+          differing += str::format(" ", std::hex, f->rva);
++        todo.push_back(f);
 +      }
 +
 +      // A routine that calls another translated routine directly (for its result in xmm0) goes in only together
@@ -1034,19 +1042,28 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +          if (caller == todo.end())
 +            continue;
 +          if (std::none_of(todo.begin(), todo.end(), [d] (const MxoXFunc* f) { return f->rva == d[1]; })) {
++            if (paired.size() < 120)
++              paired += str::format(" ", std::hex, (*caller)->rva);
++            pairedCount++;
 +            todo.erase(caller);
 +            changed = true;
 +          }
 +        }
 +      }
 +
-+      matching  = uint32_t(todo.size());
 +      installed = InstallRedirects(base, todo);
 +
 +      if (!differing.empty())
 +        Logger::info(str::format("MxO fast math: left alone because the code in memory differs (rva):", differing));
++      if (overLimit)
++        Logger::info(str::format("MxO fast math: ", overLimit, " left out by x87max.txt"));
++      if (needDeps)
++        Logger::info(str::format("MxO fast math: ", needDeps, " left alone because code they rely on differs"));
 +      if (!respected.empty())
 +        Logger::info(str::format("MxO fast math: left alone because a game add-on uses them (rva):", respected));
++      if (pairedCount)
++        Logger::info(str::format("MxO fast math: ", pairedCount,
++          " left alone because a translated routine they call directly is left alone (rva):", paired));
 +    }
 +
 +    Logger::info(str::format("MxO fast math: ", installed, " of ", total, " translated x87 routines installed (",
@@ -1556,7 +1573,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
  #include "d3d9_surface.h"
  #include "d3d9_monitor.h"
  
-@@ -156,6 +167,21 @@
+@@ -156,6 +167,24 @@
          }
        }
      }
@@ -1568,17 +1585,20 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +      windowData.swapchain->GetDevice()->GetCreationParameters(&create_parms);
 +
 +      if (!(create_parms.BehaviorFlags & D3DCREATE_NOWINDOWCHANGES)) {
-+        D3D9WindowMessageFilter filter(window);
-+        RECT rect;
-+        GetMonitorRect(GetDefaultMonitor(), &rect);
-+        SetWindowPos(window, HWND_TOPMOST, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top,
-+                     SWP_NOACTIVATE);
++        RECT rect = { };
++        GetMonitorRect(GetDefaultMonitor(), &rect);   // leaves rect empty if the query fails
++
++        if (rect.right > rect.left && rect.bottom > rect.top) {
++          D3D9WindowMessageFilter filter(window);
++          SetWindowPos(window, HWND_TOPMOST, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top,
++                       SWP_NOACTIVATE);
++        }
 +      }
 +    }
      else if (message == WM_SIZE)
      {
        D3DDEVICE_CREATION_PARAMETERS create_parms;
-@@ -184,6 +210,567 @@
+@@ -184,6 +213,567 @@
    };
  
  
@@ -2146,7 +2166,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
    D3D9SwapChainEx::D3D9SwapChainEx(
            D3D9DeviceEx*          pDevice,
            D3DPRESENT_PARAMETERS* pPresentParams,
-@@ -255,6 +842,11 @@
+@@ -255,6 +845,11 @@
            HWND     hDestWindowOverride,
      const RGNDATA* pDirtyRegion,
            DWORD    dwFlags) {
@@ -2158,7 +2178,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      D3D9DeviceLock lock = m_parent->LockDevice();
  
      uint32_t presentInterval = m_presentParams.PresentationInterval;
-@@ -852,11 +1444,84 @@
+@@ -852,11 +1447,103 @@
          {  int32_t(m_dstRect.left),                    int32_t(m_dstRect.top)                    },
          { uint32_t(m_dstRect.right - m_dstRect.left), uint32_t(m_dstRect.bottom - m_dstRect.top) } };
  
@@ -2181,57 +2201,76 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +      // Log every size involved in placing the picture whenever one of them changes, so that a
 +      // picture in the wrong place can be explained from the log alone. The cheap sizes are compared
 +      // every frame; the window and monitor rectangles every 60 frames; the client size and display
-+      // mode are read only when something changed. A fullscreen window that no longer covers exactly
-+      // the monitor (the display mode changed after the window was sized) is sized to it again.
++      // mode are read only when something changed. All of this is kept per swap chain.
 +      const int32_t cheap[] = {
 +        int32_t(m_presentParams.BackBufferWidth), int32_t(m_presentParams.BackBufferHeight),
 +        int32_t(m_dstRect.right - m_dstRect.left), int32_t(m_dstRect.bottom - m_dstRect.top),
 +        int32_t(info.imageExtent.width), int32_t(info.imageExtent.height) };
-+      static int32_t s_cheap[std::size(cheap)] = { };
-+      const bool cheapChanged = std::memcmp(cheap, s_cheap, sizeof(cheap)) != 0;
++      static_assert(sizeof(cheap) == sizeof(m_mxoLoggedSizes));
++      const bool cheapChanged = std::memcmp(cheap, m_mxoLoggedSizes, sizeof(cheap)) != 0;
 +
 +      if (cheapChanged || m_frameId % 60 == 0) {
-+        std::memcpy(s_cheap, cheap, sizeof(cheap));
-+        RECT win = { };
-+        ::GetWindowRect(m_window, &win);
++        std::memcpy(m_mxoLoggedSizes, cheap, sizeof(cheap));
 +
++        RECT win = { };
 +        MONITORINFO mi = { };
 +        mi.cbSize = sizeof(mi);
-+        ::GetMonitorInfoW(GetDefaultMonitor(), &mi);
 +
-+        static RECT s_win = { }, s_mon = { };
-+        const bool placeChanged = cheapChanged
-+          || std::memcmp(&win, &s_win, sizeof(RECT)) || std::memcmp(&mi.rcMonitor, &s_mon, sizeof(RECT));
-+        s_win = win;
-+        s_mon = mi.rcMonitor;
++        // Nothing below runs on a failed query: an empty monitor rectangle must never become a window size.
++        const bool known = ::GetWindowRect(m_window, &win) && ::GetMonitorInfoW(GetDefaultMonitor(), &mi)
++          && mi.rcMonitor.right > mi.rcMonitor.left && mi.rcMonitor.bottom > mi.rcMonitor.top;
 +
-+        if (placeChanged) {
-+          RECT client = { };
-+          ::GetClientRect(m_window, &client);
++        if (known) {
++          const bool monitorChanged = std::memcmp(&mi.rcMonitor, &m_mxoLoggedMonitor, sizeof(RECT)) != 0;
++          const bool placeChanged   = cheapChanged || monitorChanged || std::memcmp(&win, &m_mxoLoggedWindow, sizeof(RECT)) != 0;
++          m_mxoLoggedWindow  = win;
++          m_mxoLoggedMonitor = mi.rcMonitor;
 +
-+          DEVMODEW dm = { };
-+          dm.dmSize = sizeof(dm);
-+          ::EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &dm);
++          if (placeChanged) {
++            RECT client = { };
++            ::GetClientRect(m_window, &client);
 +
-+          Logger::info(str::format("MxO picture: back buffer ", m_presentParams.BackBufferWidth, "x", m_presentParams.BackBufferHeight,
-+            m_presentParams.Windowed ? " windowed" : " fullscreen",
-+            ", source ", srcRect.offset.x, ",", srcRect.offset.y, " ", srcRect.extent.width, "x", srcRect.extent.height,
-+            ", present region ", m_dstRect.left, ",", m_dstRect.top, "-", m_dstRect.right, ",", m_dstRect.bottom,
-+            ", surface ", info.imageExtent.width, "x", info.imageExtent.height,
-+            ", drawn at ", dstRect.offset.x, ",", dstRect.offset.y, " ", dstRect.extent.width, "x", dstRect.extent.height,
-+            "; window ", win.left, ",", win.top, "-", win.right, ",", win.bottom, " client ", client.right, "x", client.bottom,
-+            ", monitor ", mi.rcMonitor.left, ",", mi.rcMonitor.top, "-", mi.rcMonitor.right, ",", mi.rcMonitor.bottom,
-+            ", display mode ", dm.dmPelsWidth, "x", dm.dmPelsHeight));
-+        }
++            DEVMODEW dm = { };
++            dm.dmSize = sizeof(dm);
++            ::EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &dm);
 +
-+        if (!m_presentParams.Windowed && !::IsIconic(m_window)
-+         && std::memcmp(&win, &mi.rcMonitor, sizeof(RECT)) != 0) {
-+          // Asynchronous: the window may belong to a thread that is waiting for this one.
-+          ::SetWindowPos(m_window, HWND_TOPMOST, mi.rcMonitor.left, mi.rcMonitor.top,
-+            mi.rcMonitor.right - mi.rcMonitor.left, mi.rcMonitor.bottom - mi.rcMonitor.top,
-+            SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
-+          Logger::info(str::format("MxO: fullscreen window sized to the monitor, ",
-+            mi.rcMonitor.right - mi.rcMonitor.left, "x", mi.rcMonitor.bottom - mi.rcMonitor.top));
++            Logger::info(str::format("MxO picture: back buffer ", m_presentParams.BackBufferWidth, "x", m_presentParams.BackBufferHeight,
++              m_presentParams.Windowed ? " windowed" : " fullscreen",
++              ", source ", srcRect.offset.x, ",", srcRect.offset.y, " ", srcRect.extent.width, "x", srcRect.extent.height,
++              ", present region ", m_dstRect.left, ",", m_dstRect.top, "-", m_dstRect.right, ",", m_dstRect.bottom,
++              ", surface ", info.imageExtent.width, "x", info.imageExtent.height,
++              ", drawn at ", dstRect.offset.x, ",", dstRect.offset.y, " ", dstRect.extent.width, "x", dstRect.extent.height,
++              "; window ", win.left, ",", win.top, "-", win.right, ",", win.bottom, " client ", client.right, "x", client.bottom,
++              ", monitor ", mi.rcMonitor.left, ",", mi.rcMonitor.top, "-", mi.rcMonitor.right, ",", mi.rcMonitor.bottom,
++              ", display mode ", dm.dmPelsWidth, "x", dm.dmPelsHeight));
++          }
++
++          // Safety net for the WM_DISPLAYCHANGE handler in D3D9WindowProc, which normally does this: a fullscreen
++          // window that does not cover exactly the monitor (the display mode changed after the window was sized,
++          // and the message did not arrive) is sized to it again. Same rule as the handler (not for devices
++          // created with D3DCREATE_NOWINDOWCHANGES), and at most MaxWindowFixes times per display mode and back
++          // buffer size, so a window that cannot take the monitor's size is not fought over for the whole session.
++          static const uint32_t MaxWindowFixes = 3;
++
++          if (cheapChanged || monitorChanged)
++            m_mxoWindowFixes = 0;
++
++          D3DDEVICE_CREATION_PARAMETERS createParams = { };
++          m_parent->GetCreationParameters(&createParams);
++
++          if (!m_presentParams.Windowed && !::IsIconic(m_window)
++           && !(createParams.BehaviorFlags & D3DCREATE_NOWINDOWCHANGES)
++           && m_mxoWindowFixes < MaxWindowFixes
++           && std::memcmp(&win, &mi.rcMonitor, sizeof(RECT)) != 0) {
++            m_mxoWindowFixes++;
++            // Asynchronous: the window may belong to a thread that is waiting for this one.
++            ::SetWindowPos(m_window, HWND_TOPMOST, mi.rcMonitor.left, mi.rcMonitor.top,
++              mi.rcMonitor.right - mi.rcMonitor.left, mi.rcMonitor.bottom - mi.rcMonitor.top,
++              SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
++            Logger::info(str::format("MxO: fullscreen window sized to the monitor, ",
++              mi.rcMonitor.right - mi.rcMonitor.left, "x", mi.rcMonitor.bottom - mi.rcMonitor.top,
++              " (attempt ", m_mxoWindowFixes, " of ", MaxWindowFixes, ")"));
++          }
 +        }
 +      }
 +
@@ -2244,6 +2283,23 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
          m_hud->render(m_context, info.format, info.imageExtent);
  
        if (i + 1 >= SyncInterval)
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_swapchain.h b/src/d3d9/d3d9_swapchain.h
+--- a/src/d3d9/d3d9_swapchain.h	2026-11-19 00:00:00
++++ b/src/d3d9/d3d9_swapchain.h	2026-11-19 00:00:00
+@@ -108,6 +108,13 @@
+     RECT                      m_srcRect;
+     RECT                      m_dstRect;
+ 
++    // MxO: what PresentImage last logged about the picture's placement, and how often it re-sized the
++    // fullscreen window for the current display mode (see the safety net there)
++    int32_t                   m_mxoLoggedSizes[6] = { };
++    RECT                      m_mxoLoggedWindow   = { };
++    RECT                      m_mxoLoggedMonitor  = { };
++    uint32_t                  m_mxoWindowFixes    = 0;
++
+     DxvkSubmitStatus          m_presentStatus;
+ 
+     std::vector<Rc<DxvkImageView>> m_imageViews;
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/meson.build b/src/d3d9/meson.build
 --- a/src/d3d9/meson.build	2026-11-19 00:00:00
 +++ b/src/d3d9/meson.build	2026-11-19 00:00:00

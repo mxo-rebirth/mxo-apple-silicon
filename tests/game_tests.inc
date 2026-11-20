@@ -52,7 +52,8 @@ static uint32_t* g_init;
 static uint32_t* g_resA;
 static uint8_t*  g_data;       // the image's writable data, so side effects on globals are compared too
 static size_t    g_dataSize;
-static uint8_t*  g_dataInit;
+static uint8_t*  g_dataInit;    // what the image's data is reset to before every call
+static uint8_t*  g_dataPristine;   // the image's data as loaded; g_dataInit starts from it for every routine
 static uint8_t*  g_dataA;
 static uint8_t*  g_base;
 
@@ -98,7 +99,7 @@ static double rndRange(double lo, double hi) { return lo + (hi - lo) * double(rn
 
 static int g_reached = 0;   // shaped calls whose first output was written by the original
 
-static void putGlobalFloat(uint32_t rva, float v) {   // in the image's writable data, restored before every call
+static void putGlobalFloat(uint32_t rva, float v) {   // in the data both runs of this routine start from; later routines start from the loaded image again
   const size_t off = size_t(rva) - size_t(g_data - g_base);
   if (off + 4 <= g_dataSize) memcpy(g_dataInit + off, &v, 4);
 }
@@ -196,28 +197,25 @@ static DWORD WINAPI gameWorker(void* param) {
 static const char* FuzzFile = "fuzz.txt";   // in the current folder
 
 // The image is loaded without resolving imports, so originals that call msvcr71's floor or ceil would crash
-// where their translations (which compute these in place) do not. Those two slots get the real functions.
-static void ResolveMathImports(uint8_t* base, const IMAGE_NT_HEADERS32* nt) {
+// where their translations (which compute these in place) do not. The translator's table says where the image
+// keeps those two imports; each slot gets the real function, after a check that the unresolved slot names it
+// (the table belongs to the client.dll the translation was made from).
+static void ResolveMathImports(uint8_t* base, uint32_t imageSize) {
   HMODULE crt = LoadLibraryA("msvcr71.dll");
-  const auto& dir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
-  if (!crt || !dir.VirtualAddress)
+  if (!crt)
     return;
-  for (auto imp = (const IMAGE_IMPORT_DESCRIPTOR*)(base + dir.VirtualAddress); imp->Name; imp++) {
-    if (_stricmp((const char*)(base + imp->Name), "msvcr71.dll") || !imp->OriginalFirstThunk)
+  static const char* const names[] = { "floor", "ceil" };
+  for (const uint32_t* e = MxoX_crtslots; e[0]; e += 2) {
+    if (e[1] > 1 || e[0] > imageSize || imageSize - e[0] < 4)
       continue;
-    auto names = (const uint32_t*)(base + imp->OriginalFirstThunk);
-    auto slots = (uint32_t*)(base + imp->FirstThunk);
-    for (uint32_t k = 0; names[k]; k++) {
-      if (names[k] & 0x80000000u)
-        continue;
-      const char* name = (const char*)(base + names[k] + 2);
-      if (strcmp(name, "floor") && strcmp(name, "ceil"))
-        continue;
-      DWORD old;
-      VirtualProtect(&slots[k], 4, PAGE_READWRITE, &old);
-      slots[k] = (uint32_t)(uintptr_t)GetProcAddress(crt, name);
-      VirtualProtect(&slots[k], 4, old, &old);
-    }
+    uint32_t* slot = (uint32_t*)(base + e[0]);
+    const uint32_t nameRva = *slot;   // unresolved: the address of the import's hint and name
+    if (nameRva > imageSize - 16 || strcmp((const char*)(base + nameRva + 2), names[e[1]]))
+      continue;
+    DWORD old;
+    VirtualProtect(slot, 4, PAGE_READWRITE, &old);
+    *slot = (uint32_t)(uintptr_t)GetProcAddress(crt, names[e[1]]);
+    VirtualProtect(slot, 4, old, &old);
   }
 }
 
@@ -230,7 +228,7 @@ static int runGameChild(int iterations, int first, int count) {
   auto nt = (const IMAGE_NT_HEADERS32*)(base + ((const IMAGE_DOS_HEADER*)base)->e_lfanew);
   uint32_t imageSize = nt->OptionalHeader.SizeOfImage;
   if (!MxoXFixups(base, MxoX_imagebase, MxoX_absfix, MxoX_relfix, MxoX_code_begin, MxoX_code_end)) return 2;
-  ResolveMathImports(base, nt);
+  ResolveMathImports(base, imageSize);
   AddVectoredExceptionHandler(1, crashHandler);
   CreateThread(nullptr, 0, watchdog, nullptr, 0, nullptr);
   g_arena = (uint32_t*)VirtualAlloc(nullptr, BlockSize * Blocks, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
@@ -241,6 +239,8 @@ static int runGameChild(int iterations, int first, int count) {
     if (!memcmp(sec[k].Name, ".data", 6)) { g_data = base + sec[k].VirtualAddress; g_dataSize = sec[k].Misc.VirtualSize & ~3u; }
   DWORD old; VirtualProtect(g_data, g_dataSize, PAGE_READWRITE, &old);
   g_dataInit = (uint8_t*)malloc(g_dataSize); g_dataA = (uint8_t*)malloc(g_dataSize);
+  g_dataPristine = (uint8_t*)malloc(g_dataSize);
+  memcpy(g_dataPristine, g_data, g_dataSize);
   memcpy(g_dataInit, g_data, g_dataSize);
   g_seed ^= uint64_t(first + 2) * 0x9E3779B97F4A7C15ull;   // first + 1 would cancel the start value for routine 0 and leave the generator at zero
   FILE* out = fopen(FuzzFile, "a");
@@ -250,6 +250,7 @@ static int runGameChild(int iterations, int first, int count) {
     MxoXFunc* f = findFunc(MxoX_funcs, g.rva);
     if (!f || !MxoXMatches(base, imageSize, MxoX_imagebase, *f)) { fprintf(out, "%d %06x NOMATCH\n", idx, g.rva); fflush(out); continue; }
     static Job j; memset(&j, 0, sizeof(j)); g_reached = 0;
+    memcpy(g_dataInit, g_dataPristine, g_dataSize);   // shaped input of an earlier routine does not carry over
     j.g = &g; j.f = f; j.iterations = iterations;
     g_timeouts = 0; g_guard = 0;
     HANDLE th = CreateThread(nullptr, 0, gameWorker, &j, 0, nullptr);

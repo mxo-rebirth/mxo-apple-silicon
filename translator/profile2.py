@@ -122,7 +122,9 @@ for s, cbase, sbase, ssize, vbase, vsize in allsamples:
             detail[tid]['game'][(e, nxt, nx)] += 1
     elif sbase <= eip < sbase + ssize:
         n = dsym(eip, sbase)
-        if n.lstrip('_').startswith(('MxoX_', 'LMxoX', 'Mxo_')):
+        # translated routines (MxoX_..., their local labels) and the hand-written replacements (MxoMatMulSSE,
+        # MxoQuatToMatSSE, MxoSqrtSSE): all of it is game math, not the graphics layer
+        if n.lstrip('_').startswith(('Mxo', 'LMxoX')):
             t['translated routines'] += 1
             detail[tid]['xl'][n] += 1
         else:
