@@ -10,18 +10,24 @@ with a shortened draw distance to 55–89 fps at full draw distance.
 
 - An Apple Silicon Mac with [CrossOver](https://www.codeweavers.com/crossover) (tested with 26.3).
 - A CrossOver bottle with the game installed: [docs/crossover.md](docs/crossover.md), step 1.
-- The build tools, once: `brew install mingw-w64 meson ninja glslang`
+- [Homebrew](https://brew.sh), for the build tools.
 
 ## Set up
 
-Close the game and its launcher, download this repository, and run:
+Close the game and its launcher and paste this into Terminal:
 
 ```sh
-cd mxo-apple-silicon
-scripts/setup.sh
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/mxo-rebirth/mxo-apple-silicon/main/install.sh)"
 ```
 
-It asks which bottle to use and then goes through four steps, asking before each:
+It says what it will do and asks before it starts. It installs the build tools with Homebrew if
+they are missing, downloads this repository to `~/mxo-apple-silicon` and runs its setup. Running
+it again updates the download.
+
+By hand, the same is: `brew install mingw-w64 meson ninja glslang`, download this repository and
+run `scripts/setup.sh` in it.
+
+The setup asks which bottle to use and then goes through four steps, asking before each:
 
 | Step | What it does |
 |---|---|
@@ -41,9 +47,9 @@ Then start the game from its launcher as usual.
   setup). It starts hidden.
 - **Fan noise:** the setup offers to limit the frame rate to 90 fps. Without a limit the game
   reaches up to 200 fps in light scenes, which only makes heat. For another limit run
-  `scripts/setup.sh --fps 120 install`; `--fps 0` removes it.
-- **Another project's client:** if its game executable is not `matrix.exe` or `mxorev.exe`, name
-  it: `scripts/setup.sh --exe name.exe`.
+  `~/mxo-apple-silicon/scripts/setup.sh --fps 120 install`; `--fps 0` removes it.
+- **Another project's client:** if its game executable is not `matrix.exe` or `mxorev.exe`, add
+  its name to the end of the command: `--exe name.exe`.
 - **Rejacked:** untick "Use the new glow shader for 'Screen Filter: Over-Bright' (BETA)" in the
   launcher. It halves the frame rate at high resolutions.
 - **Close memory-hungry apps** before playing. When the Mac is short of memory, the game can
@@ -52,7 +58,7 @@ Then start the game from its launcher as usual.
 ## Undo
 
 ```sh
-scripts/setup.sh --bottle YourBottleName uninstall
+~/mxo-apple-silicon/scripts/setup.sh uninstall
 ```
 
 The game goes back to CrossOver's normal graphics. Every file the setup replaced was kept with

@@ -18,6 +18,7 @@ benchmark and regenerating the patch. Building and installing are in [building.m
 | `bench/d3d9bench.rs` | standalone Direct3D 9 benchmark |
 | `scripts/build.sh` | builds `d3d9.dll` from a `client.dll` and the CodeWeavers source |
 | `scripts/setup.sh` | guided setup of a CrossOver bottle |
+| `install.sh` | the one command of the README: installs the build tools, downloads the repository, runs `scripts/setup.sh` |
 | `scripts/merge-pipeline-caches.py` | merges DXVK pipeline caches |
 | `scripts/fps-summary.py` | frame rate in the world from the DLL's frame log |
 
