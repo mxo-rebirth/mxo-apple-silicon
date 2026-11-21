@@ -6,6 +6,11 @@ uses the 2009 client; it was tested with MxO Rejacked and MxO Revived.
 On the test machine (M4, fullscreen 3440×1440, maximum detail) the game went from about 15 fps
 with a shortened draw distance to 55–89 fps at full draw distance.
 
+![The game in a window on a Mac desktop, the frame-rate counter at the top left showing 67 fps](docs/screenshot.jpg)
+
+MxO Rejacked in the world at 67 fps, with the map and the video options open, in a window that
+fills a 3440×1440 screen.
+
 ## What you need
 
 - An Apple Silicon Mac with [CrossOver](https://www.codeweavers.com/crossover) (tested with 26.3).
@@ -66,9 +71,15 @@ a `.setup-backup` suffix.
 
 ## Good to know
 
+- **Use it at your own risk.** We take no responsibility for any damage; see the
+  [licence](LICENSE).
+- **Keep the game apart from your files.** Programs in CrossOver can reach every file of the
+  macOS account they run in. We suggest a separate environment for the game, or at least a
+  separate macOS user account. In a separate account, first run
+  `brew install mingw-w64 meson ninja glslang` in the account that has Homebrew.
 - **Experimental.** It has been played by one person on one Mac, in short sessions.
-- **Built on your Mac, from your game.** Nothing from the game is in this repository. Do not
-  share the built `d3d9.dll`: it contains code translated from your game files.
+- **Built on your Mac, from your game.** No game file is in this repository. Do not share the
+  built `d3d9.dll`: it contains code translated from your game files.
 - **It changes the game's code in memory** (math routines only, nothing network-related).
   Check that your server allows it.
 - **Intel Macs and Windows PCs** gain nothing from the math part.
@@ -99,4 +110,4 @@ For developers and the game teams:
 zlib: [LICENSE](LICENSE). The patch in `dxvk/` is a modified part of
 [DXVK](https://github.com/doitsujin/dxvk), which has the same licence:
 [dxvk/LICENSE](dxvk/LICENSE). The Matrix Online belongs to its owners; this repository contains
-none of it.
+no game files, and the screenshot shows the game.

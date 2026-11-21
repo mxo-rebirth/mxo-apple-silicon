@@ -5,8 +5,8 @@ the overview of why, what this repository does about it and what came out. The d
 the documents listed at the end.
 
 It is experimental: played in short sessions by one person on one machine, with MxO Rejacked
-and MxO Revived. Nothing in the repository comes from the game; the replacement code is
-generated on the player's machine from their own `client.dll`.
+and MxO Revived. No game file is in the repository; the replacement code is generated on the
+player's machine from their own `client.dll`.
 
 ## Why the game is slow
 
@@ -107,4 +107,4 @@ DXVK is by Philip Rebohle, Joshua Ashton and contributors, under the zlib/libpng
 ([dxvk/LICENSE](../dxvk/LICENSE)). The patch here is a derivative of it and carries the same
 licence, as does the rest of this repository ([LICENSE](../LICENSE)). The DXVK source it applies
 to is the one CodeWeavers publish for CrossOver. The Matrix Online is the property of its
-owners; this repository contains none of it.
+owners; this repository contains no game files.

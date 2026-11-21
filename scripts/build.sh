@@ -4,7 +4,7 @@
 #   scripts/build.sh /path/to/client.dll [crossover-sources-<version>.tar.gz]
 #
 # client.dll is the game's own file (from your Rejacked or Revived install). The translated math
-# routines are generated from it on your machine; nothing from the game is stored in this repository.
+# routines are generated from it on your machine; no game file is stored in this repository.
 # Without a tarball argument, CodeWeavers' source for CrossOver $CROSSOVER_VERSION (default 26.3.0)
 # is downloaded once into build/.
 #
