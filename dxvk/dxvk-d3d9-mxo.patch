@@ -440,7 +440,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 -        m_vsFloatConstsCount = std::max(m_vsFloatConstsCount, StartRegister + Count);
 +        // Every draw copies the vertex shader constants up to this mark (with software vertex
 +        // processing that can be 8192 registers). Registers that hold zero need no copy: reads
-+        // past the copied range return zero. So only registers that become nonzero raise it;
++        // past the copied range return zero. So only registers that become nonzero raise it:
 +        // a game that clears all 8192 once no longer pays for a 128 KB copy on every draw.
 +        uint32_t top = Count;
 +
@@ -765,7 +765,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +      uint32_t    rva;
 +      uint32_t    size;
 +      uint64_t    hash;
-+      uint32_t    refCount;       // address fields inside the routine; each must point at the float 1.0
++      uint32_t    refCount;       // address fields inside the routine, each of which must point at the float 1.0
 +      uint32_t    refs[3];
 +      void*       replacement;
 +    };
@@ -878,7 +878,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +      std::string differing;
 +
 +      // Game add-ons (Revived's mxrdisp, the mxowrap wrappers) check and hook client.dll code at
-+      // fixed addresses; a routine they point into is left as it is, so their checks still pass and
++      // fixed addresses. A routine they point into is left as it is, so their checks still pass and
 +      // their hooks still run. Any address inside client.dll found in such a module counts.
 +      // DXVK_MXO_RESPECT_ADDONS=0 replaces those routines anyway.
 +      std::vector<uint32_t> addonRefs;
@@ -995,7 +995,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +        Logger::info(str::format("MxO fast math: ", inlineBlocked.size(), " floor/ceil uses keep their routine original (import hooked or missing)"));
 +
 +      // Which routines go in. "matching" counts every routine whose code in memory is the code its translation
-+      // was made from; each reason for leaving a matching routine out is logged with its own count.
++      // was made from. Each reason for leaving a matching routine out is logged with its own count.
 +      std::string paired;
 +      uint32_t overLimit = 0, needDeps = 0, pairedCount = 0;
 +
@@ -1034,7 +1034,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +      }
 +
 +      // A routine that calls another translated routine directly (for its result in xmm0) goes in only together
-+      // with that routine; repeat until nothing changes, since callees can have such callees too.
++      // with that routine. Repeat until nothing changes, since callees can have such callees too.
 +      for (bool changed = true; changed; ) {
 +        changed = false;
 +        for (const uint32_t* d = MxoX_xrdeps; d[0]; d += 2) {
@@ -1248,16 +1248,16 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +// MxoSqrtSSE        cdecl     double sqrt(double x), result in st0, for the client's import of MSVCR71!sqrt
 +//
-+// The x87 sqrt Rosetta runs is slow; SSE2's is not. The result must equal what fsqrt gives under the
++// The x87 sqrt Rosetta runs is slow, SSE2's is not. The result must equal what fsqrt gives under the
 +// calling thread's FPU control word, so only two cases are computed here, everything else goes to the
 +// original (MxoSqrtOriginal):
 +// - 24-bit precision, round to nearest (the game's render thread): sqrtsd, then rounding to float. Taken
 +//   only if the result is a normal float (the x87 keeps its wider exponent range, a float does not) and
 +//   the double result is not exactly halfway between two floats (there, rounding twice could differ
-+//   from rounding once; anywhere else it cannot, because no halfway point lies between the exact root
++//   from rounding once. Anywhere else it cannot, because no halfway point lies between the exact root
 +//   and its nearest double).
 +// - 53-bit precision, round to nearest: sqrtsd is exactly fsqrt.
-+// x must be positive and finite; zero, negative, infinite and NaN inputs take the original, which also
++// x must be positive and finite. Zero, negative, infinite and NaN inputs take the original, which also
 +// handles their error reporting.
 +__asm__(
 +  ".intel_syntax noprefix\n"
@@ -1606,7 +1606,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +  // A helper thread looks at every thread of the process every few milliseconds: where it is executing, and
 +  // the nearest return addresses on its stack that lie in this DLL, in the game's client.dll and in
 +  // winevulkan.dll (so that time spent waiting or inside Vulkan can be attributed to its caller). Samples are
-+  // appended to C:\\Games\\dxvk\\samples.bin every ten seconds; translator/profile.py reads the file.
++  // appended to C:\\Games\\dxvk\\samples.bin every ten seconds. translator/profile2.py reads the file.
 +  struct SampleRecord {
 +    uint32_t tid, eip, retSelf[3], retClient[3], retVulkan;
 +  };
@@ -1623,7 +1623,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +  static DWORD s_presentThreadId = 0;
 +
-+  // The DXVK_HUD overlay starts hidden; Ctrl+Shift+F shows or hides it. The keys are looked at ten times a
++  // The DXVK_HUD overlay starts hidden. Ctrl+Shift+F shows or hides it. The keys are looked at ten times a
 +  // second, not on every frame: each look is a call into Wine's input handling.
 +  static std::atomic<bool> s_hudHidden = { true };
 +
@@ -2209,7 +2209,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +      // Log every size involved in placing the picture whenever one of them changes, so that a
 +      // picture in the wrong place can be explained from the log alone. The cheap sizes are compared
-+      // every frame; the window and monitor rectangles every 60 frames; the client size and display
++      // every frame, the window and monitor rectangles every 60 frames, the client size and display
 +      // mode are read only when something changed. All of this is kept per swap chain.
 +      const int32_t cheap[] = {
 +        int32_t(m_presentParams.BackBufferWidth), int32_t(m_presentParams.BackBufferHeight),
@@ -2681,7 +2681,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +#pragma once
 +
 +// Diagnostic counters read by the D3D9 front end's optional frame log (C:\Games\dxvk\debug.flag).
-+// Written from the rendering threads without locking; the values are statistics, not state.
++// Written from the rendering threads without locking. The values are statistics, not state.
 +
 +#include <atomic>
 +#include <chrono>
@@ -2926,7 +2926,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +  // map all readable memory as executable. Under CrossOver on Apple Silicon the first write
 +  // to each fresh page of such memory, once it is shared with Metal as a mapped Vulkan
 +  // allocation, takes about 1.2 seconds. Having the kernel fault the pages in up front
-+  // (lock, then unlock) avoids that; it costs a few milliseconds per allocation.
++  // (lock, then unlock) avoids that. It costs a few milliseconds per allocation.
 +  // Set DXVK_PREFAULT_MAPPED_MEMORY=0 to disable.
 +  //
 +  // The pages also stay locked: when macOS is short of memory it compresses or swaps out pages
@@ -2972,7 +2972,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +    // Wine maps all memory of a game whose executable is not NX-compatible as executable, and
 +    // under Rosetta the first write to each page of new memory is slow. Keep emptied
 +    // host-visible chunks for reuse instead of handing them back, up to
-+    // DXVK_KEEP_EMPTY_CHUNKS_MB (default 256) per memory type; 0 restores the old behaviour.
++    // DXVK_KEEP_EMPTY_CHUNKS_MB (default 256) per memory type. 0 restores the old behaviour.
 +    if (type->memType.propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) {
 +      static const VkDeviceSize s_keep = [] {
 +        const std::string v = env::getEnvVar("DXVK_KEEP_EMPTY_CHUNKS_MB");
@@ -3011,7 +3011,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +    // Background warming of host-visible memory: a thread allocates whole chunks ahead of
 +    // time and writes every page once, so the rendering threads get memory whose first-write
-+    // cost has already been paid. DXVK_WARM_MEMORY_MB per memory type (default 0 = off; Revived never needed it once freed chunks are kept).
++    // cost has already been paid. DXVK_WARM_MEMORY_MB per memory type (default 0 = off. Revived never needed it once freed chunks are kept).
 +    dxvk::condition_variable                                       m_warmCond;
 +    dxvk::thread                                                   m_warmThread;
 +    bool                                                           m_warmStop   = false;

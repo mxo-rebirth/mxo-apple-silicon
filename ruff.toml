@@ -1,0 +1,7 @@
+# The scripts run on the Python of macOS's developer tools.
+target-version = "py39"
+line-length = 160
+
+[lint]
+# Errors and likely bugs. No rules about taste.
+select = ["E", "F", "B", "PLE"]

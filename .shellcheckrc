@@ -1,0 +1,3 @@
+# The setup finds running programs by name with "ps -o comm=". pgrep -f would read their command
+# lines, which the setup promises never to do.
+disable=SC2009

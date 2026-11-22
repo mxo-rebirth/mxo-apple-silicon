@@ -5,7 +5,7 @@ the overview of why, what this repository does about it and what came out. The d
 the documents listed at the end.
 
 It is experimental: played in short sessions by one person on one machine, with MxO Rejacked
-and MxO Revived. No game file is in the repository; the replacement code is generated on the
+and MxO Revived. No game file is in the repository. The replacement code is generated on the
 player's machine from their own `client.dll`.
 
 ## Why the game is slow
@@ -45,7 +45,7 @@ Fullscreen 3440×1440, maximum detail, full draw distance, music on, Apple M4:
 
 | | Before | Now |
 |---|---|---|
-| Rejacked, in the world | about 15 fps windowed with the draw distance cut; 8.5 fps at full distance | 55–89 fps, 74 on average |
+| Rejacked, in the world | about 15 fps windowed with the draw distance cut. 8.5 fps at full distance | 55–89 fps, 74 on average |
 | Revived, in the world | 1–4 fps on DXVK | 42–65 fps, 58 on average (an earlier build) |
 | Loading area | 8–18 fps | 85–89 fps |
 | Entering the world | about 50 s at 3–8 fps | no stall |
@@ -54,21 +54,21 @@ Fullscreen 3440×1440, maximum detail, full draw distance, music on, Apple M4:
 Two "before" figures are stock CrossOver: the 15 fps in the world and the loading area. The
 others are from early builds of this DLL, before the fix for each problem.
 
-The game's main thread is now the limit; the GPU is idle a third to half of the time. Method,
+The game's main thread is now the limit. The GPU is idle a third to half of the time. Method,
 numbers per build and open problems: [measurements.md](measurements.md).
 
 ## Limits
 
 - Not tested: long sessions, interiors, other districts, any other Mac.
 - The translation trades the FPU's extended exponent range for speed. Results match for every
-  value a `float` can hold; `xlat.py --exact-range` reproduces the full range at a cost.
-- It patches `client.dll` in memory. That is also what cheats do; see the questions below.
+  value a `float` can hold. `xlat.py --exact-range` reproduces the full range at a cost.
+- It patches `client.dll` in memory. That is also what cheats do. See the questions below.
 - The DLL does not check that it runs on Apple Silicon. On real x86 hardware the translated
   code is expected to be slightly slower than the original.
 
 ## Other platforms
 
-We tested one setup. Everything in this section is what we expect from how the fixes work;
+We tested one setup. Everything in this section is what we expect from how the fixes work.
 none of it has been measured.
 
 The math replacement should help wherever x86 code is translated and x87 is emulated in
@@ -107,4 +107,4 @@ DXVK is by Philip Rebohle, Joshua Ashton and contributors, under the zlib/libpng
 ([dxvk/LICENSE](../dxvk/LICENSE)). The patch here is a derivative of it and carries the same
 licence, as does the rest of this repository ([LICENSE](../LICENSE)). The DXVK source it applies
 to is the one CodeWeavers publish for CrossOver. The Matrix Online is the property of its
-owners; this repository contains no game files.
+owners. This repository contains no game files.

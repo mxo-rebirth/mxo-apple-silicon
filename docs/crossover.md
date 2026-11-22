@@ -6,7 +6,7 @@ the next step, in [building.md](building.md).
 
 Out of the box the game does not work in CrossOver: you get an error box about pixel shaders,
 then a black screen, then a "Music System Failed to Initialize" error. Each has a specific fix,
-listed below. `scripts/setup.sh` can do all of it for you ([building.md](building.md)); what
+listed below. `scripts/setup.sh` can do all of it for you ([building.md](building.md)). What
 follows is the same by hand.
 
 Paths used here:
@@ -31,7 +31,7 @@ Do not start the game yet.
 
 ## 2. The three fixes that make it start
 
-All files go into `$BOTTLE/drive_c/windows/syswow64` (the 32-bit system folder; the game is a
+All files go into `$BOTTLE/drive_c/windows/syswow64` (the 32-bit system folder, the game is a
 32-bit program). Keep a copy of every file you replace.
 
 ### Pixel shader error
@@ -64,7 +64,7 @@ Microsoft packages:
 | DirectX End-User Runtimes, February 2010 (`directx_feb2010_redist.exe`), inside it `dxnt.cab` | `dmband.dll`, `dmcompos.dll`, `dmime.dll`, `dmloader.dll`, `dmscript.dll`, `dmstyle.dll`, `dmsynth.dll`, `dmusic.dll`, `dswave.dll`, `dsound.dll` |
 | DirectX 9.0c redistributable, April 2006 (`directx_apr2006_redist.exe`), inside it `DirectX.cab` | `gm16.dls`, to be renamed `gm.dls` |
 
-Both packages are archives of `.cab` files; `cabextract` (`brew install cabextract`) unpacks
+Both packages are archives of `.cab` files. `cabextract` (`brew install cabextract`) unpacks
 them:
 
 ```sh
@@ -95,7 +95,7 @@ done
 ```
 
 On the test machine these files were copied by hand, and the commands above were written down
-afterwards; the package and file names are the ones `winetricks` uses for the same job. For
+afterwards. The package and file names are the ones `winetricks` uses for the same job. For
 checking: `dmime.dll` is 181,248 bytes, `dsound.dll` 381,952 and `gm.dls` 3,440,660.
 
 ### "Music System Failed to Initialize"
@@ -121,7 +121,7 @@ endings.
   fullscreen in the game's video options. With the DLL from this repository installed,
   fullscreen works.
 - **Skip the logo movies.** They show black. The setup's `intro` step adds this line to
-  `useropts.cfg`; by hand, add it above the launcher's block:
+  `useropts.cfg`. By hand, add it above the launcher's block:
 
   ```
   EnableSplash = 0
@@ -140,12 +140,12 @@ build and install the DLL that fixes that, and [how-it-works.md](how-it-works.md
 
 | What you see | What to do |
 |---|---|
-| The "Trace program: running" text in the character-creation intro disappears after a moment | Nothing; it is cosmetic and unsolved. |
+| The "Trace program: running" text in the character-creation intro disappears after a moment | Nothing. It is cosmetic and unsolved. |
 | "Jack out" seems to do nothing | The game counts down a few seconds while you stand still. Otherwise close the window. |
 | The game will not start after an external monitor was unplugged or switched to another input while the launcher was open | CrossOver has lost track of the displays. Quit the launcher and shut the bottle down (`"$WINE" --bottle MatrixOnline -- wineboot.exe --end-session --shutdown`), then start again. |
-| Draw distance changes by itself | That is the game's render throttle; see [client-notes.md](client-notes.md#the-render-throttle). |
+| Draw distance changes by itself | That is the game's render throttle. See [client-notes.md](client-notes.md#the-render-throttle). |
 | The game crashes after about a minute in the world | It ran out of address space. Add `"WINE_LARGE_ADDRESS_AWARE" = "1"` under `[EnvironmentVariables]` in `$BOTTLE/cxbottle.conf`. |
-| Low frame rate at high resolution with Rejacked | Untick "Use the new glow shader for 'Screen Filter: Over-Bright' (BETA)" in the Rejacked launcher; it halves the frame rate at 3440×1440. |
+| Low frame rate at high resolution with Rejacked | Untick "Use the new glow shader for 'Screen Filter: Over-Bright' (BETA)" in the Rejacked launcher. It halves the frame rate at 3440×1440. |
 
 ## MxO Revived
 
@@ -179,7 +179,7 @@ the test machine. With the launcher closed, `"BackgroundVideo": false` in
 Without the line above, Wine's DirectSound is used and Revived shows the "Music System Failed
 to Initialize" box. Do not try Wine's own DirectMusic instead: Revived froze at start with it.
 
-The DLL from this repository works with Revived; see [building.md](building.md).
+The DLL from this repository works with Revived. See [building.md](building.md).
 
 ## A note on safety
 

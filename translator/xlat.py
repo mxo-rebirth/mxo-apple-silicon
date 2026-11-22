@@ -11,7 +11,14 @@ Usage: xlat.py <mode> <image> <prefix> <out.inc> <start-end> [...]
   mode  pe   : image is a PE file, ranges are RVAs
         flat : image is a flat binary linked at 0x62000000, ranges are offsets
 """
-import sys, struct, subprocess, tempfile, os, re, bisect, pickle
+import bisect
+import os
+import pickle
+import re
+import struct
+import subprocess
+import sys
+import tempfile
 
 T1, T2 = 'xmm6', 'xmm7'
 MAXDEPTH = 6
@@ -125,8 +132,8 @@ def disassemble(img, s, e):
                           '--adjust-vma=0x%x' % (img.base + s), name], capture_output=True, text=True).stdout
     os.unlink(name)
     res = []
-    for l in out.splitlines():
-        m = re.match(r'^\s*([0-9a-f]+):\t((?:[0-9a-f]{2} )+)\s*(?:\t(.*))?$', l)
+    for line in out.splitlines():
+        m = re.match(r'^\s*([0-9a-f]+):\t((?:[0-9a-f]{2} )+)\s*(?:\t(.*))?$', line)
         if not m:
             continue
         i = Ins()
@@ -532,7 +539,7 @@ class Translator:
 
         # switch tables stored inside the function are data: once found, disassemble around them
         data = []
-        for attempt in range(8):
+        for _attempt in range(8):
             ins, tables, found = prepare(data)
             inner = [t for t in found if s <= t[0] < e and t not in data]
             if not inner:
@@ -553,7 +560,7 @@ class Translator:
                         break
                     n -= 1
                 if n < 0 or n in fpret:
-                    raise Fail('FPU stack underflow at %x (function takes arguments on the FPU stack?)' % ins[u.n].rva)
+                    raise Fail('FPU stack underflow at %x (function takes arguments on the FPU stack?)' % ins[u.n].rva) from u
                 fpret.add(n)
                 # every call of the same function returns the same way
                 if ins[n].kind == 'call':
@@ -584,7 +591,7 @@ class Translator:
         lp = p + ('R' if xr else '')            # local labels: the xr variant is a second copy of the body
         fn = '_%s_%06x%s' % (p, s, '_xr' if xr else '')
         o = self.out
-        # instructions the 5-byte entry patch overwrites; other threads run them here and continue in the original
+        # instructions the 5-byte entry patch overwrites. Other threads run them here and continue in the original
         head, hlen = [], 0
         for n, i in enumerate(ins):
             if hlen >= 5:
@@ -675,10 +682,10 @@ class Translator:
             if n in fused_jump:
                 taken, target = fused_jump.pop(n)
                 if fast:
-                    all_d(d)        # branch edges carry doubles; the conversions leave the flags alone
+                    all_d(d)        # branch edges carry doubles, and the conversions leave the flags alone
                 skip = self.label()
-                for l in self.FUSED_JUMPS[taken]:
-                    o.append(l.format(T='L%s_%06x' % (lp, target), S=skip))
+                for template in self.FUSED_JUMPS[taken]:
+                    o.append(template.format(T='L%s_%06x' % (lp, target), S=skip))
                 continue
             if i.rva in targets:
                 if fast:
@@ -689,7 +696,7 @@ class Translator:
                 cs[0] = None
             if d is None:
                 continue        # never executed (padding, data)
-            falls[0] = not (i.kind in ('jmp', 'ret', 'ijmp', 'switch'))
+            falls[0] = i.kind not in ('jmp', 'ret', 'ijmp', 'switch')
 
             def compare(a, bload, af=False, bfload=None, i=i, n=n):
                 """st0 (in a; a float if af) against the value that bload puts into T2 as a double. If that value
@@ -719,9 +726,9 @@ class Translator:
 
             def memfix(lines, i=i):
                 """Appends lines; the single line holding the memory operand gets an address fixup if needed."""
-                for l in lines:
-                    o.append(l)
-                    if i.relocs and i.mem and i.mem in l:
+                for emitted in lines:
+                    o.append(emitted)
+                    if i.relocs and i.mem and i.mem in emitted:
                         lab = self.label()
                         o.append(lab + ':')
                         self.absfix.append(lab + ' - 4')
@@ -1363,7 +1370,7 @@ class Translator:
         for t, size in sorted(set(self.tabledeps)):
             deps.append((t, size, img.relocs_in(t, t + size), 0))
         done = set()
-        for s, size, relocs, flags in self.funcs + deps:
+        for s, size, relocs, _flags in self.funcs + deps:
             if s in done:
                 continue
             done.add(s)
@@ -1372,22 +1379,22 @@ class Translator:
             L.append('L%s_rel_%06x: .long %s' % (p, s, ','.join(['%d' % (r - s) for r in relocs] + ['0xffffffff'])))
         # functions: rva, size, replacement, original bytes, relocation offsets, flags (1 = needs every dependency intact)
         L += ['.p2align 2', '.globl _%s_funcs' % p, '_%s_funcs:' % p]
-        for s, size, relocs, flags in self.funcs:
+        for s, size, _relocs, flags in self.funcs:
             L.append('.long 0x%x, %d, _%s_%06x, L%s_orig_%06x, L%s_rel_%06x, %d' % (s, size, p, s, p, s, p, s, flags))
         L += ['.long 0, 0, 0, 0, 0, 0']
         # code the translations rely on without replacing it (inlined helper semantics)
         L += ['.globl _%s_deps' % p, '_%s_deps:' % p]
-        for s, size, relocs, flags in deps:
+        for s, size, _relocs, _flags in deps:
             L.append('.long 0x%x, %d, 0, L%s_orig_%06x, L%s_rel_%06x, 0' % (s, size, p, s, p, s))
         L += ['.long 0, 0, 0, 0, 0, 0']
-        # imports computed in place: import slot, routine, function (0 floor, 1 ceil); the installer leaves the
+        # imports computed in place: import slot, routine, function (0 floor, 1 ceil). The installer leaves the
         # routine original unless the slot still holds msvcr71.dll's own function
         L += ['.globl _%s_inlined' % p, '_%s_inlined:' % p]
         for slot, rva, k in self.inlined:
             L.append('.long 0x%x, 0x%x, %d' % (slot, rva, k))
         L += ['.long 0, 0, 0']
         # where client.dll's import table holds msvcr71.dll's floor (0), ceil (1) and sqrt (2): slot, number.
-        # The installer points the sqrt slot at its own version; the tests give the unresolved image real
+        # The installer points the sqrt slot at its own version. The tests give the unresolved image real
         # floor and ceil. This is the only place the import table is read.
         L += ['.globl _%s_crtslots' % p, '_%s_crtslots:' % p]
         for slot, (dll, fn) in sorted(img.imports.items()):
@@ -1405,8 +1412,8 @@ class Translator:
               '.text', '.att_syntax prefix']
         with open(path, 'w') as f:
             f.write('// Generated by xlat.py - x87 routines translated to SSE2. Do not edit.\n__asm__(\n')
-            for l in L:
-                f.write('  "%s\\n"\n' % l.replace('\\', '\\\\').replace('"', '\\"'))
+            for text in L:
+                f.write('  "%s\\n"\n' % text.replace('\\', '\\\\').replace('"', '\\"'))
             f.write(');\n')
 
 
@@ -1461,8 +1468,8 @@ def main():
         elif a == '--exact-range':
             t.exact = True
         elif a.startswith('@'):
-            for l in open(a[1:]):
-                f = l.split('#')[0].split()
+            for entry in open(a[1:]):
+                f = entry.split('#')[0].split()
                 if len(f) >= 4 and f[0] == 'ftol':
                     rva, size, want = int(f[1], 16), int(f[2], 16), int(f[3], 16)
                     if code_hash(img, rva, size) != want:
@@ -1475,13 +1482,13 @@ def main():
         else:
             s, e = [int(x, 16) for x in a.split('-')]
             jobs.append((s, e, 0, None))
-    # dry run: which translatable routines return a float on every path and are called by translated code for it;
+    # dry run: which translatable routines return a float on every path and are called by translated code for it:
     # those get a second entry that returns in xmm0 (translate's xr)
     if not os.environ.get('XLAT_NO_XR'):
         t0 = Translator(img, prefix)
         t0.ftol, t0.exact = set(t.ftol), t.exact
         ok0, seen0 = set(), set()
-        for s, e, weight, check in jobs:
+        for s, e, _weight, check in jobs:
             if s in seen0 or s in skip:
                 continue
             seen0.add(s)
@@ -1496,7 +1503,7 @@ def main():
                 pass
         t.xr_targets = {b for b in t0.fpcalls if b in ok0 and t0.fpret_all.get(b)}
     limits = {}
-    for s, e, weight, check in jobs:
+    for s, e, _weight, _check in jobs:
         limits.setdefault(s, e)         # a routine listed twice is translated with its first limit
     ok = 0
     okw = totw = 0
@@ -1537,7 +1544,7 @@ def main():
         try:
             t.translate(b, limits[b], xr=True)
         except Fail as f:
-            raise SystemExit('internal error: no direct-call entry for %x: %s' % (b, f))
+            raise SystemExit('internal error: no direct-call entry for %x: %s' % (b, f)) from f
     if writelist:
         with open(writelist, 'w') as f:
             f.write('# Routines of client.dll to translate: start limit weight size hash (hex; weight = profile samples).\n')
@@ -1560,12 +1567,12 @@ def main():
         for d in t.info:
             f.write('  { 0x%x, %d, "%s", %s, %s, %s },\n' % (d['rva'], d['nargs'], d['kinds'], 'true' if d['this'] else 'false',
                     'true' if d['fpret'] else 'false', 'true' if d['framed'] else 'false'))
-    print('%d of %d functions translated; sample weight covered %d of %d' % (ok, len(seen), okw, totw))
+    print('%d of %d functions translated, sample weight covered %d of %d' % (ok, len(seen), okw, totw))
     if not t.exact:
-        print('compare branches fused: %d; floor/ceil calls computed in place: %d; direct float-returning calls: %d to %d routines'
+        print('compare branches fused: %d, floor/ceil calls computed in place: %d, direct float-returning calls: %d to %d routines'
               % (t.fused, len(t.inlined), len(t.xrdeps), len(t.xr_targets)))
-        print('float-to-double conversions at branches: %d; instructions emitted: %d'
-              % (t.edgeconv, sum(1 for l in t.out if not l.endswith(':') and not l.startswith('.'))))
+        print('float-to-double conversions at branches: %d, instructions emitted: %d'
+              % (t.edgeconv, sum(1 for emitted in t.out if not emitted.endswith(':') and not emitted.startswith('.'))))
     for k, v in sorted(reasons.items(), key=lambda kv: -kv[1][1])[:25]:
         print('  skipped %4d functions, weight %6d: %s' % (v[0], v[1], k))
 

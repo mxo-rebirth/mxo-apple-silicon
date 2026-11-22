@@ -7,7 +7,12 @@ Produces <image>.map (pickle):
   x87       sorted list of RVAs of x87 instructions
   insn      sorted list of instruction start RVAs
 """
-import sys, struct, subprocess, tempfile, os, re, pickle
+import os
+import pickle
+import struct
+import subprocess
+import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from xlat import Image
@@ -25,15 +30,15 @@ def build(path, out):
                              '--adjust-vma=0x%x' % (img.base + lo), name], stdout=subprocess.PIPE, text=True)
     insn, x87, branches, calls = [], [], [], set()
     base = img.base
-    for l in proc.stdout:
-        t = l.find(':\t')
+    for line in proc.stdout:
+        t = line.find(':\t')
         if t < 0:
             continue
         try:
-            va = int(l[:t], 16)
+            va = int(line[:t], 16)
         except ValueError:
             continue
-        rest = l[t + 2:]
+        rest = line[t + 2:]
         t2 = rest.find('\t')
         hexpart = rest if t2 < 0 else rest[:t2]
         first = hexpart[:2]
@@ -66,7 +71,7 @@ def build(path, out):
             v = struct.unpack_from('<I', b, img.off(r))[0] - base
         except Exception:
             continue
-        # pointers stored in data (vtables, callbacks); pointers inside code are operands and checked separately
+        # pointers stored in data (vtables, callbacks). Pointers inside code are operands and checked separately
         # (the linear sweep can be out of step right after a jump table, so the pointer alone decides)
         if lo <= v < hi and not (lo <= r < hi):
             entries.add(v)

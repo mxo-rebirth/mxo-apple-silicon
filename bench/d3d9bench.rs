@@ -498,16 +498,16 @@ static QUAD_INDEXED: [f32; 32] = [
 ];
 static QUAD_INDICES: [u16; 6] = [0, 1, 2, 2, 1, 3];
 
-// vs_1_1: dcl_position v0; dcl_normal v1; dcl_texcoord v2; m4x4 oPos, v0, c0; mov oT0, v2; mov oD0, c4
+// vs_1_1: dcl_position v0 / dcl_normal v1 / dcl_texcoord v2 / m4x4 oPos, v0, c0 / mov oT0, v2 / mov oD0, c4
 static VS_CODE: [u32; 21] = [
     0xFFFE0101, 0x0000001F, 0x80000000, 0x900F0000, 0x0000001F, 0x80000003, 0x900F0001,
     0x0000001F, 0x80000005, 0x900F0002, 0x00000014, 0xC00F0000, 0x90E40000, 0xA0E40000,
     0x00000001, 0xE00F0000, 0x90E40002, 0x00000001, 0xD00F0000, 0xA0E40004, 0x0000FFFF,
 ];
-// ps_1_1: tex t0; mul r0, t0, v0
+// ps_1_1: tex t0 / mul r0, t0, v0
 static PS11_CODE: [u32; 8] =
     [0xFFFF0101, 0x00000042, 0xB00F0000, 0x00000005, 0x800F0000, 0xB0E40000, 0x90E40000, 0x0000FFFF];
-// ps_2_0: dcl t0.xy; dcl_2d s0; texld r0, t0, s0; mov oC0, r0
+// ps_2_0: dcl t0.xy / dcl_2d s0 / texld r0, t0, s0 / mov oC0, r0
 static PS20_CODE: [u32; 15] = [
     0xFFFF0200, 0x0200001F, 0x80000000, 0xB0030000, 0x0200001F, 0x90000000, 0xA00F0800, 0x03000042,
     0x800F0000, 0xB0E40000, 0xA0E40800, 0x02000001, 0x800F0800, 0x80E40000, 0x0000FFFF,
@@ -626,7 +626,7 @@ unsafe fn field(label: &[u8], v: u32) {
     print_u32(v);
 }
 
-/// Reports a failed call; Direct3D marks failure with a negative result. True if it failed.
+/// Reports a failed call. Direct3D marks failure with a negative result. True if it failed.
 unsafe fn report(name: &[u8], hr: i32) -> bool {
     if hr < 0 {
         print(b"  FAIL ");
@@ -836,7 +836,7 @@ unsafe fn checkerboard_dxt1(r: &LockedRect, dark: u16) {
     }
 }
 
-/// Creates the textures, vertex buffers and shaders. One that the chosen mode draws with must exist; the
+/// Creates the textures, vertex buffers and shaders. One that the chosen mode draws with must exist, the
 /// others are only reported.
 unsafe fn create_resources(b: &mut Bench, dev: P, o: &Options) {
     let format = if o.dxt1 { FMT_DXT1 } else { FMT_A8R8G8B8 };

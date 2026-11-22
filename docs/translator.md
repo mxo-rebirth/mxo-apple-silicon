@@ -71,7 +71,7 @@ software.
 Where the code only tests `ah` and jumps, the translation branches on the SSE compare itself.
 It does so only if flow analysis, following jumps, shows that neither the flags nor the bytes
 of `ax` holding the status word are read again before being overwritten. It applies to tests of
-the three condition bits; a test of any other bit of `ah` (the FPU stack pointer) keeps the full
+the three condition bits. A test of any other bit of `ah` (the FPU stack pointer) keeps the full
 status word. FPU register moves between `fnstsw` and `test` are allowed.
 
 Everywhere else a compare followed by `fnstsw ax` produces the same condition bits in `ah` as
@@ -104,16 +104,16 @@ the x87 stack. The DLL installs a caller only together with its callees.
 
 The translator refuses anything it cannot prove safe, and the routine then stays as it is:
 
-- code that reads or changes the FPU control word;
-- FPU stacks deeper than six;
-- routines that take arguments on the FPU stack;
+- code that reads or changes the FPU control word.
+- FPU stacks deeper than six.
+- routines that take arguments on the FPU stack.
 - routines that other code jumps into the middle of.
 
 ## The routine list
 
 `translator/routines.list` names the routines to translate: start, limit, profile weight, length
 and a hash. The hash is FNV-1a over the routine with address fields left out. The list contains
-no game code. It was built from sampling profiles of the game; a routine is translated only if
+no game code. It was built from sampling profiles of the game. A routine is translated only if
 its code matches the hash.
 
 The line `ftol 6a92d8` names the compiler's float-to-integer helper.
@@ -141,11 +141,11 @@ normal float that does not sit exactly halfway between two floats. Anything else
 When the game creates its Direct3D device, the DLL:
 
 1. checks each routine in the loaded `client.dll` byte for byte against the code its replacement
-   was generated from, and skips any that differ (for example because a wrapper has hooked it);
+   was generated from, and skips any that differ (for example because a wrapper has hooked it).
 2. skips routines whose `floor`/`ceil` import slot is not msvcr71's, and callers whose callees
-   were skipped;
+   were skipped.
 3. pauses all other threads, writes a 5-byte jump at the start of each remaining routine, and
-   resumes them;
+   resumes them.
 4. on every frame checks that the FPU control word is still what the translation assumes
    (24-bit precision, round to nearest) and switches the replacements off if it is not.
 
@@ -169,7 +169,7 @@ code and as translation on the same input and compare everything it wrote, bit f
 | Synthetic routines covering every instruction form the translator handles, random inputs including huge, tiny, zero, infinite and NaN values, `--exact-range` | 6.6 million comparisons, all identical |
 | Synthetic routines, faster rounding, ordinary values | 200,000 cases per routine, no differences |
 | Synthetic routines, single precision against the double form | 3.3 million cases identical |
-| The game's routines on random memory (taken with 468 routines; 278 could be run this way) | 20,504 comparisons; 262 routines identical in every run, 16 differed only in situations random input creates and the game does not |
+| The game's routines on random memory (taken with 468 routines, 278 could be run this way) | 20,504 comparisons. 262 routines identical in every run, 16 differed only in situations random input creates and the game does not |
 | The map routine `0x47DDB0` on plausible input | 100,000 calls, about 60,000 reach the result, all identical |
 | The current translation of all 537 routines against the previous one | no differing line, with ordinary and with random input |
 | `_ftol2` replacement | 400,000 values over the whole range, identical |
@@ -178,10 +178,10 @@ code and as translation on the same input and compare everything it wrote, bit f
 
 The differences that random input produces and the game does not:
 
-- doubles too small or too large to occur in practice (denormal, or above 2^900);
-- two NaNs meeting in one operation: x87 and SSE2 keep a different one;
+- doubles too small or too large to occur in practice (denormal, or above 2^900).
+- two NaNs meeting in one operation: x87 and SSE2 keep a different one.
 - a called routine that fails to return a value it should have, which leaves different FPU
-  stack bits in `eax`;
+  stack bits in `eax`.
 - an unused `ah` after a `bool` return, and whatever `eax` held after a float return.
 
 With ordinary values only (`MXO_PLAIN=1`), one routine differs: `0x2FE670`, where an

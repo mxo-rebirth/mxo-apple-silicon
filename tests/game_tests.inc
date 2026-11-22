@@ -1,6 +1,6 @@
 // Blind differential test of the translated game routines against the real client.dll.
 // Each routine is called with random floats / pointers into a scratch arena, once as the original
-// and once as the translation; the arena, the image's global data, eax and st0 must come out identical.
+// and once as the translation. The arena, the image's global data, eax and st0 must come out identical.
 #include <csetjmp>
 #include <emmintrin.h>
 
@@ -53,7 +53,7 @@ static uint32_t* g_resA;
 static uint8_t*  g_data;       // the image's writable data, so side effects on globals are compared too
 static size_t    g_dataSize;
 static uint8_t*  g_dataInit;    // what the image's data is reset to before every call
-static uint8_t*  g_dataPristine;   // the image's data as loaded; g_dataInit starts from it for every routine
+static uint8_t*  g_dataPristine;   // the image's data as loaded, from which g_dataInit starts for every routine
 static uint8_t*  g_dataA;
 static uint8_t*  g_base;
 
@@ -99,7 +99,7 @@ static double rndRange(double lo, double hi) { return lo + (hi - lo) * double(rn
 
 static int g_reached = 0;   // shaped calls whose first output was written by the original
 
-static void putGlobalFloat(uint32_t rva, float v) {   // in the data both runs of this routine start from; later routines start from the loaded image again
+static void putGlobalFloat(uint32_t rva, float v) {   // in the data both runs of this routine start from. Later routines start from the loaded image again
   const size_t off = size_t(rva) - size_t(g_data - g_base);
   if (off + 4 <= g_dataSize) memcpy(g_dataInit + off, &v, 4);
 }
@@ -112,8 +112,8 @@ static float rndShapeFloat() {   // ordinary values, sometimes repeated exactly
 
 static void shapeInput(const GameFn& g) {
   if (g.rva == 0x4859d0) {
-    // sort comparator: two pointers to element pointers; each element has a box at +24..+2c (min) and +30..+38
-    // (max); compared along the direction held in globals at 0xa76a08..0xa76a10
+    // sort comparator: two pointers to element pointers. Each element has a box at +24..+2c (min) and +30..+38
+    // (max), compared along the direction held in globals at 0xa76a08..0xa76a10
     const size_t objA = BlockSize * 9, objB = BlockSize * 10;
     g_init[BlockSize * 1 / 4] = uint32_t(uintptr_t(g_arena)) + objA;
     g_init[BlockSize * 2 / 4] = uint32_t(uintptr_t(g_arena)) + (rnd32() % 16 ? objB : objA);
@@ -158,7 +158,7 @@ static DWORD WINAPI gameWorker(void* param) {
     g_specials = !g_plain && (it & 3) == 3;
     for (size_t k = 0; k < BlockSize * Blocks / 4; k++) {
       uint32_t r = g_plain ? 0 : rnd32() % 64;
-      // mostly floats; a few small integers and in-arena pointers so counts and links are sometimes sane
+      // mostly floats, with a few small integers and in-arena pointers so counts and links are sometimes sane
       g_init[k] = r < 56 ? fbits(rndf()) : r < 61 ? rnd32() % 5 : uint32_t(uintptr_t(g_arena)) + (rnd32() % (BlockSize * (Blocks - 1) / 4)) * 4;
     }
     if (getenv("MXO_SHAPE") && *getenv("MXO_SHAPE")) shapeInput(g);
@@ -198,7 +198,7 @@ static const char* FuzzFile = "fuzz.txt";   // in the current folder
 
 // The image is loaded without resolving imports, so originals that call msvcr71's floor or ceil would crash
 // where their translations (which compute these in place) do not. The translator's table says where the image
-// keeps those two imports; each slot gets the real function, after a check that the unresolved slot names it
+// keeps those two imports. Each slot gets the real function, after a check that the unresolved slot names it
 // (the table belongs to the client.dll the translation was made from).
 static void ResolveMathImports(uint8_t* base, uint32_t imageSize) {
   HMODULE crt = LoadLibraryA("msvcr71.dll");

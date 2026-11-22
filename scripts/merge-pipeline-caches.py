@@ -40,9 +40,9 @@ def main(paths):
     caches = [(p,) + read_cache(p) for p in paths]
     versions = {c[2] for c in caches}
     if len(versions) != 1:
-        raise SystemExit('the caches have different versions (%s); not merging' % sorted(versions))
+        raise SystemExit('the caches have different versions (%s), not merging' % sorted(versions))
     seen, merged = set(), []
-    for path, header, version, entries in caches:
+    for path, _header, _version, entries in caches:
         print('%s: %d entries' % (os.path.basename(path), len(entries)))
         for digest, raw in entries:
             if digest not in seen:

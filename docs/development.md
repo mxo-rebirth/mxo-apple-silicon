@@ -13,7 +13,7 @@ benchmark and regenerating the patch. Building and installing are in [building.m
 | `translator/routines.list` | the routines to translate: start, limit, weight, length, hash |
 | `translator/profile2.py` | turns the profiler's `samples.bin` into a per-thread profile and a routine list |
 | `translator/dis.py` | disassembles address ranges of a PE file |
-| `translator/mxo_x87_apply.h` | run-time side of the translation: fixups and installation. The patch holds the same file as `src/d3d9/d3d9_mxo_x87.h`; `scripts/build.sh` stops if the two differ |
+| `translator/mxo_x87_apply.h` | run-time side of the translation: fixups and installation. The patch holds the same file as `src/d3d9/d3d9_mxo_x87.h`. `scripts/build.sh` stops if the two differ |
 | `tests/` | differential tests: translation against original code ([README](../tests/README.md)) |
 | `bench/d3d9bench.rs` | standalone Direct3D 9 benchmark |
 | `scripts/build.sh` | builds `d3d9.dll` from a `client.dll` and the CodeWeavers source |
@@ -21,6 +21,9 @@ benchmark and regenerating the patch. Building and installing are in [building.m
 | `install.sh` | the one command of the README: installs the build tools, downloads the repository, runs `scripts/setup.sh` |
 | `scripts/merge-pipeline-caches.py` | merges DXVK pipeline caches |
 | `scripts/fps-summary.py` | frame rate in the world from the DLL's frame log |
+| `scripts/check.sh` | the checks that need neither the game nor CrossOver: shell syntax, linters, writing rules |
+| `scripts/check-rules.py` | the rules of the style guide that a script can check |
+| `STYLEGUIDE.md` | how code and docs are written here |
 
 Everything generated from the game's files lands in `build/` or carries an ignored name
 (`.gitignore`). Nothing derived from `client.dll` belongs in a commit.
@@ -36,7 +39,7 @@ are off unless the file exists.
 | `shot.req` | with `debug.flag`: saves the next frame to `shot.bmp` |
 | `drawlog.req` | with `debug.flag`: writes one `DRAW` line per draw call of the next frame (shaders, textures, render target, blending) |
 | `sample-light.flag` | empty file. A sampling profiler records where the game's main thread and DXVK's own threads are, every 20 ms, and appends to `samples.bin` every 10 s. It also writes `modules.txt`, the list of loaded modules with their addresses. |
-| `sample.flag` | empty file. The same profiler for every thread, every 5 ms. It pauses every thread each time, which makes memory writes in the game much slower than they really are; do not judge frame rates with it. |
+| `sample.flag` | empty file. The same profiler for every thread, every 5 ms. It pauses every thread each time, which makes memory writes in the game much slower than they really are. Do not judge frame rates with it. |
 | `x87max.txt` | a number N: install only the first N translated routines (0 = none). For finding a misbehaving routine by halving. |
 
 The log is `matrix_d3d9.log` (or `mxorev_d3d9.log`) in the same folder.
@@ -48,7 +51,7 @@ scripts/fps-summary.py "$BOTTLE/drive_c/Games/dxvk/matrix_d3d9.log"
 prints the average frame rate in the world, draw calls per frame and frame time per 1,000 draw
 calls ([measurements.md](measurements.md#how-to-measure)).
 
-Wine's own tracing (`--cx-log`) slows the game to a crawl; use it only briefly.
+Wine's own tracing (`--cx-log`) slows the game to a crawl. Use it only briefly.
 
 ## Profiling and adding routines
 
@@ -81,7 +84,7 @@ Routines reached only through pointers do not appear as call targets in `client.
 by walking a sampled address back to the function prologue.
 
 For a different build of `client.dll`, the addresses in the list will not match and nothing is
-translated; the hashes guard against translating the wrong code. Start from a profile, and find
+translated. The hashes guard against translating the wrong code. Start from a profile, and find
 the float-to-integer helper for the `ftol` line: it is the routine all float-to-int casts call
 with the value on the FPU stack.
 
@@ -146,5 +149,5 @@ diff -ruN --exclude=build.w32 --exclude='*.orig' --exclude='*.rej' --exclude='*.
 lines a fixed timestamp so the patch does not change from run to run, then check that it
 applies to a fresh copy of `a` and reproduces `b`.
 
-The DLL is compiled with llvm-mingw; `MXO_COMPILER=gcc scripts/build.sh ...` uses Homebrew's GCC
+The DLL is compiled with llvm-mingw. `MXO_COMPILER=gcc scripts/build.sh ...` uses Homebrew's GCC
 instead ([graphics.md](graphics.md), problem 15).

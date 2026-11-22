@@ -5,7 +5,7 @@ MoltenVK), made from the DXVK 1.10.3 source CodeWeavers publish for CrossOver 26
 `dxvk/dxvk-d3d9-mxo.patch`. It is installed into the bottle and enabled for the game executable
 only, so launchers and everything else keep Wine's Direct3D 9. No game file is modified on disk.
 
-Each fix has a switch that turns it off; they are listed in [building.md](building.md#switches).
+Each fix has a switch that turns it off. They are listed in [building.md](building.md#switches).
 
 ## CrossOver's two stock paths
 
@@ -70,7 +70,7 @@ The client locks dynamic vertex buffers without `D3DLOCK_DISCARD` or `D3DLOCK_NO
 about 40 times per frame. This DXVK version then sends everything queued so far to the GPU,
 stops drawing into the current target, and waits until the GPU has finished with the buffer.
 
-Fix: the game gets a fresh copy of the buffer to write into; draws already queued keep using
+Fix: the game gets a fresh copy of the buffer to write into. Draws already queued keep using
 the old one. Standalone test that locks before every draw: 1 fps to 22 fps, same picture.
 
 ### 7. Texture uploads that break up the frame
@@ -113,7 +113,7 @@ Metal has no triangle fans, so MoltenVK turns every fan draw into a small comput
 which interrupts the drawing pass. DXVK's counters do not show it. The game draws its map as
 about 830 fans per frame: 10 fps with the map open.
 
-Fix: fans are drawn as indexed triangle lists with a prepared index buffer. Map 10 to 30 fps;
+Fix: fans are drawn as indexed triangle lists with a prepared index buffer. Map 10 to 30 fps.
 in the world the GPU went from fully busy to about 45% idle.
 
 ### 11. Work sent to the GPU mid-frame

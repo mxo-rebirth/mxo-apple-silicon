@@ -2,7 +2,7 @@
 # Guided setup of The Matrix Online in a CrossOver bottle, for any MxO install (Rejacked, Revived or
 # another project's client). Run it from the repository folder:
 #
-#   scripts/setup.sh                      everything; it asks what it needs to know first
+#   scripts/setup.sh                      everything, after asking what it needs to know
 #   scripts/setup.sh --yes                everything but the game step, no questions (first bottle found)
 #   scripts/setup.sh --bottle NAME step…  only the named steps, in the named bottle
 #   scripts/setup.sh --fps 120 install    another frame-rate limit (default 90, 0 for none)
@@ -21,7 +21,7 @@
 #   icons      CrossOver's icon for the Rejacked launcher: makes its shortcut when the bottle has none
 #   music      Revived only: keep its starter from switching the game's music off
 #   video      Revived only: switch off the video behind its launcher, which keeps a processor core busy
-#   uninstall  the game executables go back to Wine's Direct3D 9 (DirectMusic stays; it is needed)
+#   uninstall  the game executables go back to Wine's Direct3D 9 (DirectMusic stays, the game needs it)
 #
 # The script never reads passwords, launcher logins or credential stores, and never prints command
 # lines of running programs. Every file it replaces is kept with a ".setup-backup" suffix.
@@ -82,14 +82,14 @@ FANCY=0; GLYPHS=0; WIDTH=76; IN_FRAME=0
 ACC="" GRN="" DIM="" RED="" YEL="" OFF=""
 SITE="" SITE_DIM=""   # the stats site's frame has the site's second colour
 M_OK=" " M_NOTE=" " M_ASK=" " M_BAD=" " M_PICK=">" M_DOWN=" "
-SPIN=('|' '/' '-' '\')
+SPIN=('|' / - "\\")
 RULE="" BAR_FULL="" BAR_EMPTY=""
 WRAPPED=()
-ROW_INK=""   # the colour of a row's text; a note sets it for its own row
+ROW_INK=""   # the colour of a row's text, which a note sets for its own row
 CHOICE=0
 ANSWER=""
 
-light_background() {   # asks the terminal for its background colour; no answer counts as dark
+light_background() {   # asks the terminal for its background colour, and no answer counts as dark
   local old reply rgb r g b
   ( : < /dev/tty ) 2>/dev/null || return 1
   old=$(stty -g < /dev/tty 2>/dev/null) || return 1
@@ -112,7 +112,7 @@ if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-dumb}" != dumb ]; then
   case "$COLS" in ''|*[!0-9]*) COLS=80 ;; esac
   [ "$COLS" -ge 50 ] || COLS=80
   [ "$COLS" -ge 78 ] || WIDTH=$((COLS - 2))
-  # the terminal's own green on a light background; the site's greens on a dark one
+  # the terminal's own green on a light background, the site's greens on a dark one
   ACC=$'\033[1;32m' GRN=$'\033[32m' DIM=$'\033[2;32m' RED=$'\033[1;31m' YEL=$'\033[1;33m' OFF=$'\033[0m'
   SITE=$'\033[1;34m' SITE_DIM=$'\033[34m'
   if [ "${MXO_THEME:-}" != light ] && [ "$(tput colors 2>/dev/null || echo 8)" -ge 256 ] \
@@ -171,7 +171,7 @@ wrap() {   # wrap WIDTH TEXT: sets WRAPPED to the lines
   [ ${#WRAPPED[@]} -gt 0 ] || WRAPPED=("")
 }
 
-row() {   # row MARK COLOUR TEXT [TAIL]: a line in the frame; long text wraps, TAIL sits at the right
+row() {   # row MARK COLOUR TEXT [TAIL]: a line in the frame. Long text wraps, TAIL sits at the right
   local mark=$1 colour=$2 text=$3 tail=${4:-} inner line first=1
   if [ $GLYPHS = 0 ]; then
     printf ' %s%s%s %s%s\n' "$colour" "$mark" "$OFF" "$ROW_INK$text${ROW_INK:+$OFF}" "${tail:+  $DIM$tail$OFF}"
@@ -191,7 +191,7 @@ row() {   # row MARK COLOUR TEXT [TAIL]: a line in the frame; long text wraps, T
   done
 }
 
-say() {   # say TITLE: a new frame; plain, a heading
+say() {   # say TITLE: a new frame, or a heading when plain
   if [ $GLYPHS = 1 ]; then
     frame_close
     echo
@@ -287,7 +287,7 @@ banner() {   # the opening words: one of them in big letters, as a title would b
 }
 
 SITE_SHOWN=0
-site_frame() {   # the stats site under its own logo and in its blue; its first line is typed the first time
+site_frame() {   # the stats site under its own logo and in its blue. Its first line is typed the first time
   local blink=$'\033[5m' knock="Knock, knock." i ch
   [ -z "${MXO_NO_ANIMATION:-}" ] || blink=""
   if [ $GLYPHS = 1 ]; then frame_close; fi
@@ -338,7 +338,7 @@ moving() {   # moving TICK TEXT TAIL: the line a spinner redraws in place
   fi
 }
 
-spin() {   # spin TITLE COMMAND…: a spinner while the command works; what it prints goes to the log
+spin() {   # spin TITLE COMMAND…: a spinner while the command works. What it prints goes to the log
   local title=$1 start=$SECONDS rc=0 pid i=0 from stage="" line
   shift
   if [ $FANCY = 0 ]; then
@@ -372,7 +372,7 @@ spin() {   # spin TITLE COMMAND…: a spinner while the command works; what it p
   return $rc
 }
 
-fetch_file() {   # fetch_file URL OUT TITLE [resume]: a download with a progress bar; curl's status
+fetch_file() {   # fetch_file URL OUT TITLE [resume]: a download with a progress bar, returns curl's status
   local url=$1 out=$2 title=$3 resume=${4:-} rc=0 total pid have pct fill width tail i=0 rows=0
   if [ $FANCY = 0 ]; then
     info "$title"
@@ -406,7 +406,7 @@ fetch_file() {   # fetch_file URL OUT TITLE [resume]: a download with a progress
   done
   wait "$pid" || rc=$?
   printf '\r\033[K\033[?25h'
-  if [ $rows -gt 0 ]; then printf '\033[%dA\033[J' "$rows"; fi   # the title line goes; the result takes its place
+  if [ "$rows" -gt 0 ]; then printf '\033[%dA\033[J' "$rows"; fi   # the title line goes and the result takes its place
   if [ $rc = 0 ]; then ok "$title" "$(mb "$(stat -f %z "$out")") MB"; else bad "$title"; fi
   return $rc
 }
@@ -419,7 +419,7 @@ choose() {   # choose ITEM…: sets CHOICE to the index of the picked item
     for ((i = 0; i < n; i++)); do printf '  %d) %s\n' $((i + 1)) "${items[i]}"; done
     read -r -p "   Number: " key || die "no answer"
     case "$key" in ''|*[!0-9]*) die "nothing chosen" ;; esac
-    [ "$key" -ge 1 ] && [ "$key" -le "$n" ] || die "nothing chosen"
+    if [ "$key" -lt 1 ] || [ "$key" -gt "$n" ]; then die "nothing chosen"; fi
     CHOICE=$((key - 1))
     return 0
   fi
@@ -445,10 +445,10 @@ choose() {   # choose ITEM…: sets CHOICE to the index of the picked item
     esac
     printf '\033[%dA' $((n + 1))
   done
-  printf '\033[%dA\033[J\033[?25h' $((n + 1))   # the list goes; the caller says what was picked
+  printf '\033[%dA\033[J\033[?25h' $((n + 1))   # the list goes and the caller says what was picked
 }
 
-ask() {   # ask "question" [no] -> 0 for yes; Enter and --yes take the default, which is yes unless "no" is given
+ask() {   # ask "question" [no] -> 0 for yes. Enter and --yes take the default, which is yes unless "no" is given
   local default=${2:-yes} hint="[Y/n]" answer i n last
   [ "$default" = yes ] || hint="[y/N]"
   if [ $YES = 1 ]; then
@@ -463,7 +463,7 @@ ask() {   # ask "question" [no] -> 0 for yes; Enter and --yes take the default, 
         "${WRAPPED[i]}" $((WIDTH - 6 - ${#WRAPPED[i]})) "" "$DIM" "$OFF"
     done
     # the frame's edge first, then back to where the answer goes
-    printf '%s│%s %s%s%s %s %s%s%s%*s%s│%s\r\033[%dC' "$DIM" "$OFF" "$ACC" "$([ $n = 1 ] && echo "$M_ASK" || echo " ")" "$OFF" \
+    printf '%s│%s %s%s%s %s %s%s%s%*s%s│%s\r\033[%dC' "$DIM" "$OFF" "$ACC" "$([ "$n" = 1 ] && echo "$M_ASK" || echo " ")" "$OFF" \
       "$last" "$DIM" "$hint" "$OFF" $((WIDTH - 11 - ${#last})) "" "$DIM" "$OFF" $((${#last} + 11))
     read -r answer || die "no answer"   # end of input is not a yes
   else
@@ -497,11 +497,11 @@ MIN_MACOS=26
 say "System"
 [ "$(uname -s)" = Darwin ] || die "this is for macOS"
 [ "$(sysctl -n hw.optional.arm64 2>/dev/null)" = 1 ] \
-  || die "this is for Apple Silicon Macs; an Intel Mac gains nothing from it"
+  || die "this is for Apple Silicon Macs. An Intel Mac gains nothing from it"
 ok "$(sysctl -n machdep.cpu.brand_string 2>/dev/null || echo "Apple Silicon")"
 MACOS=$(sw_vers -productVersion 2>/dev/null || true)
 case "${MACOS%%.*}" in ''|*[!0-9]*) die "cannot read the macOS version" ;; esac
-[ "${MACOS%%.*}" -ge $MIN_MACOS ] || die "macOS $MIN_MACOS or newer is needed; this Mac has macOS $MACOS"
+[ "${MACOS%%.*}" -ge $MIN_MACOS ] || die "macOS $MIN_MACOS or newer is needed. This Mac has macOS $MACOS"
 ok "macOS $MACOS"
 [ "${MACOS%%.*}" -ge 27 ] || note "tried on macOS 27 only"
 [ -x "$WINE" ] || die "CrossOver not found in /Applications. Install it first: https://www.codeweavers.com/crossover"
@@ -527,7 +527,7 @@ if [ $FANCY = 1 ]; then mkdir -p "$CACHE"; : > "$LOG"; fi
 
 # --- bottle -------------------------------------------------------------------------------------
 
-wants_game() {   # only the game step may make a bottle; --yes leaves that step out unless it is named
+wants_game() {   # only the game step may make a bottle, and --yes leaves that step out unless it is named
   case " $STEPS " in *" game "*) return 0 ;; esac
   [ -z "$STEPS" ] && [ $YES = 0 ]
 }
@@ -547,7 +547,7 @@ create_bottle() {
 pick_bottle() {
   if [ -n "$BOTTLE" ]; then
     [ -f "$BOTTLES/$BOTTLE/cxbottle.conf" ] && return
-    wants_game && ask "No bottle called $BOTTLE yet. Create it?" || die "no bottle called $BOTTLE"
+    if ! wants_game || ! ask "No bottle called $BOTTLE yet. Create it?"; then die "no bottle called $BOTTLE"; fi
     create_bottle "$BOTTLE"
     return
   fi
@@ -556,7 +556,7 @@ pick_bottle() {
     [ -f "$d/cxbottle.conf" ] && list+=("$(basename "$d")")
   done
   if [ ${#list[@]} = 0 ]; then
-    wants_game || die "no CrossOver bottles found; the game step makes one (scripts/setup.sh game)"
+    wants_game || die "no CrossOver bottles found. The game step makes one (scripts/setup.sh game)"
     ask "No CrossOver bottle yet. Create one called $NEW_BOTTLE for the game?" || die "no bottle to work in"
     create_bottle "$NEW_BOTTLE"
     return
@@ -582,8 +582,8 @@ pick_bottle() {
 
 say "Bottle"
 pick_bottle
-B="$BOTTLES/$BOTTLE"
-DRIVE="$B/drive_c"
+BOTTLE_DIR="$BOTTLES/$BOTTLE"
+DRIVE="$BOTTLE_DIR/drive_c"
 SYS="$DRIVE/windows/syswow64"
 field bottle "$BOTTLE"
 
@@ -596,7 +596,9 @@ is_wine_builtin() {   # Wine marks its own DLLs with this text in the DOS header
   [ -f "$1" ] && [ "$(dd if="$1" bs=1 skip=64 count=16 2>/dev/null)" = "Wine builtin DLL" ]
 }
 
-backup_once() { [ -f "$1" ] && [ ! -f "$1.setup-backup" ] && cp "$1" "$1.setup-backup" || true; }
+backup_once() {   # the first copy stays: it is the file as it was before the setup
+  if [ -f "$1" ] && [ ! -f "$1.setup-backup" ]; then cp "$1" "$1.setup-backup"; fi
+}
 
 # --- the game installs in this bottle ----------------------------------------------------------
 
@@ -745,16 +747,16 @@ get_client() {   # the game itself, into C:\Games\MxO: from MxOEmu, a folder, an
     "Skip: only Revived, whose installer downloads the game itself"
   case $CHOICE in
     0)
-      from=$(mxoemu_link) || die "no client link found on $MXOEMU_PAGE; download it there and give the file instead" ;;
+      from=$(mxoemu_link) || die "no client link found on $MXOEMU_PAGE. Download it there and give the file instead" ;;
     1)
       ask_text "Where is it? (a folder or a file can be dragged in from Finder)"
       from=$ANSWER
       from=${from%"${from##*[![:space:]]}"}   # a path dragged in from Finder ends with a space
       case "$from" in \'*\'|\"*\") from=${from:1:${#from}-2} ;; esac
-      case "$from" in "~/"*) from="$HOME/${from#\~/}" ;; esac
+      case "$from" in \~/*) from="$HOME/${from#\~/}" ;; esac
       [ -n "$from" ] || { note "nothing given, skipped"; return 0; } ;;
     *)
-      note "skipped; Revived can still be installed"
+      note "skipped. Revived can still be installed"
       return 0 ;;
   esac
   case "$from" in
@@ -783,7 +785,7 @@ get_client() {   # the game itself, into C:\Games\MxO: from MxOEmu, a folder, an
     if ! spin "Unpacking the game (some minutes)" tar -xf "$from" -C "$unpack"; then
       rm -rf "${unpack:?}"
       [ -n "$downloaded" ] && rm -f "$downloaded"
-      die "could not unpack it (zip, 7z and tar archives work; a link has to lead to the file itself, not to a web page)"
+      die "could not unpack it (zip, 7z and tar archives work, and a link has to lead to the file itself, not to a web page)"
     fi
     src=$(find "$unpack" -maxdepth 4 -iname client.dll -size +5000k 2>/dev/null | head -1)
     [ -n "$src" ] || { rm -rf "${unpack:?}"; die "no client.dll in that archive"; }
@@ -793,7 +795,7 @@ get_client() {   # the game itself, into C:\Games\MxO: from MxOEmu, a folder, an
   rm -rf "${unpack:?}"
   [ -n "$downloaded" ] && rm -f "$downloaded"
   # the client has no matrix.exe of its own: its launcher.exe runs under that name
-  [ -f "$target/launcher.exe" ] || note "no launcher.exe next to client.dll; is that the whole game folder?"
+  [ -f "$target/launcher.exe" ] || note "no launcher.exe next to client.dll. Is that the whole game folder?"
   ok "game files in place: C:\\Games\\MxO"
 }
 
@@ -807,7 +809,7 @@ rejacked_folder() {   # so that the launcher does not have to be told where the 
     ok "Rejacked launcher: a game folder is set already"
   elif ! spin "Telling the Rejacked launcher where the game is: $d" \
     "$WINE" --bottle "$BOTTLE" -- reg add "$REJACKED_KEY" /v install_dir /d "$d" /f; then
-    note "could not set it; choose $d in the launcher's settings"
+    note "could not set it. Choose $d in the launcher's settings"
   fi
 }
 
@@ -835,7 +837,7 @@ step_game() {
       run_installer "$INSTALLER"
       installed "Rejacked launcher" has_rejacked
     else
-      note "no installer with a checksum found on $REJACKED_PAGE; install the launcher by hand (docs/crossover.md)"
+      note "no installer with a checksum found on $REJACKED_PAGE. Install the launcher by hand (docs/crossover.md)"
     fi
   fi
 
@@ -849,7 +851,7 @@ step_game() {
         run_installer "$INSTALLER"
         installed ".NET 10 Desktop Runtime" has_dotnet
       else
-        note "could not read Microsoft's .NET release list; Revived's launcher will ask for the .NET 10 Desktop Runtime"
+        note "could not read Microsoft's .NET release list. Revived's launcher will ask for the .NET 10 Desktop Runtime"
       fi
     fi
     kind=Installer
@@ -869,7 +871,7 @@ step_game() {
       run_installer "$INSTALLER"
       installed "MxO Revived" has_revived
     else
-      note "no installer with a checksum found on $REVIVED_PAGE; install Revived by hand (docs/crossover.md)"
+      note "no installer with a checksum found on $REVIVED_PAGE. Install Revived by hand (docs/crossover.md)"
     fi
   fi
 
@@ -895,7 +897,7 @@ step_bottle() {
   info "What the game needs to start at all."
   local src="" d f tmp
 
-  # 1. shader compiler: the game ships Microsoft's; Wine's cannot handle the game's shaders
+  # 1. shader compiler: the game ships Microsoft's, and Wine's cannot handle the game's shaders
   for d in "${INSTALLS[@]+"${INSTALLS[@]}"}"; do
     [ -f "$d/D3DCompiler_43.dll" ] && { src="$d/D3DCompiler_43.dll"; break; }
   done
@@ -909,14 +911,14 @@ step_bottle() {
     note "shader compiler: no game folder yet, skipped"
   fi
 
-  # 2. DirectMusic and DirectSound: Wine's DirectMusic hangs on this game; Microsoft's needs Microsoft's DirectSound
+  # 2. DirectMusic and DirectSound: Wine's DirectMusic hangs on this game, and Microsoft's needs Microsoft's DirectSound
   if is_wine_builtin "$SYS/dmime.dll" || [ ! -f "$SYS/dmime.dll" ]; then
     download "$DX2010_URL" "$DX2010_SHA" directx_feb2010_redist.exe "Microsoft, via the Internet Archive"
     tmp=$(mktemp -d)
     tar -xf "$CACHE/directx_feb2010_redist.exe" -C "$tmp" dxnt.cab
     for f in $DM_DLLS; do tar -xf "$tmp/dxnt.cab" -C "$tmp" "$f.dll"; done
     for f in $DM_DLLS; do backup_once "$SYS/$f.dll"; cp "$tmp/$f.dll" "$SYS/$f.dll"; done
-    rm -rf "$tmp"
+    rm -rf "${tmp:?}"
     ok "DirectMusic and DirectSound: Microsoft's DLLs installed"
   else
     ok "DirectMusic and DirectSound: Microsoft's DLLs already in place"
@@ -930,22 +932,22 @@ step_bottle() {
     mkdir -p "$SYS/drivers" "$DRIVE/windows/system32/drivers"
     cp "$tmp/gm16.dls" "$SYS/drivers/gm.dls"
     cp "$tmp/gm16.dls" "$DRIVE/windows/system32/drivers/gm.dls"
-    rm -rf "$tmp"
+    rm -rf "${tmp:?}"
     ok "music sound bank: gm.dls installed"
   else
     ok "music sound bank: already in place"
   fi
 
   spin "Telling Wine to use them for $EXES (registry)" write_start_overrides \
-    || die "a registry write failed; see $LOG"
+    || die "a registry write failed, see $LOG"
 
   set_env WINE_LARGE_ADDRESS_AWARE 1
   ok "large address space for 32-bit programs (the game crashed after a minute without it)"
 }
 
 set_env() {   # set_env NAME VALUE: in cxbottle.conf, [EnvironmentVariables]
-  backup_once "$B/cxbottle.conf"
-  python3 -I - "$B/cxbottle.conf" "$1" "$2" <<'EOF'
+  backup_once "$BOTTLE_DIR/cxbottle.conf"
+  python3 -I - "$BOTTLE_DIR/cxbottle.conf" "$1" "$2" <<'EOF'
 import re, sys
 path, name, value = sys.argv[1:4]
 text = open(path, encoding='utf-8', errors='surrogateescape').read()
@@ -962,7 +964,7 @@ EOF
 }
 
 unset_env() {
-  python3 -I - "$B/cxbottle.conf" "$1" <<'EOF'
+  python3 -I - "$BOTTLE_DIR/cxbottle.conf" "$1" <<'EOF'
 import re, sys
 path, name = sys.argv[1:3]
 text = open(path, encoding='utf-8', errors='surrogateescape').read()
@@ -985,7 +987,7 @@ needs_build() {   # no DLL yet, or the sources or the game changed since it was 
 
 step_build() {
   say "Speed-up: build"
-  [ ${#INSTALLS[@]} -gt 0 ] || die "no client.dll in this bottle; install a game first"
+  [ ${#INSTALLS[@]} -gt 0 ] || die "no client.dll in this bottle. Install a game first"
   local missing="" tool client shown
   # Homebrew is not on every account's PATH
   if ! command -v meson >/dev/null && [ -x /opt/homebrew/bin/brew ]; then eval "$(/opt/homebrew/bin/brew shellenv)"; fi
@@ -1000,7 +1002,7 @@ step_build() {
   client=$(build_client)
   shown=${client#"$DRIVE"}
   spin "Building d3d9.dll from C:${shown//\//\\} (5 to 10 minutes)" "$ROOT/scripts/build.sh" "$client" \
-    || die "the build failed; its output is in $LOG"
+    || die "the build failed. Its output is in $LOG"
   DLL="$ROOT/build/d3d9.dll"
 }
 
@@ -1031,14 +1033,14 @@ write_d3d9_overrides() {
 step_install() {
   say "Speed-up: install"
   [ -n "$DLL" ] || DLL="$ROOT/build/d3d9.dll"
-  [ -f "$DLL" ] || die "no $DLL; run the build step first"
+  [ -f "$DLL" ] || die "no $DLL. Run the build step first"
   game_running && die "close the game first"
   choose_fps
   choose_addons
   backup_once "$SYS/d3d9.dll"
   cp "$DLL" "$SYS/d3d9.dll.new" && mv "$SYS/d3d9.dll.new" "$SYS/d3d9.dll"
   spin "Switching $EXES to the new Direct3D 9 (registry)" write_d3d9_overrides \
-    || die "a registry write failed; see $LOG"
+    || die "a registry write failed, see $LOG"
   mkdir -p "$DRIVE/Games/dxvk"
   set_env MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS 1
   set_env WINE_LARGE_ADDRESS_AWARE 1
@@ -1065,7 +1067,7 @@ step_install() {
   fi
   ok "installed for: $EXES"
   info "Ctrl+Shift+F in the game shows the frame rate."
-  info "Leave the bottle's Graphics setting in CrossOver on Auto; the log is in C:\\Games\\dxvk."
+  info "Leave the bottle's Graphics setting in CrossOver on Auto. The log is in C:\\Games\\dxvk."
 }
 
 # What the game writes into options.cfg with every Video Options control at its highest, the detail and
@@ -1158,24 +1160,24 @@ options_files() {   # the options.cfg of every game in the bottle: Revived's is 
 }
 
 SCREEN_W="" SCREEN_H="" SCREEN_ASKED=0
-screen_size() {   # SCREEN_W and SCREEN_H: the main display as the bottle sees it; empty when it cannot be read
+screen_size() {   # SCREEN_W and SCREEN_H: the main display as the bottle sees it, empty when it cannot be read
   [ $SCREEN_ASKED = 0 ] || return 0
   SCREEN_ASKED=1
-  local out
+  local out width height scale
   out=$(osascript -l JavaScript -e 'ObjC.import("AppKit"); var s = $.NSScreen.screens.objectAtIndex(0);
     Math.round(s.frame.size.width) + " " + Math.round(s.frame.size.height) + " " + s.backingScaleFactor' 2>/dev/null) || return 0
-  set -- $out
-  case "${1:-x}${2:-x}" in *[!0-9]*) return 0 ;; esac
-  SCREEN_W=$1 SCREEN_H=$2
+  read -r width height scale <<< "$out" || true
+  case "${width:-x}${height:-x}" in *[!0-9]*) return 0 ;; esac
+  SCREEN_W=$width SCREEN_H=$height
   # a bottle in CrossOver's high-resolution mode counts the display's pixels, not its points
-  if [ "${3:-1}" = 2 ] && grep -qi '^"RetinaMode"="y' "$B/user.reg" 2>/dev/null; then
+  if [ "${scale:-1}" = 2 ] && grep -qi '^"RetinaMode"="y' "$BOTTLE_DIR/user.reg" 2>/dev/null; then
     SCREEN_W=$((SCREEN_W * 2)); SCREEN_H=$((SCREEN_H * 2))
   fi
 }
 
 step_detail() {
   say "Detail: everything at maximum"
-  game_running && die "close the game first; it writes its options when it closes"
+  game_running && die "close the game first. It writes its options when it closes"
   local f conf="$DRIVE/Games/dxvk/dxvk.conf" values=$MAX_DETAIL
   screen_size
   if [ -n "$SCREEN_W" ]; then   # options.cfg wins over the size in a launcher's block of useropts.cfg
@@ -1192,9 +1194,9 @@ ScreenHeight = $SCREEN_H"
   if [ -n "$SCREEN_W" ]; then
     ok "resolution ${SCREEN_W}x$SCREEN_H, the main display's"
   else
-    note "could not read the display's size; the resolution stays as it is"
+    note "could not read the display's size, so the resolution stays as it is"
   fi
-  # sharp ground and walls at shallow angles; DXVK reads this file when the game starts
+  # sharp ground and walls at shallow angles. DXVK reads this file when the game starts
   set_options "$conf" "d3d9.samplerAnisotropy = 16"
   set_env DXVK_CONFIG_FILE C:/Games/dxvk/dxvk.conf
   ok "16x anisotropic filtering"
@@ -1216,7 +1218,7 @@ intro_off() {   # every game skips its logo movies already
 step_intro() {
   say "Intro: no logo movies"
   local f
-  while IFS= read -r f; do   # the game does not keep this one in options.cfg; a launcher leaves the line alone
+  while IFS= read -r f; do   # the game does not keep this one in options.cfg, and a launcher leaves the line alone
     set_options "$f" "EnableSplash = 0"
     f=${f#"$DRIVE"}
     ok "C:${f//\//\\}"
@@ -1242,7 +1244,7 @@ else:
     t += ('' if not t or t.endswith('\n') else '\r\n') + 'music = on\r\n'
 open(p, 'wb').write(t.encode('utf-8'))
 EOF
-  # what the starter already switched off; options.cfg wins over useropts.cfg
+  # what the starter already switched off. options.cfg wins over useropts.cfg
   for f in "$REVIVED/options.cfg" "$REVIVED/useropts.cfg"; do
     [ -f "$f" ] || continue
     backup_once "$f"
@@ -1265,7 +1267,7 @@ step_video() {
   if [ -z "$REVIVED" ]; then note "MxO Revived is not in this bottle"; return 0; fi
   local settings="$REVIVED/launcher-settings.json"
   if [ ! -f "$settings" ]; then
-    note "the launcher has no settings file yet; start it once, close it and run this step again (setup.sh video)"
+    note "the launcher has no settings file yet. Start it once, close it and run this step again (setup.sh video)"
     return 0
   fi
   # the launcher writes its settings when it closes, which would undo this
@@ -1291,7 +1293,7 @@ EOF
 
 # CrossOver shows an icon for each shortcut in the bottle's Start Menu and on its Desktop. It keeps its
 # own list of them (cxmenu.conf), which "cxmenu --sync" brings up to date.
-has_icon() { grep -qiF "/$1.lnk]" "$B/cxmenu.conf" 2>/dev/null; }
+has_icon() { grep -qiF "/$1.lnk]" "$BOTTLE_DIR/cxmenu.conf" 2>/dev/null; }
 
 step_icons() {
   say "Icons"
@@ -1327,12 +1329,12 @@ step_uninstall() {
   for v in DXVK_LOG_PATH DXVK_STATE_CACHE_PATH DXVK_HUD DXVK_FRAME_RATE DXVK_CONFIG_FILE DXVK_MXO_RESPECT_ADDONS; do
     unset_env "$v"
   done
-  ok "done; DirectMusic, DirectSound and the large address space stay, the game needs them"
+  ok "done. DirectMusic, DirectSound and the large address space stay, the game needs them"
 }
 
 # --- run ----------------------------------------------------------------------------------------
 
-game_running && note "a game is running; steps that replace files will refuse until it is closed"
+game_running && note "a game is running. Steps that replace files will refuse until it is closed"
 
 if [ -z "$STEPS" ]; then
   # the installers need clicks, so --yes leaves the game step out
@@ -1343,7 +1345,7 @@ if [ -z "$STEPS" ]; then
     exit 0
   fi
 
-  # The questions come first; after them the setup works by itself. The start fixes and the speed-up
+  # The questions come first. After them the setup works by itself. The start fixes and the speed-up
   # are not asked about: without them the game shows a black screen or runs at about 15 fps.
   if [ $YES = 0 ]; then say "Options"; fi
   choose_fps
@@ -1366,7 +1368,7 @@ if [ -z "$STEPS" ]; then
   fi
   NO_INTRO=0
   if ! intro_off && ask "Skip the logo movies when the game starts?"; then NO_INTRO=1; fi
-  VIDEO_OFF=0   # the launcher writes its settings file at its first start; before that there is nothing to change
+  VIDEO_OFF=0   # the launcher writes its settings file at its first start, and before that there is nothing to change
   if [ -n "$REVIVED" ] && [ -f "$REVIVED/launcher-settings.json" ] \
     && ask "Switch off the video behind Revived's launcher (it keeps a processor core busy)?"; then
     VIDEO_OFF=1

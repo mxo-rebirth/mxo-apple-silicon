@@ -22,7 +22,7 @@ extern "C" {
   extern uint8_t  MxoX_code_begin[], MxoX_code_end[];
   extern uint32_t MxoX_tid, MxoX_imagebase;
 #endif
-  // Calls fn with ecx and stack arguments (cdecl or stdcall), returns eax; *st0 receives the FPU result if not null
+  // Calls fn with ecx and stack arguments (cdecl or stdcall), returns eax. *st0 receives the FPU result if not null
   uint32_t __cdecl xcall(void* fn, uint32_t ecx, const uint32_t* args, int nargs, double* st0);
   uint32_t __cdecl fpu_tags();
   void __cdecl fpu_setcw(uint32_t cw);
@@ -73,7 +73,7 @@ static float rndf() {
 
 static bool isnanf(uint32_t u) { return (u & 0x7f800000) == 0x7f800000 && (u & 0x7fffff); }
 
-// Compares two memory images dword by dword; any NaN equals any NaN.
+// Compares two memory images dword by dword. Any NaN equals any NaN.
 static int diff(const void* a, const void* b, size_t size, size_t* where) {
   const uint32_t* x = (const uint32_t*)a; const uint32_t* y = (const uint32_t*)b;
   for (size_t i = 0; i < size / 4; i++) {

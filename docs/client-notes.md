@@ -36,7 +36,7 @@ Revived's file has three more: `.mxrtip` (`0xBB4000`, `0x30000`), `.mxrtv` (`0xB
 and `.mxrrsi` (`0xBE8000`, `0x4000`).
 
 `matrix.exe` is a 32-bit program without the "large address aware" flag (2 GB of address space)
-and without the NX-compatible flag. Both matter under Wine; see [graphics.md](graphics.md).
+and without the NX-compatible flag. Both matter under Wine. See [graphics.md](graphics.md).
 
 ### Rejacked against Revived
 
@@ -132,7 +132,7 @@ The DLL replaces the `sqrt` slot and the translator computes `floor` and `ceil` 
   precision mode. A routine with 21 x87 instructions takes 540 ns. `msvcr71!sqrt` (x87 `fsqrt` in
   Wine) takes about 514 ns per call.
 - **Share of the main thread** before any fix, standing in the world: `client.dll` 82–86%, almost
-  all of it x87 routines. The top 25 routines were about 60% of the time; it takes several
+  all of it x87 routines. The top 25 routines were about 60% of the time. It takes several
   hundred to cover 90%.
 
 ## Routines we identified
@@ -145,17 +145,17 @@ The DLL replaces the `sqrt` slot and the translator computes `floor` and `ceil` 
 | `0x45E10` | 4×4 matrix multiply | hand-written SSE |
 | `0x46510` | quaternion to rotation matrix | hand-written SSE |
 | `0x183250` | rotate a vector by a quaternion | translated |
-| `0x48A360`, `0x48A470`, `0x48A590` | bounding box against planes (culling) | translated; `0x48A470` is the most expensive translated routine |
+| `0x48A360`, `0x48A470`, `0x48A590` | bounding box against planes (culling) | translated. `0x48A470` is the most expensive translated routine |
 | `0x2F9900`–`0x2FF400` | about a dozen routines that look like skeletal animation | translated |
-| `0x47DDB0` | world position to map grid cell; calls `_ftol2` | translated; was 18% of the main thread with the map open |
-| `0x4859D0` | comparator handed to a sort | translated; about 1% |
+| `0x47DDB0` | world position to map grid cell, calls `_ftol2` | translated, was 18% of the main thread with the map open |
+| `0x4859D0` | comparator handed to a sort | translated, about 1% |
 | `0x393E10`, `0x48FA40` | 3D-sound helpers | translated |
-| `0x29283D` | calls the DirectSound 3D-buffer setters | not touched; 2.3% of the main thread inside `dsound` |
+| `0x29283D` | calls the DirectSound 3D-buffer setters | not touched, 2.3% of the main thread inside `dsound` |
 | `0xDE70`, `0xDEB0`, `0xDEF0`, `0x66EBF0`, `0x66ED40` | double-precision helpers | translated |
 | `0x7670`, `0x7690` | thin wrappers around C runtime math imports | not translated |
 | `0x6A92D8` | `_ftol2` | hand-written SSE |
 
-After `0x48A470`, the translated routines with the most time are `0x49DA40` and `0x4DCE10`; we
+After `0x48A470`, the translated routines with the most time are `0x49DA40` and `0x4DCE10`. We
 have not worked out what they do.
 
 Seven routines in the list are reached only through pointers, so no direct call leads to them.
@@ -201,7 +201,7 @@ The client has an automatic limiter. Its settings and built-in defaults:
 | `Client_RenderThrottle_Override` | 0 (automatic) |
 
 The routine at `0x28E0` keeps a factor between 0.25 and 1. When the frame rate stays below
-30 × factor for 15 frames, the factor drops by 0.05; when it stays 30% above that, it rises. The
+30 × factor for 15 frames, the factor drops by 0.05. When it stays 30% above that, it rises. The
 factor scales the draw distances, and the scaled values are what the client writes back to
 `options.cfg` on exit (`dl_*_prefetchradius`, `wr_*dist`, `*camerafarz`). A non-zero
 `Client_RenderThrottle_Override` holds the factor at that value.
@@ -218,7 +218,7 @@ Counts are per frame, in the world at full draw distance, 3440×1440.
 | What | Observed |
 |---|---|
 | Device | created with mixed vertex processing, which gives software vertex shaders 8,192 constant registers |
-| Vertex shader constants | 1,000–1,500 updates; never more than 248 registers set; about a third of the updates repeat values already set |
+| Vertex shader constants | 1,000–1,500 updates. Never more than 248 registers set. About a third of the updates repeat values already set |
 | Draw calls | 3,600–4,000 on average, 4,000–6,000 in heavy frames |
 | Dynamic vertex buffers | about 40 locks without `D3DLOCK_DISCARD` or `D3DLOCK_NOOVERWRITE` |
 | Managed textures | uploaded right before first use: about 12 while the world streams in |
@@ -232,7 +232,7 @@ Options that cost frame rate at 3440×1440:
 | Option | Cost |
 |---|---|
 | Rejacked launcher, "new glow shader for Screen Filter: Over-Bright (BETA)" (it rewrites `rezmap.ltb`) | halves the frame rate |
-| Wet-street reflections while it rains (`WR_Reflect_EnvMap_Enable`, which Revived switches on in its `autoexec.cfg`; `wr_wetext_enable`) | Revived dropped from 45–55 to about 30 fps |
+| Wet-street reflections while it rains (`WR_Reflect_EnvMap_Enable`, which Revived switches on in its `autoexec.cfg`, and `wr_wetext_enable`) | Revived dropped from 45–55 to about 30 fps |
 | Revived's `mxrdisp` interface scaling | about 40% of the GPU |
 | Anti-aliasing | a few fps |
 | The green tint | nothing measurable |
@@ -251,7 +251,7 @@ Where it spends its time now (Rejacked, in the world, sampled every 20 ms):
 | 16–21% | Wine and system code |
 | about 6% | this DLL (Direct3D 9 on Vulkan) |
 
-Inside "Wine and system code": `PeekMessage` 2–6% (one call per frame; the cost is Wine's macOS
+Inside "Wine and system code": `PeekMessage` 2–6% (one call per frame, the cost is Wine's macOS
 event handling), the copy of vertex shader constants 2.7% (about 5.8 MB per frame), `r3d9.dll`
 2.7%, DirectSound 2.3%.
 
@@ -260,8 +260,8 @@ event handling), the copy of vertex shader constants 2.7% (about 5.8 MB per fram
 **Rejacked**
 
 - The launcher starts `matrix.exe` from `%TEMP%\MatrixOnline.0`, not from the game folder. A DLL
-  placed next to the game is therefore not found; overrides have to go into the system folder.
-- Settings live in `%APPDATA%\The Matrix Online\`. `options.cfg` is written by the game;
+  placed next to the game is therefore not found. Overrides have to go into the system folder.
+- Settings live in `%APPDATA%\The Matrix Online\`. `options.cfg` is written by the game.
   `useropts.cfg` holds a block the launcher rewrites on every PLAY. Where both set a value,
   `options.cfg` wins. Both use Windows line endings.
 
@@ -269,24 +269,24 @@ event handling), the copy of vertex shader constants 2.7% (about 5.8 MB per fram
 
 - Portable install with its own `options.cfg` in the game folder.
 - **`mxrdisp`**: an add-on that sits in front of Direct3D 9 and scales the interface. It checks
-  or hooks some client routines; by default the DLL leaves those alone
+  or hooks some client routines. By default the DLL leaves those alone
   (`DXVK_MXO_RESPECT_ADDONS`).
 - **Music guard**: the starter checks the music system before the game starts. The check fails
-  on Wine's DirectSound even where music works with Microsoft's; it then writes `music = off` to
+  on Wine's DirectSound even where music works with Microsoft's. It then writes `music = off` to
   `MxORevived-audio.txt` and starts the game without music.
 - **Sign-in**: the launcher writes the account and password into the game's own login console
   through `ReadProcessMemory`/`WriteProcessMemory`, driven by a timer, at about four characters
   a second. Both processes are mostly idle while it runs.
 - **Background video** in the launcher (`BackgroundVideo` in `launcher-settings.json`) takes more
   than one processor core.
-- Wine's own DirectMusic freezes Revived at start; Microsoft's works.
+- Wine's own DirectMusic freezes Revived at start. Microsoft's works.
 
 ## Settings
 
 | Setting | File | Effect |
 |---|---|---|
-| `Client_RenderThrottle_Override` | `options.cfg` | 0: automatic draw distance; 1: always full |
-| `dl_*_prefetchradius`, `wr_*dist`, `*camerafarz` | `options.cfg` | draw distances; rewritten on exit with the throttled values |
+| `Client_RenderThrottle_Override` | `options.cfg` | 0: automatic draw distance. 1: always full |
+| `dl_*_prefetchradius`, `wr_*dist`, `*camerafarz` | `options.cfg` | draw distances, rewritten on exit with the throttled values |
 | `EnableSplash = 0` | `useropts.cfg` | skips the logo movies |
 | `Windowed` | launcher block in `useropts.cfg` | windowed or fullscreen |
 | `MusicSystemEnable` | `options.cfg` | music |

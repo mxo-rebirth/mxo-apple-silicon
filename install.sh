@@ -41,67 +41,52 @@ rain() {   # rain WIDTH DENSITY: one row of the game's falling code, DENSITY cel
 }
 
 # Everything runs from this function, called on the last line, so a download that was cut short runs nothing.
-main() {
-  local dir=${MXO_DIR:-$HOME/mxo-apple-silicon}
-  local source=${MXO_SOURCE:-https://github.com/mxo-rebirth/mxo-apple-silicon/archive/refs/heads/main.tar.gz}
-  local yes=0 a
-  for a in "$@"; do case "$a" in --yes|-y) yes=1 ;; esac; done
-
+check_mac() {
   [ "$(uname -s)" = Darwin ] || die "this is for macOS"
   [ "$(sysctl -n hw.optional.arm64 2>/dev/null)" = 1 ] \
-    || die "this is for Apple Silicon Macs; an Intel Mac gains nothing from it"
+    || die "this is for Apple Silicon Macs. An Intel Mac gains nothing from it"
   local macos
   macos=$(sw_vers -productVersion 2>/dev/null || true)
   case "${macos%%.*}" in ''|*[!0-9]*) die "cannot read the macOS version" ;; esac
-  [ "${macos%%.*}" -ge 26 ] || die "macOS 26 or newer is needed; this Mac has macOS $macos"
+  [ "${macos%%.*}" -ge 26 ] || die "macOS 26 or newer is needed. This Mac has macOS $macos"
   [ -x /Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin/wine ] \
     || die "CrossOver not found in /Applications. Install it first: https://www.codeweavers.com/crossover"
+}
 
-  # Questions are answered at the keyboard, also when the script itself arrives on standard input
-  # (curl | bash), where an unanswered question would otherwise count as yes.
-  local input=/dev/stdin
-  if [ $yes = 0 ] && [ ! -t 0 ]; then
-    ( : < /dev/tty ) 2>/dev/null || die "no terminal to ask questions on; run it in Terminal, or add --yes"
-    input=/dev/tty
-  fi
-
-  # Homebrew may be installed without being on this shell's PATH.
-  local b
-  if ! command -v brew >/dev/null; then
-    for b in /opt/homebrew/bin/brew /usr/local/bin/brew; do
-      if [ -x "$b" ]; then eval "$("$b" shellenv)"; break; fi
-    done
-  fi
-  local missing="" t
-  for t in i686-w64-mingw32-g++ meson ninja glslangValidator; do
-    command -v "$t" >/dev/null || missing="$missing $t"
+find_brew() {   # Homebrew may be installed without being on this shell's PATH
+  local brew
+  command -v brew >/dev/null && return 0
+  for brew in /opt/homebrew/bin/brew /usr/local/bin/brew; do
+    if [ -x "$brew" ]; then eval "$("$brew" shellenv)"; return 0; fi
   done
-  if [ -n "$missing" ] && ! command -v brew >/dev/null; then
-    die "Homebrew not found. The build tools come from it; install it from https://brew.sh and run this again."
-  fi
+}
 
-  local fetch=1
-  [ -d "$dir/.git" ] && fetch=0
+missing_tools() {   # prints the build tools that are not installed
+  local tool
+  for tool in i686-w64-mingw32-g++ meson ninja glslangValidator; do
+    command -v "$tool" >/dev/null || printf ' %s' "$tool"
+  done
+}
 
+show_plan() {   # show_plan MISSING FETCH DIR: what is about to happen, and the advice
+  local line="  $LINE"
+  [ -z "$GRN" ] || line=" $DIM$LINE$OFF"
   if [ $GLYPHS = 1 ]; then
     printf '\n %s%s%s\n %s%s%s\n %s%s%s\n' "$DIM" "$(rain 56 2)" "$OFF" "$DIM" "$(rain 56 4)" "$OFF" "$GRN" "$(rain 56 6)" "$OFF"
     printf ' %sTHE MATRIX ONLINE%s  %ssetup for CrossOver on Apple Silicon%s\n\n' "$BLD" "$OFF" "$GRN" "$OFF"
   else
-    echo "The Matrix Online on Apple Silicon Macs"
-    echo
+    printf 'The Matrix Online on Apple Silicon Macs\n\n'
   fi
-  local line="  $LINE"
-  [ -n "$GRN" ] && line=" $DIM$LINE$OFF"
   echo "${GRN:+ }This will:"
-  if [ -n "$missing" ]; then
+  if [ -n "$1" ]; then
     echo "$line install the build tools with Homebrew: mingw-w64 meson ninja glslang"
   else
     echo "$line use the build tools that are already installed"
   fi
-  if [ $fetch = 1 ]; then
-    echo "$line download the source to $dir"
+  if [ "$2" = 1 ]; then
+    echo "$line download the source to $3"
   else
-    echo "$line use the git checkout in $dir as it is"
+    echo "$line use the git checkout in $3 as it is"
   fi
   echo "$line run its setup, which asks its questions first and changes only the bottle you choose"
   echo
@@ -109,9 +94,43 @@ main() {
   echo "${GRN:+ }on your computer, with your main account behind its own password. A game client"
   echo "${GRN:+ }then cannot reach your everyday files and logins."
   echo
+}
+
+get_source() {   # get_source URL DIR: over an earlier download, whose build folder with the large downloads stays
+  local tmp
+  tmp=$(mktemp -d)
+  curl -fsSL -o "$tmp/source.tar.gz" "$1" || die "could not download $1"
+  mkdir "$tmp/source"
+  tar -xzf "$tmp/source.tar.gz" -C "$tmp/source" --strip-components 1
+  [ -f "$tmp/source/scripts/setup.sh" ] || die "the downloaded archive has no scripts/setup.sh"
+  mkdir -p "$2"
+  cp -Rp "$tmp/source/." "$2/"   # with the files' dates, so that the setup rebuilds only after a change
+  rm -rf "${tmp:?}"
+}
+
+main() {
+  local dir=${MXO_DIR:-$HOME/mxo-apple-silicon}
+  local source=${MXO_SOURCE:-https://github.com/mxo-rebirth/mxo-apple-silicon/archive/refs/heads/main.tar.gz}
+  local yes=0 arg input=/dev/stdin missing fetch=1 answer
+  for arg in "$@"; do case "$arg" in --yes|-y) yes=1 ;; esac; done
+
+  check_mac
+  # Questions are answered at the keyboard, also when the script itself arrives on standard input
+  # (curl | bash), where an unanswered question would otherwise count as yes.
+  if [ $yes = 0 ] && [ ! -t 0 ]; then
+    ( : < /dev/tty ) 2>/dev/null || die "no terminal to ask questions on. Run it in Terminal, or add --yes"
+    input=/dev/tty
+  fi
+  find_brew
+  missing=$(missing_tools)
+  if [ -n "$missing" ] && ! command -v brew >/dev/null; then
+    die "Homebrew not found. The build tools come from it. Install it from https://brew.sh and run this again."
+  fi
+  [ ! -d "$dir/.git" ] || fetch=0
+
+  show_plan "$missing" "$fetch" "$dir"
   if [ $yes = 0 ]; then
-    local answer
-    read -r -p "${GRN:+ }$BLD$ASK${OFF}Continue? $DIM[Y/n]$OFF " answer < "$input" || die "no answer; nothing was changed"
+    read -r -p "${GRN:+ }$BLD$ASK${OFF}Continue? ${DIM}[Y/n]$OFF " answer < "$input" || die "no answer. Nothing was changed"
     case "$answer" in n|N|no|No) echo "Nothing was changed."; exit 0 ;; esac
   fi
 
@@ -119,21 +138,10 @@ main() {
     say "Installing the build tools with Homebrew"
     brew install mingw-w64 meson ninja glslang
   fi
-
   if [ $fetch = 1 ]; then
     say "Downloading the source to $dir"
-    local tmp
-    tmp=$(mktemp -d)
-    curl -fsSL -o "$tmp/source.tar.gz" "$source" || die "could not download $source"
-    mkdir "$tmp/source"
-    tar -xzf "$tmp/source.tar.gz" -C "$tmp/source" --strip-components 1
-    [ -f "$tmp/source/scripts/setup.sh" ] || die "the downloaded archive has no scripts/setup.sh"
-    # Copied over an earlier download: its build folder, with the large downloads, stays.
-    mkdir -p "$dir"
-    cp -Rp "$tmp/source/." "$dir/"   # with the files' dates, so that the setup rebuilds only after a change
-    rm -rf "${tmp:?}"
+    get_source "$source" "$dir"
   fi
-
   say "Running the setup"
   MXO_ADVISED=1 exec /bin/bash "$dir/scripts/setup.sh" "$@" < "$input"   # the advice was given above
 }

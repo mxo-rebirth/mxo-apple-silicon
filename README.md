@@ -1,7 +1,7 @@
 # The Matrix Online on Apple Silicon Macs
 
 Makes The Matrix Online run fast in CrossOver on Apple Silicon Macs. It is for any project that
-uses the 2009 client; it was tested with MxO Rejacked and MxO Revived.
+uses the 2009 client. It was tested with MxO Rejacked and MxO Revived.
 
 On the test machine (M4, fullscreen 3440×1440, maximum detail) the game went from about 15 fps
 with a shortened draw distance to 55–89 fps at full draw distance.
@@ -42,7 +42,7 @@ add-ons, maximum detail, the logo movies) and then works through these steps by 
 | Game | Only when the bottle has no game yet. Creates the bottle if there is none. Gets the game itself: downloaded from the [MxOEmu project](https://mxoemu.info), or from a folder, an archive or a direct link you give. Downloads the Rejacked launcher and the Revived installer from the projects' own sites, checks them against the checksums published there and opens them for you to click through, Microsoft's .NET 10 runtime first for Revived. Tells the Rejacked launcher where the game is. |
 | Start fixes | Installs what the game needs to start at all: the game's own shader compiler, Microsoft's DirectMusic and DirectSound, the music sound bank, and a larger memory limit for the game. |
 | Build | Builds the speed-up (`d3d9.dll`) on your Mac from your own copy of the game. Takes a few minutes. |
-| Install | Installs it for every MxO game it found in the bottle, and lets the games share their pipeline caches so they stutter less. Everything else in the bottle keeps CrossOver's normal graphics. On request it also speeds up the routines that game add-ons hook; an add-on such as Revived's interface scaling can then stop working. |
+| Install | Installs it for every MxO game it found in the bottle, and lets the games share their pipeline caches so they stutter less. Everything else in the bottle keeps CrossOver's normal graphics. On request it also speeds up the routines that game add-ons hook. An add-on such as Revived's interface scaling can then stop working. |
 | Detail | On request: every graphics option at its maximum (draw distance, shadows, wet streets, weather, traffic, anti-aliasing, screen filters), the resolution of the main display and 16x anisotropic filtering. It replaces the detail settings a game has, so the answer defaults to no once a game has settings. Later: `scripts/setup.sh detail`. |
 | Intro | On request: the game starts without its logo movies. Later: `scripts/setup.sh intro`. |
 | Icons | Only when CrossOver shows no icon for the Rejacked launcher: makes its shortcut again. Later: `scripts/setup.sh icons`. |
@@ -62,7 +62,7 @@ folder, choose `C:\Games\MxO` in its settings.
 - **Ctrl+Shift+F** in the game shows or hides the frame-rate counter. It starts hidden.
 - **Fan noise:** the setup offers to limit the frame rate to 90 fps. Without a limit the game
   reaches up to 200 fps in light scenes, which only makes heat. For another limit run
-  `~/mxo-apple-silicon/scripts/setup.sh --fps 120 install`; `--fps 0` removes it.
+  `~/mxo-apple-silicon/scripts/setup.sh --fps 120 install`. `--fps 0` removes it.
 - **A second launcher later:** `~/mxo-apple-silicon/scripts/setup.sh game` offers the one that
   is not installed yet.
 - **Another project's client:** if its game executable is not `matrix.exe` or `mxorev.exe`, add
@@ -84,7 +84,7 @@ a `.setup-backup` suffix.
 
 ## Good to know
 
-- **Use it at your own risk.** We take no responsibility for any damage; see the
+- **Use it at your own risk.** We take no responsibility for any damage. See the
   [licence](LICENSE).
 - **Keep the game apart from your files.** Programs in CrossOver can reach every file of the
   macOS account they run in. Our advice: install and play under a separate, standard
@@ -124,5 +124,9 @@ For developers and the game teams:
 
 zlib: [LICENSE](LICENSE). The patch in `dxvk/` is a modified part of
 [DXVK](https://github.com/doitsujin/dxvk), which has the same licence:
-[dxvk/LICENSE](dxvk/LICENSE). The Matrix Online belongs to its owners; this repository contains
-no game files, and the screenshot shows the game.
+[dxvk/LICENSE](dxvk/LICENSE). This repository contains no game files, and the screenshot shows
+the game.
+
+The Matrix Online is a trademark of Warner Bros. Entertainment Inc. CrossOver is a trademark of
+CodeWeavers, Inc. This fan project is not affiliated with or endorsed by Warner Bros.,
+CodeWeavers or any of the server teams.

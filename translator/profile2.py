@@ -3,7 +3,13 @@
 
 Reads the all-thread samples written by the DLL's profiler (sample.flag) and prints, per thread, where the
 time goes: game code, translated routines, graphics layer, Vulkan calls, and waits with their callers."""
-import sys, struct, pickle, bisect, subprocess, collections, os
+import bisect
+import collections
+import os
+import pickle
+import struct
+import subprocess
+import sys
 
 data = open(sys.argv[1], 'rb').read()
 cmap = pickle.load(open(sys.argv[2], 'rb'))
@@ -44,14 +50,14 @@ def nearest(tab, addrs, rva):
 
 # symbols of the profiled DLL
 syms = []
-for l in subprocess.run(['i686-w64-mingw32-nm', '-n', '-C', sys.argv[3]], capture_output=True, text=True).stdout.splitlines():
-    p = l.split(None, 2)
+for line in subprocess.run(['i686-w64-mingw32-nm', '-n', '-C', sys.argv[3]], capture_output=True, text=True).stdout.splitlines():
+    p = line.split(None, 2)
     if len(p) == 3 and p[1] in 'tT':
         syms.append((int(p[0], 16), p[2]))
 syms.sort()
 symaddr = [a for a, n in syms]
 hdr = subprocess.run(['i686-w64-mingw32-objdump', '-p', sys.argv[3]], capture_output=True, text=True).stdout
-dbase = int([l for l in hdr.splitlines() if 'ImageBase' in l][0].split()[1], 16)
+dbase = int([row for row in hdr.splitlines() if 'ImageBase' in row][0].split()[1], 16)
 
 nt_tab, nt_size = exports(os.path.join(winedir, 'ntdll.dll'))
 nt_addr = [a for a, n in nt_tab]
@@ -83,16 +89,16 @@ while o + 40 <= len(data):
     if magic not in (0x33504d53, 0x34504d53):
         raise SystemExit('not an SMP3/SMP4 file')
     nwords = 7 if magic == 0x33504d53 else 9
-    for k in range(nnames):
+    for _ in range(nnames):
         tid = struct.unpack_from('<I', data, o)[0]
         names[tid] = data[o + 4:o + 32].split(b'\0')[0].decode()
         o += 32
     recs += 1
     present = ptid or present
-    for k in range(count):
+    for _ in range(count):
         s = struct.unpack_from('<%dI' % nwords, data, o)
         o += 4 * nwords
-        if nwords == 7:   # SMP3: one game return address; pad to the SMP4 layout
+        if nwords == 7:   # SMP3: one game return address, padded to the SMP4 layout
             s = s[:5] + (s[5], 0, 0, s[6])
         if recs > skip:
             allsamples.append((s, cbase, sbase, ssize, vbase, vsize))
@@ -105,7 +111,7 @@ for addr, _ in cnt.most_common(5):
         ntbase = c[0]
         break
 
-for s, cbase, sbase, ssize, vbase, vsize in allsamples:
+for s, cbase, sbase, ssize, vbase, _vsize in allsamples:
     tid, eip, r1, r2, r3, rc1, rc2, rc3, rvk = s
     rclient = rc1
     rself = r1
@@ -181,7 +187,7 @@ for tid in order[:int(os.environ.get('THREADS', '6'))]:
     if d['game']:
         g = d['game']
         gx = sum(v for (e, nxt, nx), v in g.items() if nx)
-        print('   game code: %.1f%% of this thread in routines containing x87 code; top routines:' % (100.0 * gx / n))
+        print('   game code: %.1f%% of this thread in routines containing x87 code, top routines:' % (100.0 * gx / n))
         for (e, nxt, nx), v in g.most_common(int(os.environ.get('TOP', '12'))):
             print('      %5.1f%%  %06x-%06x  x87 %d' % (100.0 * v / n, e, nxt, nx))
     if d['xl']:

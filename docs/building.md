@@ -13,35 +13,38 @@ not yet, see [crossover.md](crossover.md) first.
 questions (which bottle, which servers, a frame-rate limit, add-ons, maximum detail, the logo
 movies) and then does everything below, in order:
 
-1. **game**, when the bottle has no game ([crossover.md](crossover.md), section 1): creates the
-   bottle if there is none; puts the client in `C:\Games\MxO`, downloaded from the link on the
-   MxOEmu project's page or taken from a folder, an archive (zip, 7z, tar) or a direct link;
-   downloads the Rejacked launcher and the Revived installer from the projects' download pages,
-   checks each against the SHA-256 printed on its page and starts it for you to click through;
-   before Revived's, does the same with Microsoft's .NET 10 Desktop Runtime, checked against
-   Microsoft's release list; writes the game folder into the Rejacked launcher's settings
-   (`install_dir` under `HKCU\Software\Rejacked\Rejacked Launcher\game`). Not confirmed:
-   whether the launcher picks that folder up;
+1. **game**, when the bottle has no game ([crossover.md](crossover.md), section 1):
+   - creates the bottle if there is none
+   - puts the client in `C:\Games\MxO`, downloaded from the link on the MxOEmu project's page
+     or taken from a folder, an archive (zip, 7z, tar) or a direct link
+   - downloads the Rejacked launcher and the Revived installer from the projects' download
+     pages, checks each against the SHA-256 printed on its page and starts it for you to click
+     through
+   - before Revived's, does the same with Microsoft's .NET 10 Desktop Runtime, checked against
+     Microsoft's release list
+   - writes the game folder into the Rejacked launcher's settings (`install_dir` under
+     `HKCU\Software\Rejacked\Rejacked Launcher\game`). Not confirmed: whether the launcher
+     picks that folder up.
 2. **bottle**: what the game needs to start ([crossover.md](crossover.md), section 2): the game's own shader
    compiler, Microsoft's DirectMusic and DirectSound from the February 2010 DirectX package and
    the sound bank from the April 2006 one (both downloaded from Microsoft via the Internet
-   Archive and checked against the checksums `winetricks` uses), and the large address space;
-3. **build**: `scripts/build.sh` with the bottle's own `client.dll`;
+   Archive and checked against the checksums `winetricks` uses), and the large address space.
+3. **build**: `scripts/build.sh` with the bottle's own `client.dll`.
 4. **install**: the DLL for every game executable it found (`matrix.exe`, and `mxorev.exe` if
-   Revived is installed), with the bottle settings it needs; on request also
+   Revived is installed), with the bottle settings it needs. On request also
    `DXVK_MXO_RESPECT_ADDONS=0`, which replaces the routines that add-on files next to the game
-   point into;
+   point into.
 5. **detail**, on request: writes the values of the highest Video Options settings into each
    game's `options.cfg`, with `Client_RenderThrottle_Override = 1` (the draw distance stops
    shrinking at low frame rates) and the main display's size as `ScreenWidth` and `ScreenHeight`
    (in points, or in pixels when the bottle has `RetinaMode` on), and `d3d9.samplerAnisotropy = 16`
-   into `C:\Games\dxvk\dxvk.conf`, which `DXVK_CONFIG_FILE` then names;
-6. **intro**, on request: `EnableSplash = 0` in each game's `useropts.cfg`;
+   into `C:\Games\dxvk\dxvk.conf`, which `DXVK_CONFIG_FILE` then names.
+6. **intro**, on request: `EnableSplash = 0` in each game's `useropts.cfg`.
 7. **icons**, when CrossOver's list of the bottle's shortcuts (`cxmenu.conf`) has none for the
    Rejacked launcher: `cxmenu --sync`, and if it is still missing, a shortcut made with
-   CrossOver's `cxmklnk`;
+   CrossOver's `cxmklnk`.
 8. **music**: Revived only, sets its starter's music guard to `music = on` and the music setting
-   in its `options.cfg` and `useropts.cfg` back to 1;
+   in its `options.cfg` and `useropts.cfg` back to 1.
 9. **video**: Revived only, sets `BackgroundVideo` to `false` in its `launcher-settings.json`.
 
 ```sh
@@ -82,8 +85,8 @@ GCC as before.
 
 `client.dll` is the one in your game folder. The script
 
-1. downloads CodeWeavers' source for CrossOver 26.3.0 once (about 140 MB; pass a tarball you
-   already have as the second argument, or set `CROSSOVER_VERSION`),
+1. downloads CodeWeavers' source for CrossOver 26.3.0 once, about 140 MB (or takes a tarball
+   you already have as the second argument, or another version from `CROSSOVER_VERSION`),
 2. applies `dxvk/dxvk-d3d9-mxo.patch` to the DXVK in it,
 3. maps the functions of your `client.dll` and translates the routines named in
    `translator/routines.list` (each one only if its code matches the hash in the list),
@@ -139,7 +142,7 @@ called `MatrixOnline`. Close the game and its launcher first.
    "DXVK_STATE_CACHE_PATH" = "C:/Games/dxvk"
    ```
 
-   The first two are required: without the first, DXVK froze in most runs; without the second,
+   The first two are required. Without the first, DXVK froze in most runs. Without the second,
    the game ran out of its 2 GB of address space and crashed after about a minute in the world.
    The test machine also has `"WINEMSYNC" = "1"`, and `"DXVK_HUD" = "fps,frametimes,gpuload"`
    provides a frame-rate overlay (hidden until Ctrl+Shift+F). `"DXVK_FRAME_RATE" = "90"` limits
@@ -159,7 +162,7 @@ something else has already changed them in memory
 ([client-notes.md](client-notes.md#routines-something-else-has-changed)).
 
 A CrossOver update can overwrite `syswow64/d3d9.dll`. The game then falls back to Wine's
-Direct3D 9 on its own; copy the DLL back to restore.
+Direct3D 9 on its own. Copy the DLL back to restore.
 
 ## Switches
 
@@ -178,22 +181,22 @@ Environment variables, in `cxbottle.conf` under `[EnvironmentVariables]`:
 | `DXVK_MXO_WEAK_FLUSH=1` | buffer unlocks and similar hints submit work to the GPU mid-frame again, as upstream DXVK does |
 | `DXVK_LOCK_MAPPED_MEMORY=0` | pre-touched memory is unlocked right away instead of staying locked in RAM (it can then be compressed or swapped out, and stall again) |
 | `DXVK_STATIC_SAMPLERS=0` | no per-texture-type shader variants |
-| `DXVK_MXO_SWVP_COUNT=0` | vertex shaders no longer read the uploaded constant count; all 8,192 constants are copied per draw again |
+| `DXVK_MXO_SWVP_COUNT=0` | vertex shaders no longer read the uploaded constant count. All 8,192 constants are copied per draw again |
 | `DXVK_MXO_ZERO_CONSTS=0` | registers set to zero count towards the uploaded range again |
-| `DXVK_KEEP_EMPTY_CHUNKS_MB=N` | keep up to N MB of emptied CPU-visible memory per memory type for reuse (default 256; 0 = DXVK's behaviour) |
-| `DXVK_WARM_MEMORY_MB=N` | a background thread prepares N MB of already-touched memory per memory type (default 0 = off; it was never needed once freed memory is kept) |
+| `DXVK_KEEP_EMPTY_CHUNKS_MB=N` | keep up to N MB of emptied CPU-visible memory per memory type for reuse (default 256, 0 = DXVK's behaviour) |
+| `DXVK_WARM_MEMORY_MB=N` | a background thread prepares N MB of already-touched memory per memory type (default 0 = off. It was never needed once freed memory is kept) |
 
 `x87max.txt` and the diagnostic files (`debug.flag`, the profiler) are described in
 [development.md](development.md#diagnostics).
 
-The `DXVK_HUD` overlay starts hidden; **Ctrl+Shift+F** in the game shows or hides it.
+The `DXVK_HUD` overlay starts hidden. **Ctrl+Shift+F** in the game shows or hides it.
 
 The game's own setting, in `options.cfg`:
 
 | Setting | Effect |
 |---|---|
 | `Client_RenderThrottle_Override = 0` | automatic: draw distance shrinks below 30 fps and grows again above |
-| `Client_RenderThrottle_Override = 1` | always full draw distance; use this when measuring |
+| `Client_RenderThrottle_Override = 1` | always full draw distance. Use this when measuring |
 
 ## Going back
 
