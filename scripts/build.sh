@@ -5,10 +5,11 @@
 #
 # client.dll is the game's own file (from your Rejacked or Revived install). The translated math
 # routines are generated from it on your machine. No game file is stored in this repository.
-# Without a tarball argument, CodeWeavers' source for CrossOver $CROSSOVER_VERSION (default 26.3.0)
-# is downloaded once into build/.
+# Without a tarball argument, CodeWeavers' source for the CrossOver version in $CROSSOVER_VERSION
+# (default: SOURCE_VERSION below) is downloaded once into build/. The default version is checked
+# against a fixed checksum.
 #
-# Needs: mingw-w64 (i686), meson, ninja, glslang, python3.   brew install mingw-w64 meson ninja glslang
+# Needs the programs listed in scripts/build-tools.sh, which also names their Homebrew packages.
 # The DLL is compiled with llvm-mingw, downloaded once into build/ (about 125 MB, checksum verified):
 # Homebrew's 32-bit GCC uses setjmp/longjmp exceptions, whose bookkeeping on every function call cost
 # about 5% of the game's main thread. MXO_COMPILER=gcc builds with Homebrew's GCC instead.
@@ -19,14 +20,19 @@ if [ $# -lt 1 ] || [ ! -f "$1" ]; then
   exit 2
 fi
 
+die() { echo "$*" >&2; exit 1; }
+
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 CLIENT=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
 WORK="$ROOT/build"
-VERSION=${CROSSOVER_VERSION:-26.3.0}
+SOURCE_VERSION=26.3.0   # the CrossOver whose DXVK the patch is made for
+SOURCE_SHA256=ac99c8ca4b3848f3e81784135f023df266b61c2345726ea55a50b3e030dd6872
+VERSION=${CROSSOVER_VERSION:-$SOURCE_VERSION}
 
-for tool in i686-w64-mingw32-g++ i686-w64-mingw32-objdump i686-w64-mingw32-strip meson ninja glslangValidator python3 patch; do
-  command -v "$tool" >/dev/null || { echo "missing tool: $tool" >&2; exit 1; }
-done
+# shellcheck source=build-tools.sh
+. "$ROOT/scripts/build-tools.sh"
+missing=$(missing_build_tools)
+[ -z "$missing" ] || die "missing tools:$missing. They come from Homebrew: $(brew_command)"
 
 mkdir -p "$WORK"
 
@@ -39,7 +45,7 @@ if [ "${MXO_COMPILER:-clang}" != gcc ] && [ ! -x "$LLVM_MINGW/bin/i686-w64-mingw
   archive="$WORK/toolchain/llvm-mingw-$LLVM_MINGW_VERSION.tar.xz"
   curl -L --fail -o "$archive.part" \
     "https://github.com/mstorsjo/llvm-mingw/releases/download/$LLVM_MINGW_VERSION/llvm-mingw-$LLVM_MINGW_VERSION-ucrt-macos-universal.tar.xz"
-  echo "$LLVM_MINGW_SHA256  $archive.part" | shasum -a 256 -c - >/dev/null || { echo "llvm-mingw checksum mismatch" >&2; exit 1; }
+  echo "$LLVM_MINGW_SHA256  $archive.part" | shasum -a 256 -c - >/dev/null || die "llvm-mingw checksum mismatch"
   mv "$archive.part" "$archive"
   # Unpacked next to its final place and renamed when complete, so an interrupted run never leaves a toolchain
   # folder that looks installed.
@@ -49,7 +55,7 @@ if [ "${MXO_COMPILER:-clang}" != gcc ] && [ ! -x "$LLVM_MINGW/bin/i686-w64-mingw
   tar -xJf "$archive" -C "$unpack"
   mv "$unpack/$(basename "$LLVM_MINGW")" "$LLVM_MINGW"
   rm -rf "${unpack:?}"
-  rm -f "$archive"
+  rm -f "${archive:?}"
 fi
 
 if [ $# -ge 2 ]; then
@@ -60,6 +66,12 @@ else
     echo "== downloading CodeWeavers' source for CrossOver $VERSION"
     curl -L --fail -o "$TARBALL.part" "https://media.codeweavers.com/pub/crossover/source/crossover-sources-$VERSION.tar.gz"
     mv "$TARBALL.part" "$TARBALL"
+  fi
+  # The checksum is the default version's. Another version from CROSSOVER_VERSION and a tarball given
+  # as the second argument are taken as they are.
+  if [ "$VERSION" = "$SOURCE_VERSION" ] && ! echo "$SOURCE_SHA256  $TARBALL" | shasum -a 256 -c - >/dev/null 2>&1; then
+    rm -f "${TARBALL:?}"
+    die "$(basename "$TARBALL") did not match its checksum and was deleted. Run this again to download it afresh"
   fi
 fi
 
@@ -74,7 +86,7 @@ echo "== applying the patch"
 (cd "$WORK/dxvk" && patch -p1 -s < "$ROOT/dxvk/dxvk-d3d9-mxo.patch")
 # The tests include translator/mxo_x87_apply.h, the DLL its copy in the patch. They must be the same file.
 cmp -s "$ROOT/translator/mxo_x87_apply.h" "$WORK/dxvk/src/d3d9/d3d9_mxo_x87.h" \
-  || { echo "translator/mxo_x87_apply.h differs from src/d3d9/d3d9_mxo_x87.h in the patch" >&2; exit 1; }
+  || die "translator/mxo_x87_apply.h differs from src/d3d9/d3d9_mxo_x87.h in the patch"
 
 echo "== mapping the functions of client.dll (about a minute)"
 python3 -I "$ROOT/translator/discover.py" "$CLIENT" "$WORK/client.map"
@@ -86,8 +98,8 @@ tail -n 1 "$WORK/translate.log"
 grep -c '^SKIP' "$WORK/translate.log" | sed 's/^/   routines skipped (see build\/translate.log): /' || true
 
 echo "== building d3d9.dll"
-(
-  cd "$WORK/dxvk"
+(   # "set -e" does not reach into the left side of "||": each step that can fail says so itself
+  cd "$WORK/dxvk" || exit 1
   cross=build-win32.txt
   extra=-Wno-template-body
   if [ "${MXO_COMPILER:-clang}" != gcc ]; then
@@ -95,14 +107,14 @@ echo "== building d3d9.dll"
     extra=
     L="$LLVM_MINGW/bin"
     printf "[binaries]\nc = '%s'\ncpp = '%s'\nar = '%s'\nstrip = '%s'\nwindres = '%s'\n\n[properties]\nneeds_exe_wrapper = true\n\n[host_machine]\nsystem = 'windows'\ncpu_family = 'x86'\ncpu = 'x86'\nendian = 'little'\n" \
-      "$L/i686-w64-mingw32-clang" "$L/i686-w64-mingw32-clang++" "$L/llvm-ar" "$L/llvm-strip" "$L/i686-w64-mingw32-windres" > "$cross"
+      "$L/i686-w64-mingw32-clang" "$L/i686-w64-mingw32-clang++" "$L/llvm-ar" "$L/llvm-strip" "$L/i686-w64-mingw32-windres" > "$cross" || exit 1
   fi
   meson setup --cross-file "$cross" --buildtype release \
     -Denable_dxgi=false -Denable_d3d10=false -Denable_d3d11=false -Denable_d3d9=true \
     -Dcpp_args="-include cstdint -include cstring -include cstdlib -include algorithm -include limits $extra" \
-    build.w32 > "$WORK/meson.log" 2>&1
+    build.w32 > "$WORK/meson.log" 2>&1 || exit 1
   ninja -C build.w32 > "$WORK/ninja.log" 2>&1
-) || { echo "build failed, see build/meson.log and build/ninja.log" >&2; exit 1; }
+) || die "build failed, see build/meson.log and build/ninja.log"
 
 if [ "${MXO_COMPILER:-clang}" != gcc ]; then
   "$LLVM_MINGW/bin/llvm-strip" -o "$WORK/d3d9.dll" "$WORK/dxvk/build.w32/src/d3d9/d3d9.dll"

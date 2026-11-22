@@ -1,3 +1,8 @@
 # The setup finds running programs by name with "ps -o comm=". pgrep -f would read their command
 # lines, which the setup promises never to do.
 disable=SC2009
+
+# scripts/build.sh and scripts/setup.sh read scripts/build-tools.sh with "source". The line above each
+# "source" names the file, and these two settings let shellcheck open it from the script's folder.
+external-sources=true
+source-path=SCRIPTDIR

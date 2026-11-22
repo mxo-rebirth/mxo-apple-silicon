@@ -1,7 +1,8 @@
 #!/bin/bash
 # The checks that need neither the game nor CrossOver: shell syntax under the bash macOS ships, the
-# two linters, and the rules of STYLEGUIDE.md that a script can check. GitHub runs the same on every
-# push and pull request. Needs the linters:  brew install shellcheck ruff
+# two linters, the tests of the setup's Python helpers, and the rules of STYLEGUIDE.md that a script
+# can check. GitHub runs the same on every push and pull request. Needs the linters:
+#   brew install shellcheck ruff
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -22,13 +23,18 @@ for script in "${scripts[@]}"; do old_bash -n "$script"; done
 echo "== shellcheck"
 shellcheck "${scripts[@]}"
 
+python_folders=(translator scripts tests/setup)
+
 echo "== ruff"
-ruff check --no-cache translator scripts
+ruff check --no-cache "${python_folders[@]}"
 
 echo "== Python 3.9 syntax"   # the Python of macOS's developer tools
-ruff check --no-cache --select E9 --target-version py39 translator scripts
+ruff check --no-cache --select E9 --target-version py39 "${python_folders[@]}"
 
-echo "== writing rules and step lists"
+echo "== the setup's helpers"
+python3 -I tests/setup/test_setup_helpers.py
+
+echo "== writing rules, bash 3.2 and step lists"
 python3 -I scripts/check-rules.py
 
 echo "all checks passed"

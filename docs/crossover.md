@@ -170,7 +170,8 @@ its own executable name:
 Revived's starter also has a music guard: if its own check of the music system fails (it does
 when the check runs on Wine's DirectSound), it switches the game's music off and writes
 `music = off` into `MxORevived-audio.txt` in the Revived folder. Set that line to `music = on`,
-and `MusicSystemEnable = 1` in Revived's own `options.cfg`.
+and `MusicSystemEnable = 1` in Revived's own `options.cfg`. The setup does both, and
+`scripts/setup.sh music` does it again later.
 
 The launcher plays a video behind its window, which kept more than one processor core busy on
 the test machine. With the launcher closed, `"BackgroundVideo": false` in

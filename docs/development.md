@@ -20,12 +20,17 @@ benchmark and regenerating the patch. Building and installing are in [building.m
 | `bench/d3d9bench.rs` | standalone Direct3D 9 benchmark |
 | `scripts/build.sh` | builds `d3d9.dll` from a `client.dll` and the CodeWeavers source |
 | `scripts/setup.sh` | guided setup of a CrossOver bottle |
-| `install.sh` | the one command of the README: installs the build tools, downloads the repository, runs `scripts/setup.sh` |
+| `scripts/setup-helpers.py` | the setup's file edits and page readings, one subcommand each |
+| `scripts/build-tools.sh` | the programs the build needs and their Homebrew packages, read by `build.sh` and `setup.sh` |
+| `tests/setup/` | tests of `setup-helpers.py` on temporary files |
+| `install.sh` | the one command of the README: downloads the repository and runs `scripts/setup.sh` |
 | `scripts/merge-pipeline-caches.py` | merges DXVK pipeline caches |
 | `scripts/fps-summary.py` | frame rate in the world from the DLL's frame log |
-| `scripts/check.sh` | the checks that need neither the game nor CrossOver: shell syntax, linters, writing rules |
-| `scripts/check-rules.py` | the rules of the style guide that a script can check |
+| `scripts/check.sh` | the checks that need neither the game nor CrossOver: shell syntax, linters, the tests of the setup's helpers, writing rules |
+| `scripts/check-rules.py` | the rules of the style guide that a script can check: no semicolons in prose, nothing newer than bash 3.2, one list of setup steps |
 | `STYLEGUIDE.md` | how code and docs are written here |
+| `.shellcheckrc`, `ruff.toml` | the linters' settings |
+| `.github/` | the workflow that runs `scripts/check.sh` on GitHub, and the pull request template |
 
 Everything generated from the game's files lands in `build/` or carries an ignored name
 (`.gitignore`). Nothing derived from `client.dll` belongs in a commit.

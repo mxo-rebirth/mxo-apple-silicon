@@ -32,13 +32,17 @@ The table of files is in [docs/development.md](docs/development.md#layout). A ne
 - Programs are found by name with `ps -o comm=`. Their command lines are never read or printed.
 - The setup never reads passwords, launcher logins or credential stores, and keeps every file it replaces with a `.setup-backup` suffix
 - Colours, frames and animation appear only on a terminal. Piped, every message is a plain line that still makes sense alone.
-- Every question has a default, and `--yes` takes it. A default never replaces settings a player already has.
+- Every question has a default, and `--yes` takes it. A default never replaces settings a player already has. Where the game comes from is the one question `--yes` skips: a 1.3 GB download is not started unasked.
+- A file in the bottle is written next to the old one and renamed, so it is there whole or not at all
+- A temporary folder is entered in `LEFTOVERS` when it is made. The exit trap removes it however the setup ends.
+- A message names a step as its command: `scripts/setup.sh NAME`
 
 ## Python
 
 - Standard library only, and no network
 - The scripts start Python with `python3 -I`, so nothing from the folder or the environment is loaded
 - The code runs on Python 3.9, the one in macOS's developer tools
+- Python lives in files of its own, never in a here-document of a shell script, where no linter sees it
 
 ## The DXVK Patch
 
@@ -59,7 +63,7 @@ The table of files is in [docs/development.md](docs/development.md#layout). A ne
 ## Tests and Checks
 
 ```sh
-scripts/check.sh    # shell syntax under bash 3.2, shellcheck, ruff, the writing rules
+scripts/check.sh    # shell syntax under bash 3.2, shellcheck, ruff, the helpers' tests, the writing rules
 ```
 
 - `scripts/check.sh` needs neither the game nor CrossOver. GitHub runs it on every push and pull request (`.github/workflows/check.yml`).
@@ -75,7 +79,7 @@ scripts/check.sh    # shell syntax under bash 3.2, shellcheck, ruff, the writing
 - No history in comments: no dates, versions or "changed this" notes
 - If a comment no longer matches the code, fix or delete it in the same change
 - No semicolons in comments, in docs or in the messages the scripts print
-- The README is for players and stays short: what it does, what it needs, the setup, tips, undo. Everything else is in `docs/`.
+- The README is for players and stays short. What developers and the game teams need is in `docs/`.
 - What was not tested is said so, next to the claim
 - No logo or title art of the game or the films, and no character names, in the repo or in what the setup prints
 - People's names and accounts never appear. The repository's own address is the one exception: the installer and the README need it.
@@ -102,4 +106,5 @@ scripts/check.sh    # shell syntax under bash 3.2, shellcheck, ruff, the writing
 
 - `scripts/build.sh` and the last part of `scripts/setup.sh` run outside functions
 - `translator/xlat.py` has functions far over 80 lines
-- The setup has no tests in the repo
+- The setup's shell has no tests in the repo. Its Python helpers have (`tests/setup/`).
+- No test covers the two hand-written matrix routines of the DLL
