@@ -28,11 +28,11 @@ player's machine from their own `client.dll`.
 One file: a custom build of DXVK's `d3d9.dll`, installed into the CrossOver bottle and enabled
 for the game executable only. No game file is modified on disk.
 
-- **Math.** `translator/xlat.py` turns 537 x87 routines of `client.dll` into SSE2 code that gives
+- **Math.** `translator/xlat.py` turns 535 x87 routines of `client.dll` into SSE2 code that gives
   the same results for every value a `float` can hold. At startup the DLL checks each routine
   in memory against the code its replacement was generated from and redirects the matching
   ones. Four more routines, among them `sqrt` and the float-to-integer helper, have
-  hand-written replacements. [translator.md](translator.md)
+  replacements written for them. [translator.md](translator.md)
 - **Graphics.** Fifteen fixes to DXVK 1.10.3 on MoltenVK: shaders that failed to compile,
   one-second page faults, buffer locks and texture uploads that interrupted drawing, 128 KB of
   shader constants copied per draw, triangle fans, and more. [graphics.md](graphics.md)

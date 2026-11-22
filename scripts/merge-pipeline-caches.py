@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""Merge DXVK pipeline caches (*.dxvk-cache) so that every MxO executable starts with what the others
+"""merge-pipeline-caches.py <cache> <cache>...
+
+Merges DXVK pipeline caches (*.dxvk-cache) so that every MxO executable starts with what the others
 have already seen. Rejacked (matrix.exe) and Revived (mxorev.exe) run the same engine, but DXVK keeps
-one cache per executable name; without merging, each one hitches while it builds pipelines the other
+one cache per executable name. Without merging, each one hitches while it builds pipelines the other
 already has. DXVK skips entries it cannot use, so merging is safe.
 
     scripts/merge-pipeline-caches.py "$BOTTLE/drive_c/Games/dxvk"/*.dxvk-cache
@@ -15,23 +17,28 @@ import shutil
 import struct
 import sys
 
+HEADER_BYTES = 12               # magic, version, entry size
+ENTRY_HEADER_BYTES = 24         # stage mask and size, then the SHA-1 of the entry
+
 
 def read_cache(path):
-    data = open(path, 'rb').read()
-    if len(data) < 12 or data[:4] != b'DXVK':
+    """(header, version, entries) of a cache file. An entry is (its SHA-1, its bytes with the header)."""
+    with open(path, 'rb') as file:
+        data = file.read()
+    if len(data) < HEADER_BYTES or data[:4] != b'DXVK':
         raise SystemExit('%s: not a DXVK state cache' % path)
     version = struct.unpack_from('<I', data, 4)[0]
     if version < 8:
         raise SystemExit('%s: cache version %d is too old to merge' % (path, version))
-    entries, offset = [], 12
-    while offset + 24 <= len(data):
+    entries, offset = [], HEADER_BYTES
+    while offset + ENTRY_HEADER_BYTES <= len(data):
         size = struct.unpack_from('<I', data, offset)[0] >> 8   # 8 bits stage mask, 24 bits size
-        end = offset + 24 + size                                  # header, SHA-1, data
+        end = offset + ENTRY_HEADER_BYTES + size
         if end > len(data):
             break                                                 # truncated last entry: drop it
-        entries.append((data[offset + 4:offset + 24], data[offset:end]))
+        entries.append((data[offset + 4:offset + ENTRY_HEADER_BYTES], data[offset:end]))
         offset = end
-    return data[:12], version, entries
+    return data[:HEADER_BYTES], version, entries
 
 
 def main(paths):

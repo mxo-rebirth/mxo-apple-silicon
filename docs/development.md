@@ -10,9 +10,11 @@ benchmark and regenerating the patch. Building and installing are in [building.m
 | `dxvk/dxvk-d3d9-mxo.patch` | all changes to CodeWeavers' DXVK 1.10.3 source |
 | `translator/xlat.py` | the x87 to SSE2 translator ([translator.md](translator.md)) |
 | `translator/discover.py` | maps `client.dll`: function entries, branches, x87 instructions (`build/client.map`) |
-| `translator/routines.list` | the routines to translate: start, limit, weight, length, hash |
+| `translator/routines.list` | the routines to translate. Its head describes the format |
 | `translator/profile2.py` | turns the profiler's `samples.bin` into a per-thread profile and a routine list |
 | `translator/dis.py` | disassembles address ranges of a PE file |
+| `translator/peimage.py` | the one reader of PE files: sections, relocations, imports, exports |
+| `translator/mingw.py` | the one place that starts `objdump` and `nm` and reads what they print |
 | `translator/mxo_x87_apply.h` | run-time side of the translation: fixups and installation. The patch holds the same file as `src/d3d9/d3d9_mxo_x87.h`. `scripts/build.sh` stops if the two differ |
 | `tests/` | differential tests: translation against original code ([README](../tests/README.md)) |
 | `bench/d3d9bench.rs` | standalone Direct3D 9 benchmark |
@@ -59,18 +61,21 @@ Wine's own tracing (`--cx-log`) slows the game to a crawl. Use it only briefly.
 2. Build once so that `build/client.map` and the unstripped DLL exist, then:
 
    ```sh
-   python3 translator/profile2.py "$BOTTLE/drive_c/Games/dxvk/samples.bin" build/client.map \
+   python3 -I translator/profile2.py "$BOTTLE/drive_c/Games/dxvk/samples.bin" build/client.map \
        build/dxvk/build.w32/src/d3d9/d3d9.dll \
        /Applications/CrossOver.app/Contents/SharedSupport/CrossOver/lib/wine/i386-windows
    ```
 
    It prints, per thread, where the time went (game code, translated routines, graphics layer,
    Vulkan, waits and their callers) and writes `samples.bin.hot`: the game routines containing
-   x87 code, by sample count.
+   x87 code that the presenting thread was sampled in, by sample count. Only that thread
+   counts, because the translations run on no other. `THREADS=N` sets how many threads are
+   reported (default 6) and `TOP=N` how many game routines per thread (default 12). The map has
+   to be the one the current `discover.py` writes, which every build does.
 3. Add those routines to the list and let the translator fill in length and hash:
 
    ```sh
-   python3 translator/xlat.py pe client.dll MxoX /tmp/out.inc --map build/client.map \
+   python3 -I translator/xlat.py pe client.dll MxoX build/out.inc --map build/client.map \
        --write-list translator/routines.list @translator/routines.list @samples.bin.hot
    ```
 

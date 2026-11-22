@@ -1,4 +1,6 @@
-# Synthetic x87 routines covering every instruction form the translator handles.
+# Synthetic x87 routines for the instruction forms the translator handles. Not here, because they need a PE
+# image with relocations and imports: jump tables, the call to the float-to-integer helper and the floor and
+# ceil imports. The game part of the tests covers those.
 # void __cdecl tN(const In* in, Out* out)
 #   In : float f[16] @0, int32 i[4] @64, double d[4] @80, int16 w[2] @112, int64 q @116
 #   Out: float o[16] @0, double od[4] @64, int32 oi[4] @96, int16 ow[2] @112, int64 oq @116
@@ -726,3 +728,202 @@ _t11:
   pop ebp
   ret
 _t11_end:
+
+# t12: the compares that set the CPU flags themselves (fcomi, fucomi, fcomip, fucomip), between two floats,
+# a double and a float, and an integer and a float, each followed by a different jump
+.p2align 4
+.globl _t12
+_t12:
+  push ebp
+  mov ebp, esp
+  push esi
+  push edi
+  mov esi, [ebp+8]
+  mov edi, [ebp+12]
+  xor ecx, ecx
+  fld dword ptr [esi+4]
+  fld dword ptr [esi]
+  fcomi st, st(1)
+  jbe 1f
+  or ecx, 0x1
+1:
+  fcomi st, st(1)
+  jnp 2f
+  or ecx, 0x2
+2:
+  fucomi st, st(1)
+  jne 3f
+  or ecx, 0x4
+3:
+  fucomi st, st(1)
+  seta al
+  movzx eax, al
+  mov [edi+100], eax
+  fld qword ptr [esi+80]
+  fcomi st, st(2)
+  jae 4f
+  or ecx, 0x8
+4:
+  fucomip st, st(1)
+  jb 5f
+  or ecx, 0x10
+5:
+  fcomip st, st(1)
+  ja 6f
+  or ecx, 0x20
+6:
+  fild dword ptr [esi+64]
+  fucomi st, st(1)
+  je 7f
+  or ecx, 0x40
+7:
+  fcomip st, st(1)
+  jp 8f
+  or ecx, 0x80
+8:
+  fld dword ptr [esi+8]
+  fchs
+  fxch st(1)
+  fucomip st, st(1)
+  jnb 9f
+  or ecx, 0x100
+9:
+  fstp st(0)
+  mov [edi+96], ecx
+  pop edi
+  pop esi
+  pop ebp
+  ret
+_t12_end:
+
+# t13: fucom and fucomp between registers, a compare with an integer in memory (ficom, ficomp), fnop, and
+# the constants fldl2e, fldl2t, fldlg2 and fldln2, stored as they are and after arithmetic
+.p2align 4
+.globl _t13
+_t13:
+  push ebp
+  mov ebp, esp
+  push esi
+  push edi
+  mov esi, [ebp+8]
+  mov edi, [ebp+12]
+  xor ecx, ecx
+  fld dword ptr [esi+4]
+  fld dword ptr [esi]
+  fucom st(1)
+  fnstsw ax
+  test ah, 0x45
+  jnz 1f
+  or ecx, 0x1
+1:
+  fnop
+  fucomp st(1)
+  fnstsw ax
+  sahf
+  jne 2f
+  or ecx, 0x2
+2:
+  ficom dword ptr [esi+64]
+  fnstsw ax
+  test ah, 0x01
+  jz 3f
+  or ecx, 0x4
+3:
+  ficomp dword ptr [esi+68]
+  fnstsw ax
+  test ah, 0x40
+  jz 4f
+  or ecx, 0x8
+4:
+  mov [edi+96], ecx
+  fldl2e
+  fstp qword ptr [edi+64]
+  fldl2t
+  fstp qword ptr [edi+72]
+  fldlg2
+  fstp qword ptr [edi+80]
+  fldln2
+  fstp qword ptr [edi+88]
+  fldl2e
+  fmul dword ptr [esi+8]
+  fstp dword ptr [edi]
+  fldln2
+  fadd dword ptr [esi+12]
+  fstp dword ptr [edi+4]
+  fldlg2
+  fstp dword ptr [edi+8]
+  fldl2t
+  fchs
+  fstp dword ptr [edi+12]
+  pop edi
+  pop esi
+  pop ebp
+  ret
+_t13_end:
+
+# t14: loops closed by loop and skipped by jecxz, with a value on the FPU stack across them
+.p2align 4
+.globl _t14
+_t14:
+  push ebp
+  mov ebp, esp
+  push esi
+  push edi
+  mov esi, [ebp+8]
+  mov edi, [ebp+12]
+  mov ecx, 8
+  fldz
+1:
+  fadd dword ptr [esi+ecx*4-4]
+  loop 1b
+  fstp dword ptr [edi]
+  mov ecx, [esi+64]
+  and ecx, 3
+  fld dword ptr [esi+32]
+  jecxz 3f
+2:
+  fadd st, st(0)
+  loop 2b
+3:
+  fstp dword ptr [edi+4]
+  pop edi
+  pop esi
+  pop ebp
+  ret
+_t14_end:
+
+# t15: ends with a jump into another routine, in the short form because that routine lies right behind it
+.p2align 4
+.globl _t15
+_t15:
+  mov eax, [esp+4]
+  mov edx, [esp+8]
+  fld dword ptr [eax]
+  fmul dword ptr [eax+4]
+  fstp dword ptr [edx]
+  jmp _t15b
+_t15_end:
+
+.p2align 4
+.globl _t15b
+_t15b:
+  mov eax, [esp+4]
+  mov edx, [esp+8]
+  fld dword ptr [eax+8]
+  fadd dword ptr [eax+12]
+  fstp dword ptr [edx+4]
+  ret
+_t15b_end:
+
+# t16: the same with the long form of the jump
+.p2align 4
+.globl _t16
+_t16:
+  mov eax, [esp+4]
+  mov edx, [esp+8]
+  fld dword ptr [eax+16]
+  fsub dword ptr [eax+20]
+  fstp dword ptr [edx+8]
+  .byte 0xe9
+  .long _t15b - . - 4
+_t16_end:

@@ -1,14 +1,31 @@
 // Blind differential test of the translated game routines against the real client.dll.
 // Each routine is called with random floats / pointers into a scratch arena, once as the original
-// and once as the translation. The arena, the image's global data, eax and st0 must come out identical.
+// and once as the translation. The arena, the image's global data and st0 must come out identical. Of eax
+// the low byte counts where the translator knows that the routine's own integer code sets it before every
+// return (alResult): that is the byte a bool comes back in. The rest of eax is compared and reported, but
+// not counted, because a status word read leaves other bits there than its translation does.
 #include <csetjmp>
 #include <emmintrin.h>
 
-struct GameFn { uint32_t rva; int nargs; const char* kinds; bool thisPtr; bool fpret; bool framed; };
+struct GameFn { uint32_t rva; int nargs; const char* kinds; bool thisPtr; bool fpret; bool framed; bool alResult; };
 
 static const GameFn g_gameFns[] = {
 #include "out_game.inc.tests"
 };
+
+static const DWORD CallTimeoutMs = 700;        // a call that runs longer is abandoned
+static const DWORD WatchdogPollMs = 50;
+static const LONG  MaxTimeouts = 5;            // a routine with this many abandoned calls is not called again
+static const DWORD BlockedAfterMs = 4000;      // a worker without a heartbeat for this long is blocked for good
+static const DWORD ChildSilentMs = 120000;     // a child that reports nothing for this long is ended
+static const int   BatchSize = 40;             // routines per child process
+static const int   HelperCases = 400000;       // values the float-to-integer helper is tried with
+static const uint32_t FpuOneValue = 0x3fff;    // the FPU tag word with one value on the stack
+
+// Routines that get plausible input with MXO_SHAPE=1, and the globals the second one reads
+static const uint32_t MapRoutine = 0x47ddb0;       // world position to map grid cell
+static const uint32_t SortComparator = 0x4859d0;
+static const uint32_t SortDirection = 0xa76a08;    // three floats
 
 static jmp_buf g_crashJmp;
 static volatile int g_guard = 0;
@@ -21,11 +38,11 @@ static void timeoutStub() { g_guard = 0; longjmp(g_crashJmp, 2); }
 // A call that spins for too long (random loop counts) is abandoned by redirecting the worker to timeoutStub
 static DWORD WINAPI watchdog(void*) {
   for (;;) {
-    Sleep(50);
+    Sleep(WatchdogPollMs);
     HANDLE w = g_worker;
-    if (!w || !g_guard || GetTickCount() - g_callStart < 700) continue;
+    if (!w || !g_guard || GetTickCount() - g_callStart < CallTimeoutMs) continue;
     SuspendThread(w);
-    if (g_guard && GetTickCount() - g_callStart >= 700) {
+    if (g_guard && GetTickCount() - g_callStart >= CallTimeoutMs) {
       CONTEXT ctx; ctx.ContextFlags = CONTEXT_CONTROL;
       if (GetThreadContext(w, &ctx)) { ctx.Eip = DWORD(uintptr_t(&timeoutStub)); SetThreadContext(w, &ctx); InterlockedIncrement(&g_timeouts); }
     }
@@ -65,33 +82,33 @@ static Result runOne(void* fn, const GameFn& g, const uint32_t* args) {
   uint32_t seh; __asm__ __volatile__("movl %%fs:0, %0" : "=r"(seh));
   if (setjmp(g_crashJmp)) {
     __asm__ __volatile__("movl %0, %%fs:0" : : "r"(seh));
-    fpu_setcw(0x007f);
+    fpu_setcw(CwGame);
     r.crashed = true;
     return r;
   }
   // same FPU state before every call: empty stack with the stack pointer at zero (a routine run on garbage
   // can pop an empty stack, which leaves it "empty" but rotated and shows up in later status words)
-  fpu_setcw(0x007f);
+  fpu_setcw(CwGame);
   g_callStart = GetTickCount();
   g_guard = 1;
   r.eax = xcall(fn, uint32_t(uintptr_t(g_arena)), args, PassedArgs, g.fpret ? &r.st0 : nullptr);
   g_guard = 0;
   r.tags = fpu_tags();
   // a routine that hands on a callee's floating-point result leaves it on the FPU stack: compare it too
-  if (!g.fpret && r.tags == 0x3fff) __asm__ __volatile__("fstpl %0" : "=m"(r.st0));
-  else if (r.tags != 0xffff) fpu_setcw(0x007f);
+  if (!g.fpret && r.tags == FpuOneValue) __asm__ __volatile__("fstpl %0" : "=m"(r.st0));
+  else if (r.tags != FpuEmpty) fpu_setcw(CwGame);
   return r;
 }
 
 struct Job {
   const GameFn* g; MxoXFunc* f; int iterations;
   volatile LONG heartbeat, finished;
-  int done, crashed, bad, stack, eaxdiff, crashdiff, databad;
+  int done, crashed, bad, stack, eaxdiff, aldiff, crashdiff, databad;
   char msg[3][200]; int nmsg;
 };
 
 // Random memory rarely gets far into some routines. For those, MXO_SHAPE=1 builds plausible input in the
-// arena (g_init) before the call. 0x47DDB0 maps a world position to a map grid cell: this = {.., +8 grid*},
+// arena (g_init) before the call. MapRoutine maps a world position to a map grid cell: this = {.., +8 grid*},
 // grid = {+28 minX, +38 minZ, +40 maxX, +50 maxZ, +58 cell size (double), +60 scale (int), +64/+68 columns/rows},
 // arg0 = position {+0 x, +10 z}, arg1/arg2 = column/row out.
 static void putd(size_t byteOff, double v) { memcpy((uint8_t*)g_init + byteOff, &v, 8); }
@@ -111,9 +128,9 @@ static float rndShapeFloat() {   // ordinary values, sometimes repeated exactly
 }
 
 static void shapeInput(const GameFn& g) {
-  if (g.rva == 0x4859d0) {
-    // sort comparator: two pointers to element pointers. Each element has a box at +24..+2c (min) and +30..+38
-    // (max), compared along the direction held in globals at 0xa76a08..0xa76a10
+  if (g.rva == SortComparator) {
+    // two pointers to element pointers. Each element has a box at +24..+2c (min) and +30..+38
+    // (max), compared along the direction held in the globals at SortDirection
     const size_t objA = BlockSize * 9, objB = BlockSize * 10;
     g_init[BlockSize * 1 / 4] = uint32_t(uintptr_t(g_arena)) + objA;
     g_init[BlockSize * 2 / 4] = uint32_t(uintptr_t(g_arena)) + (rnd32() % 16 ? objB : objA);
@@ -122,11 +139,11 @@ static void shapeInput(const GameFn& g) {
       memcpy((uint8_t*)g_init + objA + o, &a, 4);
       memcpy((uint8_t*)g_init + objB + o, &b, 4);
     }
-    for (uint32_t r = 0xa76a08; r <= 0xa76a10; r += 4)
+    for (uint32_t r = SortDirection; r < SortDirection + 12; r += 4)
       putGlobalFloat(r, rnd32() % 5 ? rndShapeFloat() / 1000.0f : 0.0f);
     return;
   }
-  if (g.rva != 0x47ddb0) return;
+  if (g.rva != MapRoutine) return;
   const size_t grid = BlockSize * 8, pos = BlockSize * 1;
   g_init[2] = uint32_t(uintptr_t(g_arena)) + grid;
   double minX = rndRange(-5000, 5000), minZ = rndRange(-5000, 5000);
@@ -151,9 +168,9 @@ static void shapeInput(const GameFn& g) {
 static DWORD WINAPI gameWorker(void* param) {
   Job& j = *(Job*)param;
   const GameFn& g = *j.g;
-  fpu_setcw(0x007f);
+  fpu_setcw(CwGame);
   MxoX_tid = GetCurrentThreadId();
-  for (int it = 0; it < j.iterations && g_timeouts < 5; it++) {
+  for (int it = 0; it < j.iterations && g_timeouts < MaxTimeouts; it++) {
     InterlockedIncrement(&j.heartbeat);
     g_specials = !g_plain && (it & 3) == 3;
     for (size_t k = 0; k < BlockSize * Blocks / 4; k++) {
@@ -169,8 +186,8 @@ static DWORD WINAPI gameWorker(void* param) {
     memcpy(g_arena, g_init, BlockSize * Blocks);
     Result ra = runOne(g_base + g.rva, g, args);
     memcpy(g_resA, g_arena, BlockSize * Blocks);
-    if (g.rva == 0x47ddb0 && g_resA[BlockSize * 2 / 4] != 0xffffffffu && !ra.crashed) g_reached++;
-    if (g.rva == 0x4859d0 && !ra.crashed) g_reached++;
+    if (g.rva == MapRoutine && g_resA[BlockSize * 2 / 4] != 0xffffffffu && !ra.crashed) g_reached++;
+    if (g.rva == SortComparator && !ra.crashed) g_reached++;
     memcpy(g_dataA, g_data, g_dataSize);
     memcpy(g_data, g_dataInit, g_dataSize);
     memcpy(g_arena, g_init, BlockSize * Blocks);
@@ -183,6 +200,9 @@ static DWORD WINAPI gameWorker(void* param) {
     }
     if (ra.tags != rb.tags) { if (!j.stack++ && j.nmsg < 3) snprintf(j.msg[j.nmsg++], 200, "FPU stack differs: orig %04x xlat %04x", ra.tags, rb.tags); }
     if ((ra.eax ^ rb.eax) & 0xffffff00) { if (!j.eaxdiff++ && j.nmsg < 3) snprintf(j.msg[j.nmsg++], 200, "eax orig %08x xlat %08x", ra.eax, rb.eax); }
+    if (g.alResult && ((ra.eax ^ rb.eax) & 0xff)) {
+      if (!j.aldiff++ && j.nmsg < 3) snprintf(j.msg[j.nmsg++], 200, "al differs: orig %02x xlat %02x (iteration %d)", ra.eax & 0xff, rb.eax & 0xff, it);
+    }
     if (diff(&ra.st0, &rb.st0, 8, &where) && !diff(g_resA, g_arena, BlockSize * Blocks, &where)) {
       uint64_t a, b; memcpy(&a, &ra.st0, 8); memcpy(&b, &rb.st0, 8);
       if (!j.bad++ && j.nmsg < 3) snprintf(j.msg[j.nmsg++], 200, "st0 differs: orig %016llx xlat %016llx (iteration %d)", (unsigned long long)a, (unsigned long long)b, it);
@@ -259,10 +279,12 @@ static int runGameChild(int iterations, int first, int count) {
     bool killed = false;
     while (WaitForSingleObject(th, 100) == WAIT_TIMEOUT) {
       if (j.heartbeat != lastBeat) { lastBeat = j.heartbeat; lastChange = GetTickCount(); }
-      else if (GetTickCount() - lastChange > 4000) { killed = true; break; }
+      else if (GetTickCount() - lastChange > BlockedAfterMs) { killed = true; break; }
     }
-    fprintf(out, "%d %06x %s ran=%d crashed=%d crashdiff=%d timeouts=%ld result=%d data=%d eax=%d stack=%d reached=%d sig=%s%s\n", idx, g.rva,
-      killed ? "BLOCKED" : "DONE", j.done, j.crashed, j.crashdiff, long(g_timeouts), j.bad, j.databad, j.eaxdiff, j.stack, g_reached, g.thisPtr ? "this," : "", g.kinds);
+    // al is -1 for a routine whose al is not compared
+    fprintf(out, "%d %06x %s ran=%d crashed=%d crashdiff=%d timeouts=%ld result=%d data=%d eax=%d stack=%d al=%d reached=%d sig=%s%s\n", idx, g.rva,
+      killed ? "BLOCKED" : "DONE", j.done, j.crashed, j.crashdiff, long(g_timeouts), j.bad, j.databad, j.eaxdiff, j.stack, g.alResult ? j.aldiff : -1,
+      g_reached, g.thisPtr ? "this," : "", g.kinds);
     for (int k = 0; k < j.nmsg; k++) fprintf(out, "# %06x %s\n", g.rva, j.msg[k]);
     fflush(out);
     if (killed) { fclose(out); TerminateProcess(GetCurrentProcess(), 3); }
@@ -282,6 +304,14 @@ static int lastIndexDone() {
   return last;
 }
 
+// The float-to-integer helper is the one dependency that also has a replacement. The other rows of the
+// dependency table are jump tables.
+static MxoXFunc* findHelper() {
+  for (const MxoXFunc* dep = (const MxoXFunc*)MxoX_deps; dep->size; dep++)
+    if (MxoXFunc* f = findFunc(MxoX_funcs, dep->rva)) return f;
+  return nullptr;
+}
+
 static int runGame(int iterations) {
   int problems = 0;
   DeleteFileA(FuzzFile);
@@ -290,10 +320,11 @@ static int runGame(int iterations) {
   {
     // the float-to-integer helper against the inline fast path used by the translations
     HMODULE mod = LoadLibraryExA(clientPath(), nullptr, DONT_RESOLVE_DLL_REFERENCES);
-    if (mod && MxoX_deps[0]) {
-      void* ftol = (uint8_t*)mod + MxoX_deps[0];
+    MxoXFunc* helper = mod ? findHelper() : nullptr;
+    if (helper) {
+      void* ftol = (uint8_t*)mod + helper->rva;
       int badf = 0, fast = 0;
-      for (int it = 0; it < 400000; it++) {
+      for (int it = 0; it < HelperCases; it++) {
         g_specials = it & 1;
         double v = (it % 5 == 0) ? double(int32_t(rnd32())) * 0.5 : (it % 5 == 1) ? double(rndf()) * 1000.0 : double(rndf());
         uint32_t lo, hi;
@@ -306,59 +337,64 @@ static int runGame(int iterations) {
       printf("float-to-integer helper vs inline path: %d cases on the fast path, %d mismatches\n", fast, badf);
       problems += badf;
       // the replacement for the helper itself, over the whole range including huge values, infinities and NaN
-      if (MxoXFunc* rf = findFunc(MxoX_funcs, MxoX_deps[0])) {
+      {
         MxoXFixups((uint8_t*)mod, MxoX_imagebase, MxoX_absfix, MxoX_relfix, MxoX_code_begin, MxoX_code_end);
         int badr = 0, stackr = 0;
-        for (int it = 0; it < 400000; it++) {
+        for (int it = 0; it < HelperCases; it++) {
           g_specials = it & 1;
           double v = (it % 6 == 0) ? double(int32_t(rnd32())) * 0.5 : (it % 6 == 1) ? double(rndf()) * 1000.0
                    : (it % 6 == 2) ? double(int64_t(uint64_t(rnd32()) << 32 | rnd32())) : (it % 6 == 3) ? double(rndf()) * 4.0e9 : double(rndf());
           uint32_t lo1, hi1, lo2, hi2;
           __asm__ __volatile__("fldl %2\n call *%3\n" : "=a"(lo1), "=d"(hi1) : "m"(v), "r"(ftol) : "ecx", "st");
-          uint32_t t1 = fpu_tags();
-          __asm__ __volatile__("fldl %2\n call *%3\n" : "=a"(lo2), "=d"(hi2) : "m"(v), "r"(rf->replacement) : "ecx", "st");
-          uint32_t t2 = fpu_tags();
-          if (t1 != 0xffff || t2 != 0xffff) { stackr++; fpu_setcw(0x007f); }
+          uint32_t tagsOriginal = fpu_tags();
+          __asm__ __volatile__("fldl %2\n call *%3\n" : "=a"(lo2), "=d"(hi2) : "m"(v), "r"(helper->replacement) : "ecx", "st");
+          uint32_t tagsReplacement = fpu_tags();
+          if (tagsOriginal != FpuEmpty || tagsReplacement != FpuEmpty) { stackr++; fpu_setcw(CwGame); }
           if (lo1 != lo2 || hi1 != hi2) { if (badr++ < 4) printf("helper replacement MISMATCH v=%g original %08x:%08x replacement %08x:%08x\n", v, hi1, lo1, hi2, lo2); }
         }
-        printf("float-to-integer helper replacement: 400000 cases, %d mismatches, %d FPU stack errors\n", badr, stackr);
+        printf("float-to-integer helper replacement: %d cases, %d mismatches, %d FPU stack errors\n", HelperCases, badr, stackr);
         problems += badr + stackr;
       }
     }
   }
   char self[MAX_PATH]; GetModuleFileNameA(nullptr, self, MAX_PATH);
-  int next = 0, lost = 0;
+  int next = 0;
   while (next < total) {
-    char cmd[600]; snprintf(cmd, sizeof(cmd), "\"%s\" %d child %d %d", self, iterations, next, 40);
+    char cmd[600]; snprintf(cmd, sizeof(cmd), "\"%s\" %d child %d %d", self, iterations, next, BatchSize);
     STARTUPINFOA si = {}; si.cb = sizeof(si); PROCESS_INFORMATION pi = {};
     if (!CreateProcessA(nullptr, cmd, nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) { printf("cannot start child\n"); return problems + 1; }
     int before = lastIndexDone(); DWORD lastChange = GetTickCount();
     while (WaitForSingleObject(pi.hProcess, 500) == WAIT_TIMEOUT) {
       int now = lastIndexDone();
       if (now != before) { before = now; lastChange = GetTickCount(); }
-      else if (GetTickCount() - lastChange > 120000) { TerminateProcess(pi.hProcess, 4); break; }
+      else if (GetTickCount() - lastChange > ChildSilentMs) { TerminateProcess(pi.hProcess, 4); break; }
     }
     CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
     int done = lastIndexDone();
-    if (done < next) { FILE* out = fopen(FuzzFile, "a"); fprintf(out, "%d %06x LOST\n", next, g_gameFns[next].rva); fclose(out); lost++; done = next; }
+    if (done < next) { FILE* out = fopen(FuzzFile, "a"); fprintf(out, "%d %06x LOST\n", next, g_gameFns[next].rva); fclose(out); done = next; }
     next = done + 1;
     printf("... %d of %d\n", next, total);
   }
   // summary
   FILE* in = fopen(FuzzFile, "r");
-  char line[512]; int tested = 0, exercised = 0, clean = 0, blocked = 0; long runs = 0;
+  char line[512]; int tested = 0, exercised = 0, clean = 0, blocked = 0, alCompared = 0, eaxRoutines = 0; long runs = 0, eaxCases = 0;
   while (in && fgets(line, sizeof(line), in)) {
     if (line[0] == '#') { printf("   %s", line); continue; }
-    int idx, ran = 0, crashed = 0, crashdiff = 0, result = 0, data = 0, eax = 0, stack = 0; long timeouts = 0; unsigned rva; char status[32] = "";
-    if (sscanf(line, "%d %x %31s ran=%d crashed=%d crashdiff=%d timeouts=%ld result=%d data=%d eax=%d stack=%d", &idx, &rva, status, &ran, &crashed, &crashdiff, &timeouts, &result, &data, &eax, &stack) < 3) continue;
+    int idx, ran = 0, crashed = 0, crashdiff = 0, result = 0, data = 0, eax = 0, stack = 0, al = -1; long timeouts = 0; unsigned rva; char status[32] = "";
+    if (sscanf(line, "%d %x %31s ran=%d crashed=%d crashdiff=%d timeouts=%ld result=%d data=%d eax=%d stack=%d al=%d", &idx, &rva, status, &ran, &crashed, &crashdiff, &timeouts, &result, &data, &eax, &stack, &al) < 3) continue;
     tested++; runs += ran; if (ran) exercised++;
     if (!strcmp(status, "BLOCKED") || !strcmp(status, "LOST")) blocked++;
-    if (result || data || eax || stack || crashdiff || strcmp(status, "DONE")) printf("%s", line);
+    if (al >= 0) alCompared++;
+    const int alDiffs = al > 0 ? al : 0;
+    if (eax) { eaxRoutines++; eaxCases += eax; }
+    if (result || data || eax || stack || crashdiff || alDiffs || strcmp(status, "DONE")) printf("%s", line);
     else if (ran) clean++;
-    problems += result + data + stack + crashdiff;
+    problems += result + data + stack + crashdiff + alDiffs;
   }
   if (in) fclose(in);
-  printf("game routines: %d tested; %d ran to completion at least once (%ld comparisons); %d of those identical in every run; %d blocked or lost\n",
+  printf("game routines: %d tested, %d ran to completion at least once (%ld comparisons), %d of those identical in every run, %d blocked or lost\n",
     tested, exercised, runs, clean, blocked);
+  printf("al was compared for %d routines. Differences in the rest of eax, reported above and not counted: %ld cases in %d routines\n",
+    alCompared, eaxCases, eaxRoutines);
   return problems;
 }

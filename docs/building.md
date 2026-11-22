@@ -93,7 +93,7 @@ GCC as before.
 4. builds `build/d3d9.dll`.
 
 It takes five to ten minutes. `build/translate.log` says what was translated and what was
-skipped and why. With the `client.dll` this was developed on, all 537 routines translate.
+skipped and why. With the `client.dll` this was developed on, all 535 routines translate.
 One DLL serves both games: Revived's `client.dll` has the same code at the same addresses for
 all but one of them, and each routine is checked again when the game starts.
 

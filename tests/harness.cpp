@@ -17,6 +17,7 @@ extern "C" {
   extern uint8_t  XT_code_begin[], XT_code_end[];
   extern uint32_t XT_tid, XT_imagebase;
   void t1(); void t2(); void t3(); void t4(); void t5(); void t6(); void t7(); void t8(); void t8h(); void t9(); void t10(); void t11();
+  void t12(); void t13(); void t14(); void t15(); void t15b(); void t16();
 #ifdef WITH_GAME
   extern uint32_t MxoX_funcs[], MxoX_absfix[], MxoX_relfix[], MxoX_deps[], MxoX_crtslots[];
   extern uint8_t  MxoX_code_begin[], MxoX_code_end[];
@@ -50,6 +51,11 @@ __asm__(
   ".att_syntax prefix\n"
 );
 
+// FPU control words. The game's is what Direct3D 9 sets: 24-bit precision, round to nearest, exceptions masked
+static const uint32_t CwGame = 0x007f;
+static const uint32_t Cw53 = 0x027f;   // 53-bit precision, what a Windows thread starts with
+static const uint32_t FpuEmpty = 0xffff;   // the FPU tag word with all eight registers empty
+
 static uint64_t g_seed = 0x9E3779B97F4A7C15ull;
 static uint32_t rnd32() { g_seed ^= g_seed << 13; g_seed ^= g_seed >> 7; g_seed ^= g_seed << 17; return uint32_t(g_seed >> 16); }
 static float    bitsf(uint32_t u) { float f; memcpy(&f, &u, 4); return f; }
@@ -73,14 +79,17 @@ static float rndf() {
 
 static bool isnanf(uint32_t u) { return (u & 0x7f800000) == 0x7f800000 && (u & 0x7fffff); }
 
-// Compares two memory images dword by dword. Any NaN equals any NaN.
+// The high half of a double infinity has the bits of a float NaN. It is told apart by the zero low half before it
+static bool infHigh(const uint32_t* v, size_t i) { return i > 0 && (v[i] & 0x7fffffff) == 0x7ff00000 && v[i - 1] == 0; }
+
+// Compares two memory images dword by dword. Any NaN equals any NaN, as a float and as the high half of a
+// double. An infinity equals only itself: two NaN patterns do not count as equal where one of them can be
+// the high half of a double infinity.
 static int diff(const void* a, const void* b, size_t size, size_t* where) {
   const uint32_t* x = (const uint32_t*)a; const uint32_t* y = (const uint32_t*)b;
   for (size_t i = 0; i < size / 4; i++) {
     if (x[i] == y[i]) continue;
-    if (isnanf(x[i]) && isnanf(y[i])) continue;
-    // high half of a double NaN
-    if ((x[i] & 0x7ff00000) == 0x7ff00000 && (y[i] & 0x7ff00000) == 0x7ff00000) continue;
+    if (isnanf(x[i]) && isnanf(y[i]) && !infHigh(x, i) && !infHigh(y, i)) continue;
     *where = i * 4; return 1;
   }
   return 0;
@@ -112,12 +121,19 @@ static int runSynth(const char* name, void (*fn)(), bool fpret, int iterations) 
     double ra = 0, rb = 0;
     uint32_t args[2];
     args[0] = uint32_t(uintptr_t(&in)); args[1] = uint32_t(uintptr_t(&a));
+    // the same FPU state before every call: a routine given a huge value can pop an empty stack (fptan pushes
+    // nothing then), which leaves the stack empty but its pointer moved, and that shows in later status words
+    fpu_setcw(CwGame);
     xcall((void*)fn, 0, args, 2, fpret ? &ra : nullptr);
-    uint32_t t1 = fpu_tags();
+    uint32_t tagsOriginal = fpu_tags();
     args[1] = uint32_t(uintptr_t(&b));
+    fpu_setcw(CwGame);
     xcall(f->replacement, 0, args, 2, fpret ? &rb : nullptr);
-    uint32_t t2 = fpu_tags();
-    if (t1 != 0xffff || t2 != 0xffff) { if (!stackbad++) printf("%-6s FPU stack not empty: orig %04x xlat %04x\n", name, t1, t2); fpu_setcw(0x007f); }
+    uint32_t tagsTranslated = fpu_tags();
+    if (tagsOriginal != FpuEmpty || tagsTranslated != FpuEmpty) {
+      if (!stackbad++) printf("%-6s FPU stack not empty: orig %04x xlat %04x\n", name, tagsOriginal, tagsTranslated);
+      fpu_setcw(CwGame);
+    }
     size_t where = 0;
     if (diff(&a, &b, sizeof(a), &where) || diff(&ra, &rb, 8, &where)) {
       if (bad++ < 4) {
@@ -132,9 +148,11 @@ static int runSynth(const char* name, void (*fn)(), bool fpret, int iterations) 
 }
 
 
-static uint32_t g_benchCw = 0x007f;
+static const int BenchCalls = 1000000;
+
+// Time per call of a routine that returns nothing on the FPU stack, as original and as translation
 static void benchSynth(const char* name, void (*fn)(), int calls) {
-  fpu_setcw(g_benchCw);
+  fpu_setcw(CwGame);
   MxoXFunc* f = findFunc(XT_funcs, uint32_t((uint8_t*)fn - synth_begin));
   if (!f) return;
   g_specials = 0;
@@ -144,18 +162,16 @@ static void benchSynth(const char* name, void (*fn)(), int calls) {
   in.w[0] = 5; in.w[1] = 7; in.q = 123456789;
   uint32_t args[2] = { uint32_t(uintptr_t(&in)), uint32_t(uintptr_t(&out)) };
   LARGE_INTEGER q0, q1, q2, fq; QueryPerformanceFrequency(&fq);
-  double dummy;
-  bool fp = fn == t8 || fn == t8h;
   QueryPerformanceCounter(&q0);
-  for (int k = 0; k < calls; k++) xcall((void*)fn, 0, args, 2, fp ? &dummy : nullptr);
+  for (int k = 0; k < calls; k++) xcall((void*)fn, 0, args, 2, nullptr);
   QueryPerformanceCounter(&q1);
-  for (int k = 0; k < calls; k++) xcall(f->replacement, 0, args, 2, fp ? &dummy : nullptr);
+  for (int k = 0; k < calls; k++) xcall(f->replacement, 0, args, 2, nullptr);
   QueryPerformanceCounter(&q2);
   double a = double(q1.QuadPart - q0.QuadPart) * 1e9 / double(fq.QuadPart) / calls;
   double b = double(q2.QuadPart - q1.QuadPart) * 1e9 / double(fq.QuadPart) / calls;
-  fpu_setcw(0x027f);
+  fpu_setcw(Cw53);   // printf rounds the digits of a double with FPU arithmetic, which 24-bit precision spoils
   printf("%-6s x87 %7.1f ns/call   SSE2 %7.1f ns/call   %.1fx\n", name, a, b, a / b);
-  fpu_setcw(0x007f);
+  fpu_setcw(CwGame);
 }
 
 #ifdef WITH_GAME
@@ -167,12 +183,12 @@ int main(int argc, char** argv) {
   int bad = 0;
   setvbuf(stdout, nullptr, _IONBF, 0);
 #ifdef WITH_GAME
-  if (argc > 4 && !strcmp(argv[2], "child")) { g_plain = argc > 5 || (getenv("MXO_PLAIN") && *getenv("MXO_PLAIN")); fpu_setcw(0x007f); return runGameChild(iterations, atoi(argv[3]), atoi(argv[4])); }
+  if (argc > 4 && !strcmp(argv[2], "child")) { g_plain = getenv("MXO_PLAIN") && *getenv("MXO_PLAIN"); fpu_setcw(CwGame); return runGameChild(iterations, atoi(argv[3]), atoi(argv[4])); }
 #endif
   const bool synthOnly = argc > 2 && !strcmp(argv[2], "synth");   // "synth": only the synthetic part
   if (argc > 2 && !synthOnly) goto game;   // any other second argument: skip the synthetic part
-  fpu_setcw(0x007f);   // 24-bit precision, round to nearest, exceptions masked: what Direct3D 9 sets
-  if (!MxoXFixups(synth_begin, 0x62000000, XT_absfix, XT_relfix, XT_code_begin, XT_code_end)) { printf("fixups failed\n"); return 2; }
+  fpu_setcw(CwGame);
+  if (!MxoXFixups(synth_begin, XT_imagebase, XT_absfix, XT_relfix, XT_code_begin, XT_code_end)) { printf("fixups failed\n"); return 2; }
   for (int pass = 0; pass < 3; pass++) {
     g_specials = pass != 0;
     // pass 2: pretend to be another thread, so every call must take the trampoline into the original code
@@ -190,19 +206,22 @@ int main(int argc, char** argv) {
     bad += runSynth("t9", t9, false, iterations);
     bad += runSynth("t10", t10, false, iterations);
     bad += runSynth("t11", t11, false, iterations);
+    bad += runSynth("t12", t12, false, iterations);
+    bad += runSynth("t13", t13, false, iterations);
+    bad += runSynth("t14", t14, false, iterations);
+    bad += runSynth("t15", t15, false, iterations);
+    bad += runSynth("t15b", t15b, false, iterations);
+    bad += runSynth("t16", t16, false, iterations);
   }
   XT_tid = GetCurrentThreadId();
-  for (int m = 0; m < 1; m++) {
-  g_benchCw = m == 0 ? 0x007f : m == 1 ? 0x027f : 0x037f;
-  printf("== speed, FPU control word %04x (%s precision)\n", g_benchCw, m == 0 ? "24-bit" : m == 1 ? "53-bit" : "64-bit");
-  benchSynth("t1", t1, 1000000); benchSynth("t2", t2, 1000000); benchSynth("t3", t3, 1000000); benchSynth("t4", t4, 1000000);
-  benchSynth("t5", t5, 1000000); benchSynth("t6", t6, 1000000); benchSynth("t9", t9, 1000000); benchSynth("t10", t10, 1000000);
-  }
-  fpu_setcw(0x007f);
+  printf("== speed, FPU control word %04x (24-bit precision)\n", CwGame);
+  benchSynth("t1", t1, BenchCalls); benchSynth("t2", t2, BenchCalls); benchSynth("t3", t3, BenchCalls); benchSynth("t4", t4, BenchCalls);
+  benchSynth("t5", t5, BenchCalls); benchSynth("t6", t6, BenchCalls); benchSynth("t9", t9, BenchCalls); benchSynth("t10", t10, BenchCalls);
+  fpu_setcw(CwGame);
   if (synthOnly) { printf("TOTAL problems: %d\n", bad); return bad ? 1 : 0; }
 game:
 #ifdef WITH_GAME
-  fpu_setcw(0x007f);
+  fpu_setcw(CwGame);
   bad += runGame(iterations);
 #endif
   printf("TOTAL problems: %d\n", bad);

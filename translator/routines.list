@@ -1,5 +1,11 @@
-# Routines of client.dll to translate: start limit weight size hash (hex; weight = profile samples).
-# The hash is FNV-1a over the routine with address fields left out; it carries no game code.
+# Routines of client.dll to translate, one per line:   start limit weight size hash
+# start and limit are RVAs in hex: where the routine begins and the furthest it may reach, which is
+# the start of the next routine. weight is its number of profile samples, in decimal. size and hash,
+# in hex, are the length of its code and FNV-1a over that code with the address fields left out.
+# With them a routine is translated only if the image holds exactly the code the list was made from.
+# A line without size and hash is translated unchecked, and --write-list fills them in.
+# The line "ftol rva size hash" names the compiler's float-to-integer helper, checked the same way.
+# The list carries no game code.
 ftol 6a92d8 75 401dfa8ffc792418
 4d1f80 4d23b0 100332 2f1 1ff95e8f179a2337
 2fbf50 2fc0c0 100189 164 582abc4aafa4aca0
@@ -178,7 +184,6 @@ deb0 def0 16 37 e14e9e7a2a424857
 e030 e080 13 4a cda2200cefd8cf7d
 610970 610cf0 13 315 5f0a347a3445e58e
 471660 471850 13 1ef ecd881384ac46220
-46510 46890 13 d6 4b661a4a028dab20
 2e6980 2e6ac0 12 137 947f5812945c00d3
 4685b0 468650 12 64 457b8e8fcc32a4f4
 1736f0 174a00 12 11d1 384b521c8015a822
@@ -190,7 +195,6 @@ e030 e080 13 4a cda2200cefd8cf7d
 32e810 32f070 12 855 15302dd2d550286c
 33ca40 33ce60 12 29a 392042adc690bb8f
 4987b0 4993d0 12 42a ee2cb7992ef9148c
-45e10 46160 12 22a b89ece1419908b6b
 2ffb00 2ffce0 11 ad df31812ac0e9621e
 5c0b70 5c0df0 11 277 1446f6edafcc8ca2
 1b3b20 1b3d30 11 5a 7621e3e9789fd447

@@ -1,204 +1,247 @@
 #!/usr/bin/env python3
 """profile2.py <samples.bin> <client.map> <d3d9.dll with symbols> <wine i386 dll dir> [skip-records]
 
-Reads the all-thread samples written by the DLL's profiler (sample.flag) and prints, per thread, where the
-time goes: game code, translated routines, graphics layer, Vulkan calls, and waits with their callers."""
+Reads the samples written by the DLL's profiler (sample.flag or sample-light.flag) and prints, per thread,
+where the time goes: game code, translated routines, graphics layer, Vulkan calls, and waits with their
+callers. skip-records leaves out that many ten-second records from the start of the file.
+
+Writes <samples.bin>.hot next to the samples: the game routines containing x87 code that the presenting
+thread was sampled in, as "start limit samples" lines that xlat.py reads as a routine list. Only that
+thread counts, because the translations run on no other.
+
+Environment:
+  THREADS  how many threads to report, busiest first (default 6)
+  TOP      how many game routines to list per thread (default 12)
+"""
 import bisect
 import collections
 import os
 import pickle
 import struct
-import subprocess
 import sys
 
-data = open(sys.argv[1], 'rb').read()
-cmap = pickle.load(open(sys.argv[2], 'rb'))
-winedir = sys.argv[4]
-skip = int(sys.argv[5]) if len(sys.argv) > 5 else 0
-entries, x87 = cmap['entries'], cmap['x87']
-tlo, thi = cmap['text']
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import mingw
+from peimage import Fail, Image
 
+SMP4 = 0x34504d53                   # the magic number of a record, "SMP4"
+HEADER_BYTES = 40
+NAME_BYTES = 32                     # a thread id and its name
+SAMPLE_WORDS = 9                    # tid, eip, three return addresses in the DLL, three in the game, one in winevulkan
 
-def exports(path):
-    b = open(path, 'rb').read()
-    pe = struct.unpack_from('<I', b, 0x3c)[0]
-    nsec = struct.unpack_from('<H', b, pe + 6)[0]
-    opt = struct.unpack_from('<H', b, pe + 20)[0]
-    size = struct.unpack_from('<I', b, pe + 24 + 56)[0]
-    secs = [struct.unpack_from('<IIII', b, pe + 24 + opt + 40 * i + 8) for i in range(nsec)]
-
-    def off(rva):
-        for vs, va, rs, raw in secs:
-            if va <= rva < va + max(vs, rs):
-                return raw + rva - va
-    erva = struct.unpack_from('<I', b, pe + 24 + 96)[0]
-    if not erva:
-        return [], size
-    e = off(erva)
-    nfun, nnames, afun, anames, aord = struct.unpack_from('<IIIII', b, e + 20)
-    funcs = struct.unpack_from('<%dI' % nfun, b, off(afun))
-    names = struct.unpack_from('<%dI' % nnames, b, off(anames))
-    ords = struct.unpack_from('<%dH' % nnames, b, off(aord))
-    tab = sorted((funcs[ords[i]], b[off(names[i]):b.index(b'\0', off(names[i]))].decode()) for i in range(nnames))
-    return tab, size
-
-
-def nearest(tab, addrs, rva):
-    i = bisect.bisect_right(addrs, rva) - 1
-    return tab[i][1] if i >= 0 else '?'
-
-
-# symbols of the profiled DLL
-syms = []
-for line in subprocess.run(['i686-w64-mingw32-nm', '-n', '-C', sys.argv[3]], capture_output=True, text=True).stdout.splitlines():
-    p = line.split(None, 2)
-    if len(p) == 3 and p[1] in 'tT':
-        syms.append((int(p[0], 16), p[2]))
-syms.sort()
-symaddr = [a for a, n in syms]
-hdr = subprocess.run(['i686-w64-mingw32-objdump', '-p', sys.argv[3]], capture_output=True, text=True).stdout
-dbase = int([row for row in hdr.splitlines() if 'ImageBase' in row][0].split()[1], 16)
-
-nt_tab, nt_size = exports(os.path.join(winedir, 'ntdll.dll'))
-nt_addr = [a for a, n in nt_tab]
-vk_tab, vk_size = exports(os.path.join(winedir, 'winevulkan.dll'))
-vk_addr = [a for a, n in vk_tab]
-
-
-def dsym(addr, base):
-    n = syms[bisect.bisect_right(symaddr, addr - base + dbase) - 1][1]
-    n = n.replace('dxvk::', '')
-    return n[:n.index('(')] if '(' in n else n
-
+# Wine loads its system DLLs into the top of the address space
+SYSTEM_DLL_TOP_BYTES = (0x7b, 0x7c, 0x7d, 0x7e, 0x7f)
+NT_STUB_RETURN = 0xc                # a thread waiting in the kernel sits this far into its Nt stub
+DLL_ALIGNMENT = 0x10000             # modules are loaded at multiples of 64 KB
+BASE_GUESSES = 5                    # the most common system addresses are tried as "inside a wait"
 
 WAITS = ('WaitForAlertByThreadId', 'WaitForSingleObject', 'WaitForMultipleObjects', 'DelayExecution',
          'WaitForKeyedEvent', 'RemoveIoCompletion', 'NotifyChangeKey', 'SignalAndWaitForSingleObject', 'YieldExecution')
 
-threads = collections.defaultdict(collections.Counter)      # tid -> category -> samples
-detail = collections.defaultdict(lambda: collections.defaultdict(collections.Counter))
-names = {}
-present = 0
-total = 0
-ntbase = None
-recs = 0
-o = 0
-allsamples = []
-while o + 40 <= len(data):
-    magic, count, cbase, sbase, ssize, vbase, vsize, ptid, nnames, _ = struct.unpack_from('<10I', data, o)
-    o += 40
-    if magic not in (0x33504d53, 0x34504d53):
-        raise SystemExit('not an SMP3/SMP4 file')
-    nwords = 7 if magic == 0x33504d53 else 9
-    for _ in range(nnames):
-        tid = struct.unpack_from('<I', data, o)[0]
-        names[tid] = data[o + 4:o + 32].split(b'\0')[0].decode()
-        o += 32
-    recs += 1
-    present = ptid or present
-    for _ in range(count):
-        s = struct.unpack_from('<%dI' % nwords, data, o)
-        o += 4 * nwords
-        if nwords == 7:   # SMP3: one game return address, padded to the SMP4 layout
-            s = s[:5] + (s[5], 0, 0, s[6])
-        if recs > skip:
-            allsamples.append((s, cbase, sbase, ssize, vbase, vsize))
+# Symbols of the DLL that are game math and not the graphics layer: the hand-written replacements (MxoMatMulSSE,
+# MxoQuatToMatSSE, MxoSqrtSSE) and the translated routines with their local labels. scripts/build.sh passes
+# the prefix MxoX to xlat.py.
+GAME_MATH_SYMBOLS = ('Mxo', 'LMxoX')
 
-# ntdll base: most waits sit at <Nt stub> + 0xc
-cnt = collections.Counter(s[0][1] for s in allsamples if s[0][1] >> 24 in (0x7b, 0x7c, 0x7d, 0x7e, 0x7f))
-for addr, _ in cnt.most_common(5):
-    c = [(addr - 0xc - a) for a, n in nt_tab if n[:2] in ('Nt', 'Zw') and (addr - 0xc - a) & 0xffff == 0]
-    if c:
-        ntbase = c[0]
-        break
+MIN_BUSY_SHARE = 0.02               # a thread that is busy for less of the time is left out
+UNKNOWN = '?'
 
-for s, cbase, sbase, ssize, vbase, _vsize in allsamples:
-    tid, eip, r1, r2, r3, rc1, rc2, rc3, rvk = s
-    rclient = rc1
-    rself = r1
-    total += 1
-    t = threads[tid]
-    if cbase and cbase <= eip < cbase + 0xbb4000:
-        r = eip - cbase
-        t['game code (client.dll)'] += 1
-        if tlo <= r < thi:
-            e = entries[bisect.bisect_right(entries, r) - 1]
-            i = bisect.bisect_right(entries, e)
-            nxt = entries[i] if i < len(entries) else thi
-            nx = bisect.bisect_left(x87, nxt) - bisect.bisect_left(x87, e)
-            detail[tid]['game'][(e, nxt, nx)] += 1
-    elif sbase <= eip < sbase + ssize:
-        n = dsym(eip, sbase)
-        # translated routines (MxoX_..., their local labels) and the hand-written replacements (MxoMatMulSSE,
-        # MxoQuatToMatSSE, MxoSqrtSSE): all of it is game math, not the graphics layer
-        if n.lstrip('_').startswith(('Mxo', 'LMxoX')):
-            t['translated routines'] += 1
-            detail[tid]['xl'][n] += 1
+
+def read_samples(data, skip):
+    """(samples, thread names, presenting thread id, record count) of a samples file.
+
+    A sample is (the nine words of the DLL's SampleRecord, client base, DLL base, DLL size, winevulkan base).
+    The profiler appends a record every ten seconds, so a file can end in the middle of one: that record is
+    left out and said so."""
+    samples, names, present, records = [], {}, 0, 0
+    position = 0
+    while position + HEADER_BYTES <= len(data):
+        magic, count, client_base, dll_base, dll_size, vulkan_base, _vulkan_size, present_tid, name_count, _ = \
+            struct.unpack_from('<10I', data, position)
+        if magic != SMP4:
+            raise Fail('not a samples file of this profiler: no SMP4 record at offset %d' % position)
+        names_at = position + HEADER_BYTES
+        samples_at = names_at + NAME_BYTES * name_count
+        end = samples_at + 4 * SAMPLE_WORDS * count
+        if end > len(data):
+            break
+        for k in range(name_count):
+            tid = struct.unpack_from('<I', data, names_at + NAME_BYTES * k)[0]
+            name = data[names_at + NAME_BYTES * k + 4:names_at + NAME_BYTES * (k + 1)]
+            names[tid] = name.split(b'\0')[0].decode(errors='replace')
+        records += 1
+        present = present_tid or present
+        if records > skip:
+            for k in range(count):
+                words = struct.unpack_from('<%dI' % SAMPLE_WORDS, data, samples_at + 4 * SAMPLE_WORDS * k)
+                samples.append((words, client_base, dll_base, dll_size, vulkan_base))
+        position = end
+    if position != len(data):
+        print('the file ends inside a record: the last %d bytes are left out' % (len(data) - position), file=sys.stderr)
+    return samples, names, present, records
+
+
+def text_symbols(path):
+    """Sorted (address, name) of the code symbols of a DLL."""
+    symbols = []
+    for line in mingw.run([mingw.NM, '-n', '-C', path]).splitlines():
+        fields = line.split(None, 2)
+        if len(fields) == 3 and fields[1] in 'tT':
+            symbols.append((int(fields[0], 16), fields[2]))
+    if not symbols:
+        raise Fail('%s has no symbols: the profile needs the DLL as built, before it is stripped' % path)
+    symbols.sort()
+    return symbols
+
+
+def named(table, addresses, address):
+    """The name of the last entry of a sorted (address, name) table at or below address."""
+    k = bisect.bisect_right(addresses, address) - 1
+    return table[k][1] if k >= 0 else UNKNOWN
+
+
+def ntdll_base(samples, nt_exports):
+    """Where ntdll.dll is loaded, which the samples do not say: most waits sit a fixed distance into an Nt stub."""
+    counts = collections.Counter(words[1] for words, *_ in samples if words[1] >> 24 in SYSTEM_DLL_TOP_BYTES)
+    for address, _count in counts.most_common(BASE_GUESSES):
+        bases = [address - NT_STUB_RETURN - rva for rva, name in nt_exports
+                 if name[:2] in ('Nt', 'Zw') and (address - NT_STUB_RETURN - rva) % DLL_ALIGNMENT == 0]
+        if bases:
+            return bases[0]
+    return None
+
+
+def main(args):
+    if len(args) not in (4, 5):
+        raise SystemExit(__doc__)
+    samples_path, map_path, dll_path, wine_folder = args[:4]
+    try:
+        skip = int(args[4]) if len(args) == 5 else 0
+    except ValueError:
+        raise SystemExit(__doc__) from None
+    with open(samples_path, 'rb') as file:
+        samples, names, present, records = read_samples(file.read(), skip)
+    if not samples:
+        raise Fail('no samples in %s (%d records, %d skipped)' % (samples_path, records, skip))
+    with open(map_path, 'rb') as file:
+        client_map = pickle.load(file)
+    if 'size' not in client_map:
+        raise Fail('%s is from an older discover.py: make it again' % map_path)
+    entries, x87, client_size = client_map['entries'], client_map['x87'], client_map['size']
+    text_start, text_end = client_map['text']
+
+    symbols = text_symbols(dll_path)
+    symbol_addresses = [address for address, _name in symbols]
+    dll_preferred_base = Image(dll_path).base
+    ntdll = Image(os.path.join(wine_folder, 'ntdll.dll'))
+    nt_exports = ntdll.exports()[1]
+    nt_addresses = [rva for rva, _name in nt_exports]
+    vulkan_exports = Image(os.path.join(wine_folder, 'winevulkan.dll')).exports()[1]
+    vulkan_addresses = [rva for rva, _name in vulkan_exports]
+    nt_base = ntdll_base(samples, nt_exports)
+
+    def dll_symbol(address, base):
+        name = named(symbols, symbol_addresses, address - base + dll_preferred_base)
+        name = name.replace('dxvk::', '')
+        return name[:name.index('(')] if '(' in name else name
+
+    def routine_start(rva):
+        """The entry at or below an address of the game, None if there is none."""
+        k = bisect.bisect_right(entries, rva) - 1
+        return entries[k] if k >= 0 else None
+
+    threads = collections.defaultdict(collections.Counter)      # tid -> category -> samples
+    detail = collections.defaultdict(lambda: collections.defaultdict(collections.Counter))
+    for words, client_base, dll_base, dll_size, vulkan_base in samples:
+        tid, eip, dll_return1, dll_return2, dll_return3, game_return1, game_return2, game_return3, vulkan_return = words
+        counts = threads[tid]
+        if client_base and client_base <= eip < client_base + client_size:
+            rva = eip - client_base
+            counts['game code (client.dll)'] += 1
+            start = routine_start(rva) if text_start <= rva < text_end else None
+            if start is not None:
+                k = bisect.bisect_right(entries, start)
+                limit = entries[k] if k < len(entries) else text_end
+                x87_count = bisect.bisect_left(x87, limit) - bisect.bisect_left(x87, start)
+                detail[tid]['game'][(start, limit, x87_count)] += 1
+        elif dll_base <= eip < dll_base + dll_size:
+            name = dll_symbol(eip, dll_base)
+            if name.lstrip('_').startswith(GAME_MATH_SYMBOLS):
+                counts['translated routines'] += 1
+                detail[tid]['xl'][name] += 1
+            else:
+                counts['graphics layer (d3d9.dll)'] += 1
+                detail[tid]['d3d9'][name] += 1
         else:
-            t['graphics layer (d3d9.dll)'] += 1
-            detail[tid]['d3d9'][n] += 1
-    else:
-        nm = None
-        if ntbase is not None and ntbase <= eip < ntbase + nt_size:
-            nm = nearest(nt_tab, nt_addr, eip - ntbase)
-        caller = ' < '.join(dsym(r, sbase)[:44] for r in (r1, r2, r3) if r) or '-'
-        if rclient and cbase:
-            caller += '  [game ' + ' < '.join('%x' % (entries[bisect.bisect_right(entries, r - cbase) - 1])
-                                            for r in (rc1, rc2, rc3) if r) + ']'
-        if nm and any(w in nm for w in WAITS):
-            t['waiting'] += 1
-            detail[tid]['wait'][(nm, caller)] += 1
-        elif rvk and vbase:
-            t['inside Vulkan / Metal'] += 1
-            detail[tid]['vk'][(nearest(vk_tab, vk_addr, rvk - vbase), caller)] += 1
-        else:
-            t['other system code'] += 1
-            detail[tid]['other'][(nm or '%08x' % (eip & 0xfffff000), caller)] += 1
+            system_name = None
+            if nt_base is not None and nt_base <= eip < nt_base + ntdll.size:
+                system_name = named(nt_exports, nt_addresses, eip - nt_base)
+            caller = ' < '.join(dll_symbol(address, dll_base)[:44] for address in (dll_return1, dll_return2, dll_return3) if address) or '-'
+            if game_return1 and client_base:
+                starts = [routine_start(address - client_base) for address in (game_return1, game_return2, game_return3) if address]
+                caller += '  [game ' + ' < '.join(UNKNOWN if start is None else '%x' % start for start in starts) + ']'
+            if system_name and any(wait in system_name for wait in WAITS):
+                counts['waiting'] += 1
+                detail[tid]['wait'][(system_name, caller)] += 1
+            elif vulkan_return and vulkan_base:
+                counts['inside Vulkan / Metal'] += 1
+                detail[tid]['vk'][(named(vulkan_exports, vulkan_addresses, vulkan_return - vulkan_base), caller)] += 1
+            else:
+                counts['other system code'] += 1
+                detail[tid]['other'][(system_name or '%08x' % (eip & 0xfffff000), caller)] += 1
 
-sweeps = max(sum(t.values()) for t in threads.values())
-print('records %d (skipped %d), %d sweeps over %d threads' % (recs, skip, sweeps, len(threads)))
-order = sorted(threads, key=lambda tid: -(sum(threads[tid].values()) - threads[tid]['waiting']))
-for tid in order[:int(os.environ.get('THREADS', '6'))]:
-    t = threads[tid]
-    n = sum(t.values())
-    busy = n - t['waiting']
-    if busy < n * 0.02:
-        continue
-    label = names.get(tid, 'game main thread' if tid == present else 'thread')
-    print('\n== %s (tid %d)%s: busy %.0f%% of the time' % (label, tid, ' [calls Present]' if tid == present else '', 100.0 * busy / n))
-    for k, v in t.most_common():
-        print('   %5.1f%%  %s' % (100.0 * v / n, k))
-    d = detail[tid]
-    if d['wait']:
-        print('   waits by caller:')
-        for (nm, caller), v in d['wait'].most_common(6):
-            print('      %5.1f%%  %s  <-  %s' % (100.0 * v / n, nm, caller[:150]))
-    if d['vk']:
-        print('   Vulkan calls:')
-        for (nm, caller), v in d['vk'].most_common(10):
-            print('      %5.1f%%  %s  <-  %s' % (100.0 * v / n, nm, caller[:110]))
-    if d['d3d9']:
-        print('   graphics layer code:')
-        for nm, v in d['d3d9'].most_common(10):
-            print('      %5.1f%%  %s' % (100.0 * v / n, nm[:90]))
-    if d['other']:
-        print('   other:')
-        for (nm, caller), v in d['other'].most_common(5):
-            print('      %5.1f%%  %s  <-  %s' % (100.0 * v / n, nm, caller[:60]))
-    if d['game']:
-        g = d['game']
-        gx = sum(v for (e, nxt, nx), v in g.items() if nx)
-        print('   game code: %.1f%% of this thread in routines containing x87 code, top routines:' % (100.0 * gx / n))
-        for (e, nxt, nx), v in g.most_common(int(os.environ.get('TOP', '12'))):
-            print('      %5.1f%%  %06x-%06x  x87 %d' % (100.0 * v / n, e, nxt, nx))
-    if d['xl']:
-        print('   translated: ' + ', '.join('%s %.1f%%' % (k, 100.0 * v / n) for k, v in d['xl'].most_common(6)))
+    sweeps = max(sum(counts.values()) for counts in threads.values())
+    print('records %d (skipped %d), %d sweeps over %d threads' % (records, skip, sweeps, len(threads)))
+    busiest = sorted(threads, key=lambda tid: -(sum(threads[tid].values()) - threads[tid]['waiting']))
+    for tid in busiest[:int(os.environ.get('THREADS', '6'))]:
+        counts = threads[tid]
+        total = sum(counts.values())
+        busy = total - counts['waiting']
+        if busy < total * MIN_BUSY_SHARE:
+            continue
+        label = names.get(tid, 'game main thread' if tid == present else 'thread')
+        print('\n== %s (tid %d)%s: busy %.0f%% of the time'
+              % (label, tid, ' [calls Present]' if tid == present else '', 100.0 * busy / total))
+        for category, count in counts.most_common():
+            print('   %5.1f%%  %s' % (100.0 * count / total, category))
+        found = detail[tid]
+        if found['wait']:
+            print('   waits by caller:')
+            for (name, caller), count in found['wait'].most_common(6):
+                print('      %5.1f%%  %s  <-  %s' % (100.0 * count / total, name, caller[:150]))
+        if found['vk']:
+            print('   Vulkan calls:')
+            for (name, caller), count in found['vk'].most_common(10):
+                print('      %5.1f%%  %s  <-  %s' % (100.0 * count / total, name, caller[:110]))
+        if found['d3d9']:
+            print('   graphics layer code:')
+            for name, count in found['d3d9'].most_common(10):
+                print('      %5.1f%%  %s' % (100.0 * count / total, name[:90]))
+        if found['other']:
+            print('   other:')
+            for (name, caller), count in found['other'].most_common(5):
+                print('      %5.1f%%  %s  <-  %s' % (100.0 * count / total, name, caller[:60]))
+        if found['game']:
+            in_x87_routines = sum(count for (_start, _limit, x87_count), count in found['game'].items() if x87_count)
+            print('   game code: %.1f%% of this thread in routines containing x87 code, top routines:' % (100.0 * in_x87_routines / total))
+            for (start, limit, x87_count), count in found['game'].most_common(int(os.environ.get('TOP', '12'))):
+                print('      %5.1f%%  %06x-%06x  x87 %d' % (100.0 * count / total, start, limit, x87_count))
+        if found['xl']:
+            print('   translated: ' + ', '.join('%s %.1f%%' % (name, 100.0 * count / total) for name, count in found['xl'].most_common(6)))
 
-# routines worth translating: game-thread samples in routines with x87 code
-with open(sys.argv[1] + '.hot', 'w') as f:
-    agg = collections.Counter()
-    for tid in threads:
-        for (e, nxt, nx), v in detail[tid]['game'].items():
-            if nx:
-                agg[(e, nxt)] += v
-    for (e, nxt), v in agg.most_common():
-        f.write('%x %x %d\n' % (e, nxt, v))
+    # routines worth translating: what the presenting thread ran that contains x87 code. The translations run
+    # on that thread only, so time other threads spend in a routine is no reason to translate it
+    hot = collections.Counter()
+    for (start, limit, x87_count), count in detail[present]['game'].items():
+        if x87_count:
+            hot[(start, limit)] += count
+    with open(samples_path + '.hot', 'w') as file:
+        for (start, limit), count in hot.most_common():
+            file.write('%x %x %d\n' % (start, limit, count))
+
+
+if __name__ == '__main__':
+    try:
+        main(sys.argv[1:])
+    except (Fail, OSError) as failure:
+        raise SystemExit('profile2.py: %s' % failure) from failure

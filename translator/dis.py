@@ -3,45 +3,42 @@
 
 Disassembles address ranges of a PE file. The ranges are RVAs in hex."""
 import os
-import struct
-import subprocess
 import sys
-import tempfile
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import mingw
+from peimage import Fail, Image
 
 
-def load(path):
-    data = open(path, 'rb').read()
-    pe = struct.unpack_from('<I', data, 0x3c)[0]
-    section_count = struct.unpack_from('<H', data, pe + 6)[0]
-    optional_size = struct.unpack_from('<H', data, pe + 20)[0]
-    base = struct.unpack_from('<I', data, pe + 24 + 28)[0]
-    sections = [struct.unpack_from('<IIII', data, pe + 24 + optional_size + 40 * i + 8) for i in range(section_count)]
-    return data, sections, base
+def code_of(img, start, end):
+    """The bytes of [start, end), which have to lie in one section of the file."""
+    if end <= start:
+        raise Fail('the range %x-%x is empty' % (start, end))
+    code = img.bytes(start, end)
+    if len(code) != end - start or img.offset_of(end - 1) != img.offset_of(start) + end - 1 - start:
+        raise Fail('the range %x-%x does not lie in one section of the file' % (start, end))
+    return code
 
 
-def offset_of(sections, rva):
-    for virtual_size, virtual_address, raw_size, raw in sections:
-        if virtual_address <= rva < virtual_address + max(virtual_size, raw_size):
-            return raw + rva - virtual_address
-    return None
-
-
-def disassemble(data, sections, base, start, end):
-    code = data[offset_of(sections, start):offset_of(sections, end)]
-    with tempfile.NamedTemporaryFile(suffix='.bin', delete=False) as file:
-        file.write(code)
-        name = file.name
-    command = ['i686-w64-mingw32-objdump', '-D', '-b', 'binary', '-mi386', '-Mintel', '--adjust-vma=0x%x' % (base + start), name]
-    out = subprocess.run(command, capture_output=True, text=True).stdout
-    os.unlink(name)
-    return [line for line in out.splitlines() if ':\t' in line]
+def main(args):
+    try:
+        ranges = [tuple(int(part, 16) for part in arg.split('-')) for arg in args[1:]]
+    except ValueError:
+        ranges = []
+    if not ranges or any(len(pair) != 2 for pair in ranges):
+        raise SystemExit(__doc__)
+    img = Image(args[0])
+    print('image base %x' % img.base)
+    for start, end in ranges:
+        code = code_of(img, start, end)
+        print('==== %x-%x' % (start, end))
+        for line in mingw.disassembly(code, img.base + start, wide=False):
+            if ':\t' in line:
+                print(line.rstrip('\n'))
 
 
 if __name__ == '__main__':
-    data, sections, base = load(sys.argv[1])
-    print('image base %x' % base)
-    for arg in sys.argv[2:]:
-        start, end = [int(part, 16) for part in arg.split('-')]
-        print('==== %x-%x' % (start, end))
-        for line in disassemble(data, sections, base, start, end):
-            print(line)
+    try:
+        main(sys.argv[1:])
+    except (Fail, OSError) as failure:
+        raise SystemExit('dis.py: %s' % failure) from failure
