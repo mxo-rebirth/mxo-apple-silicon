@@ -1,27 +1,52 @@
 # Building, installing and removing
 
-Everything here was done on macOS with CrossOver 26.3 and an Apple Silicon Mac. The steps
+Everything here was done on macOS 27 with CrossOver 26.3 and an Apple Silicon Mac. The steps
 install a custom `d3d9.dll` into one CrossOver bottle and enable it for the game executable
 only. No game file is changed.
 
-This assumes the game already starts in CrossOver. If it does not yet, see
-[crossover.md](crossover.md) first.
+The sections after the quick setup assume the game already starts in CrossOver. If it does
+not yet, see [crossover.md](crossover.md) first.
 
 ## Quick setup
 
-`scripts/setup.sh` does everything below, in order, asking before each step:
+`scripts/setup.sh` checks the Mac (Apple Silicon, macOS 26 or newer, CrossOver), asks its
+questions (which bottle, which servers, a frame-rate limit, add-ons, maximum detail, the logo
+movies) and then does everything below, in order:
 
-1. **bottle**: what the game needs to start ([crossover.md](crossover.md), section 2): the game's own shader
+1. **game**, when the bottle has no game ([crossover.md](crossover.md), section 1): creates the
+   bottle if there is none; puts the client in `C:\Games\MxO`, downloaded from the link on the
+   MxOEmu project's page or taken from a folder, an archive (zip, 7z, tar) or a direct link;
+   downloads the Rejacked launcher and the Revived installer from the projects' download pages,
+   checks each against the SHA-256 printed on its page and starts it for you to click through;
+   before Revived's, does the same with Microsoft's .NET 10 Desktop Runtime, checked against
+   Microsoft's release list; writes the game folder into the Rejacked launcher's settings
+   (`install_dir` under `HKCU\Software\Rejacked\Rejacked Launcher\game`). Not confirmed:
+   whether the launcher picks that folder up;
+2. **bottle**: what the game needs to start ([crossover.md](crossover.md), section 2): the game's own shader
    compiler, Microsoft's DirectMusic and DirectSound from the February 2010 DirectX package and
    the sound bank from the April 2006 one (both downloaded from Microsoft via the Internet
    Archive and checked against the checksums `winetricks` uses), and the large address space;
-2. **build**: `scripts/build.sh` with the bottle's own `client.dll`;
-3. **install**: the DLL for every game executable it found (`matrix.exe`, and `mxorev.exe` if
-   Revived is installed), with the bottle settings it needs;
-4. **music**: Revived only, switches its starter's music guard back on.
+3. **build**: `scripts/build.sh` with the bottle's own `client.dll`;
+4. **install**: the DLL for every game executable it found (`matrix.exe`, and `mxorev.exe` if
+   Revived is installed), with the bottle settings it needs; on request also
+   `DXVK_MXO_RESPECT_ADDONS=0`, which replaces the routines that add-on files next to the game
+   point into;
+5. **detail**, on request: writes the values of the highest Video Options settings into each
+   game's `options.cfg`, with `Client_RenderThrottle_Override = 1` (the draw distance stops
+   shrinking at low frame rates) and the main display's size as `ScreenWidth` and `ScreenHeight`
+   (in points, or in pixels when the bottle has `RetinaMode` on), and `d3d9.samplerAnisotropy = 16`
+   into `C:\Games\dxvk\dxvk.conf`, which `DXVK_CONFIG_FILE` then names;
+6. **intro**, on request: `EnableSplash = 0` in each game's `useropts.cfg`;
+7. **icons**, when CrossOver's list of the bottle's shortcuts (`cxmenu.conf`) has none for the
+   Rejacked launcher: `cxmenu --sync`, and if it is still missing, a shortcut made with
+   CrossOver's `cxmklnk`;
+8. **music**: Revived only, sets its starter's music guard to `music = on` and the music setting
+   in its `options.cfg` and `useropts.cfg` back to 1;
+9. **video**: Revived only, sets `BackgroundVideo` to `false` in its `launcher-settings.json`.
 
 ```sh
-scripts/setup.sh                          # asks which bottle and before each step
+scripts/setup.sh                          # everything; asks its questions first
+scripts/setup.sh --bottle MatrixOnline game   # only the launchers and the game; makes the bottle if needed
 scripts/setup.sh --bottle MatrixOnline install
 scripts/setup.sh --bottle MatrixOnline uninstall
 scripts/setup.sh --exe otherclient.exe    # another project's executable name

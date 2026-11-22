@@ -6,7 +6,8 @@ the next step, in [building.md](building.md).
 
 Out of the box the game does not work in CrossOver: you get an error box about pixel shaders,
 then a black screen, then a "Music System Failed to Initialize" error. Each has a specific fix,
-listed below. After step 1, `scripts/setup.sh` can do the rest for you ([building.md](building.md)).
+listed below. `scripts/setup.sh` can do all of it for you ([building.md](building.md)); what
+follows is the same by hand.
 
 Paths used here:
 
@@ -21,9 +22,9 @@ Paths used here:
 2. Download the launcher from <https://mxo-rejacked.com/download> and install it into that
    bottle (in CrossOver, choose to install an unlisted application, then pick the installer
    file and the bottle).
-3. Get the game client, version 7.6005, the way the Rejacked download page describes, and
-   unpack it to `C:\Games\MxO`, which on the Mac is `$BOTTLE/drive_c/Games/MxO`. It is about
-   6 GB unpacked.
+3. Rejacked does not hand out the game. Put the client, version 7.6005, in `C:\Games\MxO`,
+   which on the Mac is `$BOTTLE/drive_c/Games/MxO`. It is about 6 GB unpacked. The MxOEmu
+   project offers it as a 1.3 GB archive at <https://mxoemu.info>.
 4. Create an account on the Rejacked site.
 
 Do not start the game yet.
@@ -119,8 +120,8 @@ endings.
   Keep the launcher set to windowed (`Windowed = 1` in its block) and do not switch to
   fullscreen in the game's video options. With the DLL from this repository installed,
   fullscreen works.
-- **Skip the logo movies.** They show black. Add this line to `useropts.cfg`, above the
-  launcher's block:
+- **Skip the logo movies.** They show black. The setup's `intro` step adds this line to
+  `useropts.cfg`; by hand, add it above the launcher's block:
 
   ```
   EnableSplash = 0
@@ -148,8 +149,11 @@ build and install the DLL that fixes that, and [how-it-works.md](how-it-works.md
 
 ## MxO Revived
 
-Revived was installed into the same bottle. Its launcher needs the .NET 10 Desktop Runtime
-(x64), installed in the bottle with Microsoft's installer:
+Revived was installed into the same bottle. Its download page,
+<https://mxorevived.com/download.html>, has two installers: `MxORevived-Installer.exe` downloads
+the game (1.3 GB) into `C:\Games\MxO Revived`, and `MxORevived-Setup.exe` makes that folder from
+a game that is already installed. Its launcher needs the .NET 10 Desktop Runtime (x64),
+installed in the bottle with Microsoft's installer:
 
 ```sh
 "$WINE" --bottle MatrixOnline -- windowsdesktop-runtime-10.0.x-win-x64.exe /install /quiet /norestart
@@ -167,6 +171,10 @@ Revived's starter also has a music guard: if its own check of the music system f
 when the check runs on Wine's DirectSound), it switches the game's music off and writes
 `music = off` into `MxORevived-audio.txt` in the Revived folder. Set that line to `music = on`,
 and `MusicSystemEnable = 1` in Revived's own `options.cfg`.
+
+The launcher plays a video behind its window, which kept more than one processor core busy on
+the test machine. With the launcher closed, `"BackgroundVideo": false` in
+`launcher-settings.json` in the Revived folder switches it off.
 
 Without the line above, Wine's DirectSound is used and Revived shows the "Music System Failed
 to Initialize" box. Do not try Wine's own DirectMusic instead: Revived froze at start with it.
