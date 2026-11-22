@@ -97,7 +97,7 @@ scripts/check.sh    # shell syntax under bash 3.2, shellcheck, ruff, the helpers
 - **An apostrophe inside `"${name:+text}"` ends a bash 3.2 script with a parse error.** Build the text in a statement of its own.
 - **A variable directly before a non-ASCII character needs braces** in bash 3.2: `${RULE}─`
 - **`tput cols` inside `$( )` asks the pipe.** `stty size < /dev/tty` asks the terminal.
-- **CrossOver's bottle view follows `cxmenu.conf`.** The plist under `desktopdata` can be out of date.
+- **A launcher in `cxmenu.conf` can still be without its icon in CrossOver.** After an installer has run, `cxmenu --sync` puts it there. The plist under `desktopdata` can be out of date.
 - **A bottle made with `cxbottle` has MSync off and shows no icons** unless the three `--param` values of `create_bottle` are passed
 - **Add-on files next to the game cost speed.** The DLL leaves alone every routine an `mx*.dll` points into, unless `DXVK_MXO_RESPECT_ADDONS=0`.
 - **The profiler changes what it measures.** Frame rates are judged with it off.

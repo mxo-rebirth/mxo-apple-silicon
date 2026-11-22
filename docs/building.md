@@ -45,9 +45,10 @@ stops before its questions while a game is running.
    (in points, or in pixels when the bottle has `RetinaMode` on), and `d3d9.samplerAnisotropy = 16`
    into `C:\Games\dxvk\dxvk.conf`, which `DXVK_CONFIG_FILE` then names.
 6. **intro**, on request: `EnableSplash = 0` in each game's `useropts.cfg`.
-7. **icons**, when CrossOver's list of the bottle's shortcuts (`cxmenu.conf`) has none for the
-   Rejacked launcher: `cxmenu --sync`, and if it is still missing, a shortcut made with
-   CrossOver's `cxmklnk`. It runs by itself in a whole run and after the game step.
+7. **icons**, when the Rejacked launcher is in the bottle: `cxmenu --sync`, which has CrossOver
+   read the bottle's shortcuts again. If its list of them (`cxmenu.conf`) then has none for the
+   launcher, a shortcut is made with CrossOver's `cxmklnk`. It runs by itself in a whole run
+   and after the game step.
 8. **music**: Revived only, sets its starter's music guard to `music = on` and the music setting
    in its `options.cfg` and `useropts.cfg` back to 1. A whole run in a bottle that already has
    the speed-up leaves a guard that says `music = off` alone: the setup wrote `on` there before,

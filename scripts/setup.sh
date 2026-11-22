@@ -27,7 +27,8 @@
 #   detail     every graphics option of the game at its maximum, the main display's resolution,
 #              and 16x anisotropic filtering
 #   intro      the game starts without its logo movies
-#   icons      CrossOver's icon for the Rejacked launcher: makes its shortcut when the bottle has none
+#   icons      CrossOver's icon for the Rejacked launcher: CrossOver reads the bottle's shortcuts again,
+#              and the launcher's shortcut is made when the bottle has none
 #   music      Revived only: keep its starter from switching the game's music off
 #   video      Revived only: switch off the video behind its launcher, which keeps a processor core busy
 #   uninstall  the game executables go back to Wine's Direct3D 9 (DirectMusic stays, the game needs it)
@@ -366,7 +367,7 @@ banner() {   # the opening words: one of them in big letters, as a title would b
   echo
   if [ $GLYPHS = 1 ] && [ $WIDTH -ge 76 ]; then
     printf ' %s%s%s\n %s%s%s\n' "$DIM" "$(rain $((WIDTH - 2)) 2)" "$OFF" "$DIM" "$(rain $((WIDTH - 2)) 4)" "$OFF"
-    printf '  %sW I T N E S S%s\n' "$GRN" "$OFF"
+    printf '  %sW I T N E S S   T H E%s\n' "$GRN" "$OFF"
     reveal \
       '   ▄▄▄▄▖  ▔▔▔▜███▙▄   ▔▔▔▝▙▄▄▄▄    ─▄▞▘▔  ▗▄▄▄▖   ▄▄▄▄▖─▗▖▔▔▐█▘   ▄     ' \
       '   █  ▝▌     ▐█   ▝      ▗▌  ▗▟     █▌    ▐   █   ▘  █▌     ▐█    █     ' \
@@ -376,7 +377,7 @@ banner() {   # the opening words: one of them in big letters, as a title would b
       '                                               Y O U R S E L F  ▝▀▀     '
     echo
   else
-    printf '  %sWitness rebirth yourself.%s\n' "$ACC" "$OFF"
+    printf '  %sWitness the rebirth yourself.%s\n' "$ACC" "$OFF"
   fi
   printf '  %sThe Matrix Online%s  %ssetup for CrossOver on Apple Silicon%s\n' "$GRN" "$OFF" "$DIM" "$OFF"
 }
@@ -1502,7 +1503,8 @@ step_video() {
 }
 
 # CrossOver shows an icon for each shortcut in the bottle's Start Menu and on its Desktop. It keeps its
-# own list of them (cxmenu.conf), which "cxmenu --sync" brings up to date.
+# own list of them (cxmenu.conf), which "cxmenu --sync" brings up to date. A launcher in that list can
+# still be without its icon after an installer has run: the sync is what puts the icon there.
 has_icon() { grep -qiF "/$1.lnk]" "$BOTTLE_DIR/cxmenu.conf" 2>/dev/null; }
 
 step_icons() {
@@ -1512,21 +1514,24 @@ step_icons() {
     || note "CrossOver could not read the bottle's shortcuts"
   exe=$(rejacked_exe)
   if [ -z "$exe" ]; then info "The Rejacked launcher is not in this bottle."; return 0; fi
-  if has_icon "Rejacked Launcher"; then ok "Rejacked launcher: CrossOver has its shortcut"; return 0; fi
-  # the launcher is installed, but no shortcut to it is in the bottle: one made with CrossOver's own tool
-  win=$(win_path "$exe")
-  spin "Rejacked launcher: no shortcut in the bottle, making one" \
-    "$WINE" --bottle "$BOTTLE" -- cxmklnk --programs "Rejacked Launcher.lnk" --target "$win" --workdir "${win%\\*}" || true
-  "$CX/bin/cxmenu" --bottle "$BOTTLE" --sync --mode install >/dev/null 2>&1 || true
   if has_icon "Rejacked Launcher"; then
+    ok "Rejacked launcher: CrossOver has its shortcut"
+  else   # the launcher is installed, but no shortcut to it is in the bottle: one made with CrossOver's own tool
+    win=$(win_path "$exe")
+    spin "Rejacked launcher: no shortcut in the bottle, making one" \
+      "$WINE" --bottle "$BOTTLE" -- cxmklnk --programs "Rejacked Launcher.lnk" --target "$win" --workdir "${win%\\*}" || true
+    "$CX/bin/cxmenu" --bottle "$BOTTLE" --sync --mode install >/dev/null 2>&1 || true
+    if ! has_icon "Rejacked Launcher"; then
+      note "CrossOver has no icon for the Rejacked launcher. It starts with the bottle's Run Command: $win"
+      return 0
+    fi
     ok "Rejacked launcher: its icon is back in CrossOver"
-  else
-    note "CrossOver has no icon for the Rejacked launcher. It starts with the bottle's Run Command: $win"
   fi
+  info "If CrossOver does not show the icon yet, close CrossOver and open it again."
 }
 
-check_icon() {   # CrossOver's icon for the Rejacked launcher, where the launcher is there and the icon is not
-  if has_rejacked && ! has_icon "Rejacked Launcher"; then step_icons; fi
+refresh_icons() {   # with the Rejacked launcher in the bottle. Whether CrossOver shows its icon cannot be read from the bottle
+  if has_rejacked; then step_icons; fi
 }
 
 step_uninstall() {
@@ -1601,10 +1606,10 @@ if [ ${#STEPS[@]} = 0 ]; then
   if [ $NO_INTRO = 1 ]; then step_intro; fi
   if [ -n "$REVIVED" ]; then keep_or_fix_music; fi
   if [ $VIDEO_OFF = 1 ]; then step_video; fi
-  check_icon
+  refresh_icons
 else
   for step in "${STEPS[@]}"; do "step_$step"; done
-  if named game && ! named icons; then check_icon; fi   # a launcher the game step installed has no icon yet
+  if named game && ! named icons; then refresh_icons; fi   # a launcher the game step installed has no icon yet
 fi
 
 say "Done"

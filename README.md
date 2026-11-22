@@ -45,7 +45,7 @@ through these steps by itself:
 | Install | Installs it for every MxO game it found in the bottle, and lets the games share their pipeline caches so they stutter less. Everything else in the bottle keeps CrossOver's normal graphics. On request it also speeds up the routines that game add-ons hook. An add-on such as Revived's interface scaling can then stop working. |
 | Detail | On request: every graphics option at its maximum (draw distance, shadows, wet streets, weather, traffic, anti-aliasing, screen filters), the resolution of the main display and 16x anisotropic filtering. It replaces the detail settings a game has, so the answer defaults to no once a game has settings. Later: `scripts/setup.sh detail`. |
 | Intro | On request: the game starts without its logo movies. Later: `scripts/setup.sh intro`. |
-| Icons | Only when CrossOver shows no icon for the Rejacked launcher: makes its shortcut again. Later: `scripts/setup.sh icons`. |
+| Icons | With the Rejacked launcher in the bottle: has CrossOver read the bottle's shortcuts again, so the launcher gets its icon, and makes the shortcut when the bottle has none. Later: `scripts/setup.sh icons`. |
 | Music | Revived only: keeps the game's music on. Revived's starter switches it off otherwise. In a bottle the setup has been through before, music that is off stays off. To switch it on: `scripts/setup.sh music`. |
 | Launcher video | Revived only: switches off the video behind the launcher's window, which keeps a processor core busy. |
 
