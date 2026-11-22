@@ -44,7 +44,8 @@ The table of files is in [docs/development.md](docs/development.md#layout). A ne
 
 - All changes to DXVK are in one patch file. `scripts/build.sh` applies it to a fresh copy of CodeWeavers' source.
 - Code in the patch follows the style of the DXVK code around it
-- Every fix can be switched off with an environment variable and has a row in the [switch table](docs/building.md#switches)
+- A fix can be switched off with an environment variable and has a row in the [switch table](docs/building.md#switches). [graphics.md](docs/graphics.md) names the few that cannot.
+- A switch is read through `env::isFixEnabled`, `env::getEnvSwitch` or `env::getEnvSizeMB`, which also log a value that is not the default or not understood
 - `translator/mxo_x87_apply.h` and its copy in the patch are one file. The build stops if they differ.
 - A routine is replaced only when its bytes in memory match the bytes it was translated from
 

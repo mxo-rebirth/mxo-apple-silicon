@@ -64,7 +64,7 @@ The 11 code changes in Revived's file:
 | `0x706800` | 25 bytes of padding replaced by code |
 | `0x813DEA` | one constant argument changed from 1 to 0 |
 
-Of the 537 routines in `translator/routines.list`, 536 are byte-identical in both files. The
+Of the 535 routines in `translator/routines.list`, 534 are byte-identical in both files. The
 exception is `0x1736F0`, because of the jump at `0x174758`.
 
 ### Imports
@@ -153,7 +153,7 @@ The DLL replaces the `sqrt` slot and the translator computes `floor` and `ceil` 
 | `0x29283D` | calls the DirectSound 3D-buffer setters | not touched, 2.3% of the main thread inside `dsound` |
 | `0xDE70`, `0xDEB0`, `0xDEF0`, `0x66EBF0`, `0x66ED40` | double-precision helpers | translated |
 | `0x7670`, `0x7690` | thin wrappers around C runtime math imports | not translated |
-| `0x6A92D8` | `_ftol2` | hand-written SSE |
+| `0x6A92D8` | `_ftol2` | SSE, written out by `xlat.py` |
 
 After `0x48A470`, the translated routines with the most time are `0x49DA40` and `0x4DCE10`. We
 have not worked out what they do.
@@ -183,9 +183,6 @@ replacement was generated from. These fail that check:
 |---|---|---|
 | `0x1736F0` | changed in memory before the device is created (the file is unchanged) | the file itself differs (jump at `0x174758`) |
 | `0x1B5890` | unchanged, replaced | changed in memory before the device is created |
-
-`0x45E10` and `0x46510` also show up in the log as "code in memory differs". That is the DLL's
-own hand-written replacement, installed first.
 
 ## The render throttle
 

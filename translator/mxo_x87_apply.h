@@ -11,7 +11,36 @@ struct MxoXFunc {
   void*           replacement;  // translated code
   const uint8_t*  orig;         // original bytes, as linked at the preferred base
   const uint32_t* relocs;       // ascending offsets of relocated dwords, ends with 0xffffffff
-  uint32_t        flags;        // 1: relies on every entry of the dependency table being intact
+  uint32_t        flags;        // MxoXNeedsDeps or 0
+};
+
+// MxoXFunc::flags: the routine relies on every entry of the dependency table being intact
+const uint32_t MxoXNeedsDeps = 1;
+
+// msvcr71.dll functions, by their number in the two import tables below
+enum MxoXCrtFunction : uint32_t {
+  MxoXCrtFloor = 0,
+  MxoXCrtCeil  = 1,
+  MxoXCrtSqrt  = 2,
+};
+
+// Entry of the crtslots table, which ends with slot 0: where the image imports a function of msvcr71.dll
+struct MxoXCrtSlot {
+  uint32_t slot;      // rva of the import slot
+  uint32_t function;  // MxoXCrtFunction
+};
+
+// Entry of the inlined table, which ends with slot 0: a routine whose translation computes floor or ceil itself
+struct MxoXInlinedImport {
+  uint32_t slot;      // rva of the import slot the original calls through
+  uint32_t rva;       // the routine
+  uint32_t function;  // MxoXCrtFunction
+};
+
+// Entry of the xrdeps table, which ends with caller 0: a translated routine that calls another one directly
+struct MxoXDirectCall {
+  uint32_t caller;
+  uint32_t callee;
 };
 
 // Points the translated code at an image loaded at 'base'. Call once.

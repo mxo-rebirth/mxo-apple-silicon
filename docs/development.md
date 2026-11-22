@@ -37,12 +37,12 @@ are off unless the file exists.
 
 | File | Effect |
 |---|---|
-| `debug.flag` | empty file. Every 5 s the log gets the frame rate, the render throttle, DXVK's per-frame statistics, the game's calls per frame, memory activity and which DXVK routine interrupted render passes how often. Every frame slower than 40 ms gets a `SPIKE` line saying what happened in it (pipelines built, waits, uploads, new memory). While a frame is more than 200 ms late, a `STALL` line records where the game's main thread is, as `module+offset` call chains. |
-| `shot.req` | with `debug.flag`: saves the next frame to `shot.bmp` |
+| `debug.flag` | empty file. Every 5 s the log gets the frame rate, the render throttle, DXVK's per-frame statistics, the game's calls per frame, memory activity and which DXVK routine interrupted render passes how often. Every frame slower than 40 ms gets a `SPIKE` line saying what happened in it (pipelines built, waits, uploads, new memory). While a frame is more than 200 ms late, a `STALL` line records where the game's main thread is, as `module+offset` call chains. One stall is sampled for 30 seconds at most. The log takes at most 400 `SPIKE` and 300 `STALL` lines and says so when either ends. |
+| `shot.req` | with `debug.flag`: saves the next frame to `shot.bmp`. Needs a back buffer with 8 bits per colour (`X8R8G8B8` or `A8R8G8B8`) |
 | `drawlog.req` | with `debug.flag`: writes one `DRAW` line per draw call of the next frame (shaders, textures, render target, blending) |
-| `sample-light.flag` | empty file. A sampling profiler records where the game's main thread and DXVK's own threads are, every 20 ms, and appends to `samples.bin` every 10 s. It also writes `modules.txt`, the list of loaded modules with their addresses. |
-| `sample.flag` | empty file. The same profiler for every thread, every 5 ms. It pauses every thread each time, which makes memory writes in the game much slower than they really are. Do not judge frame rates with it. |
-| `x87max.txt` | a number N: install only the first N translated routines (0 = none). For finding a misbehaving routine by halving. |
+| `sample-light.flag` | empty file. A sampling profiler records where the game's main thread and DXVK's own threads are, every 20 ms, and appends to `samples.bin` every 10 s. It also writes `modules.txt`, the list of loaded modules with their addresses. If `sample.flag` exists too, this one wins. |
+| `sample.flag` | empty file. The same profiler for every thread, every 5 ms. It pauses every thread each time, which makes memory writes in the game much slower than they really are. Do not judge frame rates with it. It holds at most 60,000 samples per 10 s and logs one line when more are lost. |
+| `x87max.txt` | a number N: install only the first N translated routines (0 = none). For finding a misbehaving routine by halving. The two hand-written matrix routines count after the translated ones. |
 
 The log is `matrix_d3d9.log` (or `mxorev_d3d9.log`) in the same folder.
 
@@ -136,7 +136,8 @@ d3d9bench.exe [vp] [width] [height] [draws] [seconds] [texture] [flags] [mode]
 
 It prints a `RESULT` line with the frame rate and the time per part of a frame, and a `PIXELS`
 line that says whether the world and the UI reached the back buffer. When a call that the chosen
-mode depends on fails, it stops with exit code 6.
+mode depends on fails, it stops with exit code 6. A back buffer smaller than 830×100 is refused
+with exit code 1: the pixel check needs that much.
 
 Run it in a bottle with the DLL override set for `d3d9bench.exe`.
 

@@ -154,7 +154,7 @@ called `MatrixOnline`. Close the game and its launcher first.
 After the next start, `drive_c/Games/dxvk/matrix_d3d9.log` should contain a line like
 
 ```
-MxO fast math: 535 of 538 translated x87 routines installed (535 match this client.dll)
+MxO fast math: 535 of 536 translated x87 routines installed (535 match this client.dll)
 ```
 
 Routines that are not installed are listed with their address and the reason, usually that
@@ -173,18 +173,20 @@ Environment variables, in `cxbottle.conf` under `[EnvironmentVariables]`:
 | `DXVK_MXO_X87=0` | keep the graphics fixes, do not install the translated routines. First thing to try if the game misbehaves in the world. |
 | `DXVK_MXO_FASTMATH=0` | no math replacement at all, including the hand-written routines |
 | `DXVK_MXO_SQRT=0` | the game's `sqrt` import stays Wine's |
-| `DXVK_LOCK_RENAME_COPY=0` | buffer locks wait for the GPU again |
+| `DXVK_LOCK_RENAME_COPY=0` | buffer locks wait for the GPU again. `d3d9.lockRenameCopy = False` in `dxvk.conf` does the same |
 | `DXVK_HOIST_UPLOADS=0` | texture and buffer uploads interrupt the render pass again |
 | `DXVK_PREFAULT_MAPPED_MEMORY=0` | no pre-touching of mapped memory |
-| `DXVK_MXO_RESPECT_ADDONS=0` | also replace game routines that add-ons such as Revived's `mxrdisp` check or hook (by default those are left alone so the add-on keeps working) |
+| `DXVK_MXO_RESPECT_ADDONS=0` | also replace game routines that add-ons such as Revived's `mxrdisp` check or hook, the two hand-written matrix routines included (by default those are left alone so the add-on keeps working) |
 | `DXVK_MXO_FAN_TO_LIST=0` | triangle fans are passed to MoltenVK as fans again (it emulates each one with a compute pass that interrupts drawing) |
 | `DXVK_MXO_WEAK_FLUSH=1` | buffer unlocks and similar hints submit work to the GPU mid-frame again, as upstream DXVK does |
 | `DXVK_LOCK_MAPPED_MEMORY=0` | pre-touched memory is unlocked right away instead of staying locked in RAM (it can then be compressed or swapped out, and stall again) |
-| `DXVK_STATIC_SAMPLERS=0` | no per-texture-type shader variants |
+| `DXVK_STATIC_SAMPLERS=0` | no per-texture-type shader variants. Unset, they are on only with MoltenVK. `1` switches them on with any driver |
 | `DXVK_MXO_SWVP_COUNT=0` | vertex shaders no longer read the uploaded constant count. All 8,192 constants are copied per draw again |
 | `DXVK_MXO_ZERO_CONSTS=0` | registers set to zero count towards the uploaded range again |
-| `DXVK_KEEP_EMPTY_CHUNKS_MB=N` | keep up to N MB of emptied CPU-visible memory per memory type for reuse (default 256, 0 = DXVK's behaviour) |
-| `DXVK_WARM_MEMORY_MB=N` | a background thread prepares N MB of already-touched memory per memory type (default 0 = off. It was never needed once freed memory is kept) |
+| `DXVK_KEEP_EMPTY_CHUNKS_MB=N` | keep up to N MB of emptied CPU-visible memory per memory type for reuse (default 256, at most 1024, 0 = DXVK's behaviour). A value that is not a number is ignored with a warning |
+
+The switches understand `0` and `1` only. The log has one line for each switch that is not at its
+default, and a warning for a value it does not understand.
 
 `x87max.txt` and the diagnostic files (`debug.flag`, the profiler) are described in
 [development.md](development.md#diagnostics).

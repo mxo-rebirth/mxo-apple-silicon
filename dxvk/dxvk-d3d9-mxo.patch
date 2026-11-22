@@ -14,13 +14,13 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      if (canSWVP)
        Logger::info("D3D9DeviceEx: Using extended constant set for software vertex processing.");
  
-+    Logger::info(str::format("D3D9DeviceEx: behaviour flags 0x", std::hex, m_behaviorFlags, std::dec,
++    Logger::info(str::format("MxO: behaviour flags 0x", std::hex, m_behaviorFlags, std::dec,
 +      ", vertex shader float constants ", m_vsLayout.floatCount));
 +
      if (m_dxvkDevice->instance()->extensions().extDebugUtils)
        m_annotation = new D3D9UserDefinedAnnotation(this);
  
-@@ -79,8 +85,16 @@
+@@ -79,8 +85,21 @@
      if (!(BehaviorFlags & D3DCREATE_FPU_PRESERVE))
        SetupFPU();
  
@@ -28,16 +28,21 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
      m_dxsoOptions = DxsoOptions(this, m_d3d9Options);
  
-+    // MoltenVK cannot have several image variables of different types on one binding
-+    m_dxsoOptions.staticSamplers = env::getEnvVar("DXVK_STATIC_SAMPLERS") != "0"
-+      && (env::getEnvVar("DXVK_STATIC_SAMPLERS") == "1"
-+       || m_dxvkDevice->adapter()->matchesDriver(DxvkGpuVendor(0), VK_DRIVER_ID_MOLTENVK, 0, 0));
-+    Logger::info(str::format("D3D9: static sampler variants ", m_dxsoOptions.staticSamplers ? "on" : "off"));
++    // MoltenVK cannot have several image variables of different types on one binding.
++    // DXVK_STATIC_SAMPLERS=0 switches the variants off, 1 switches them on for any driver.
++    // Vendor 0: a driver that does not name itself is never taken for MoltenVK.
++    const env::EnvSwitch staticSamplers = env::getEnvSwitch("DXVK_STATIC_SAMPLERS");
++
++    m_dxsoOptions.staticSamplers = staticSamplers == env::EnvSwitch::One
++      || (staticSamplers == env::EnvSwitch::Unset
++       && m_dxvkDevice->adapter()->matchesDriver(DxvkGpuVendor(0), VK_DRIVER_ID_MOLTENVK, 0, 0));
++    Logger::info(str::format("MxO: static sampler variants ", m_dxsoOptions.staticSamplers ? "on" : "off",
++      staticSamplers == env::EnvSwitch::Unset ? "" : " (set by DXVK_STATIC_SAMPLERS)"));
 +
      const bool supportsRobustness2 = m_dxvkDevice->features().extRobustness2.robustBufferAccess2;
      bool useRobustConstantAccess = supportsRobustness2;
      if (useRobustConstantAccess) {
-@@ -864,6 +878,7 @@
+@@ -864,6 +883,7 @@
    HRESULT STDMETHODCALLTYPE D3D9DeviceEx::GetRenderTargetData(
            IDirect3DSurface9* pRenderTarget,
            IDirect3DSurface9* pDestSurface) {
@@ -45,7 +50,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      D3D9DeviceLock lock = LockDevice();
  
      D3D9Surface* src = static_cast<D3D9Surface*>(pRenderTarget);
-@@ -936,6 +951,7 @@
+@@ -936,6 +956,7 @@
            IDirect3DSurface9*   pDestSurface,
      const RECT*                pDestRect,
            D3DTEXTUREFILTERTYPE Filter) {
@@ -53,7 +58,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      D3D9DeviceLock lock = LockDevice();
  
      D3D9Surface* dst = static_cast<D3D9Surface*>(pDestSurface);
-@@ -1145,6 +1161,7 @@
+@@ -1145,6 +1166,7 @@
            IDirect3DSurface9* pSurface,
      const RECT*              pRect,
            D3DCOLOR           Color) {
@@ -61,7 +66,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      D3D9DeviceLock lock = LockDevice();
  
      D3D9Surface* dst = static_cast<D3D9Surface*>(pSurface);
-@@ -1237,6 +1254,7 @@
+@@ -1237,6 +1259,7 @@
    HRESULT STDMETHODCALLTYPE D3D9DeviceEx::SetRenderTarget(
            DWORD              RenderTargetIndex,
            IDirect3DSurface9* pRenderTarget) {
@@ -69,7 +74,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      D3D9DeviceLock lock = LockDevice();
  
      if (unlikely(RenderTargetIndex >= caps::MaxSimultaneousRenderTargets
-@@ -1406,6 +1424,7 @@
+@@ -1406,6 +1429,7 @@
  
  
    HRESULT STDMETHODCALLTYPE D3D9DeviceEx::EndScene() {
@@ -77,7 +82,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      D3D9DeviceLock lock = LockDevice();
  
      if (unlikely(!m_flags.test(D3D9DeviceFlag::InScene)))
-@@ -1426,6 +1445,7 @@
+@@ -1426,6 +1450,7 @@
            D3DCOLOR Color,
            float    Z,
            DWORD    Stencil) {
@@ -85,7 +90,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      if (unlikely(!Count && pRects))
        return D3D_OK;
  
-@@ -2409,6 +2429,30 @@
+@@ -2409,6 +2434,31 @@
    }
  
  
@@ -100,12 +105,13 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +      m_mxoFanIndices = m_dxvkDevice->createBuffer(info,
 +        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 +
-+      // triangle k of a fan is (0, k+1, k+2): same vertices and winding as the fan
++      // Triangle k of a fan is (k+1, k+2, 0): the winding of the fan, and the first
++      // vertex is the one a fan takes the colour from under flat shading.
 +      auto indices = reinterpret_cast<uint32_t*>(m_mxoFanIndices->mapPtr(0));
 +      for (uint32_t k = 0; k < MxoFanMaxTriangles; k++) {
-+        indices[3 * k + 0] = 0;
-+        indices[3 * k + 1] = k + 1;
-+        indices[3 * k + 2] = k + 2;
++        indices[3 * k + 0] = k + 1;
++        indices[3 * k + 1] = k + 2;
++        indices[3 * k + 2] = 0;
 +      }
 +    }
 +
@@ -116,7 +122,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
    HRESULT STDMETHODCALLTYPE D3D9DeviceEx::DrawPrimitive(
            D3DPRIMITIVETYPE PrimitiveType,
            UINT             StartVertex,
-@@ -2423,6 +2467,22 @@
+@@ -2423,6 +2473,22 @@
  
      PrepareDraw(PrimitiveType);
  
@@ -139,7 +145,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      EmitCs([this,
        cPrimType    = PrimitiveType,
        cPrimCount   = PrimitiveCount,
-@@ -2503,6 +2563,23 @@
+@@ -2503,6 +2569,23 @@
      auto upSlice = AllocTempBuffer<true>(bufferSize);
      FillUPVertexBuffer(upSlice.mapPtr, pVertexStreamZeroData, dataSize, bufferSize);
  
@@ -163,7 +169,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      EmitCs([this,
        cBufferSlice  = std::move(upSlice.slice),
        cPrimType     = PrimitiveType,
-@@ -4151,6 +4228,7 @@
+@@ -4151,6 +4234,7 @@
              D3DLOCKED_BOX*          pLockedBox,
        const D3DBOX*                 pBox,
              DWORD                   Flags) {
@@ -171,7 +177,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      D3D9DeviceLock lock = LockDevice();
  
      UINT Subresource = pResource->CalcSubresource(Face, MipLevel);
-@@ -4442,6 +4520,7 @@
+@@ -4442,6 +4526,7 @@
    HRESULT D3D9DeviceEx::FlushImage(
          D3D9CommonTexture*      pResource,
          UINT                    Subresource) {
@@ -179,7 +185,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
  
      const Rc<DxvkImage> image = pResource->GetImage();
      auto formatInfo  = imageFormatInfo(image->info().format);
-@@ -4705,7 +4784,33 @@
+@@ -4705,7 +4790,35 @@
        const bool usesStagingBuffer = pResource->DoesStagingBufferUploads();
        const bool directMapping = pResource->GetMapMode() == D3D9_COMMON_BUFFER_MAP_MODE_DIRECT;
        const bool skipWait = (!needsReadback && (usesStagingBuffer || readOnly || (noOverlap && !directMapping))) || noOverwrite;
@@ -189,7 +195,9 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +      // is done with every draw that still uses it: a flush, a new render pass and a stall per lock.
 +      // Give the application a fresh backing slice that already holds the current contents instead.
 +      // Draws that are already queued keep the old slice, exactly as with DISCARD.
-+      const bool renameWithCopy = !skipWait && directMapping && !needsReadback && m_d3d9Options.lockRenameCopy;
++      // Not while another lock is outstanding: its pointer is into the old slice.
++      const bool renameWithCopy = !skipWait && directMapping && !needsReadback && m_d3d9Options.lockRenameCopy
++                               && pResource->GetLockCount() == 0;
 +
 +      if (renameWithCopy) {
 +        DxvkDebugCounters::add(DxvkDebugCounter::BufferRename);
@@ -214,7 +222,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
          if (unlikely(needsReadback)) {
            Logger::warn("Buffer readback is unimplemented.");
            // Remember to update the sequence number when implementing buffer readback.
-@@ -4742,6 +4847,7 @@
+@@ -4742,6 +4855,7 @@
  
    HRESULT D3D9DeviceEx::FlushBuffer(
          D3D9CommonBuffer*       pResource) {
@@ -222,7 +230,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      auto dstBuffer = pResource->GetBufferSlice<D3D9_COMMON_BUFFER_TYPE_REAL>();
      auto srcSlice = pResource->GetMappedSlice();
  
-@@ -4816,6 +4922,17 @@
+@@ -4816,6 +4930,17 @@
      // order to keep the number of submissions low.
      uint32_t pending = m_dxvkDevice->pendingSubmissions();
  
@@ -230,17 +238,17 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +    // colour and depth target is then written to memory and read back when drawing resumes.
 +    // Weak hints come in the middle of drawing (about a hundred buffer unlocks per frame), so
 +    // they only submit when nothing is queued for the GPU at all. Strong hints (end of scene,
-+    // change of the main render target) fall where the pass ends anyway and stay as they were.
-+    // DXVK_MXO_WEAK_FLUSH=1 restores the usual behaviour for weak hints.
-+    static const bool s_upstreamWeakFlush = env::getEnvVar("DXVK_MXO_WEAK_FLUSH") == "1";
++    // change of the main render target) fall where the pass ends anyway and are not held back.
++    // DXVK_MXO_WEAK_FLUSH=1 lets weak hints submit the way DXVK does.
++    static const bool s_holdWeakHints = env::isFixEnabled("DXVK_MXO_WEAK_FLUSH", env::EnvSwitch::One);
 +
-+    if (!StrongHint && !s_upstreamWeakFlush && pending != 0)
++    if (!StrongHint && s_holdWeakHints && pending != 0)
 +      return;
 +
      if (StrongHint || pending <= MaxPendingSubmits) {
        auto now = dxvk::high_resolution_clock::now();
  
-@@ -5009,13 +5126,21 @@
+@@ -5009,13 +5134,21 @@
  
      constSet.dirty = false;
  
@@ -264,7 +272,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      const uint32_t floatDataSize = floatCount * sizeof(Vector4);
      const uint32_t intDataSize   = std::min(constSet.meta.maxConstIndexI, m_vsIntConstsCount) * sizeof(Vector4i);
      const uint32_t boolDataSize  = divCeil(std::min(constSet.meta.maxConstIndexB, m_vsBoolConstsCount), 32u) * uint32_t(sizeof(uint32_t));
-@@ -5036,6 +5161,12 @@
+@@ -5036,6 +5169,12 @@
              data[constant.uboIdx] = *reinterpret_cast<const Vector4*>(constant.float32);
          }
        }
@@ -277,24 +285,32 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      }
  
      Rc<DxvkBuffer>& intBuffer = constSet.swvpBuffers.intBuffer;
-@@ -5060,7 +5191,15 @@
+@@ -5060,7 +5199,23 @@
  
      DxvkBufferSliceHandle slice;
      if (unlikely(dstBuffer == nullptr || dstBuffer->info().size < size)) {
 -      dstBuffer = CreateConstantBuffer(useSSBO, size, DxsoProgramType::VertexShader, cBufferTarget);
 +      // Grow in power-of-two steps of at least 4 KB, up to 64 KB: every new buffer starts
 +      // with an empty pool of slices, and new memory is slow to touch under Rosetta.
-+      uint32_t bufferSize = std::max(size, 4096u);
-+      while (bufferSize & (bufferSize - 1))
-+        bufferSize += bufferSize & -bufferSize;
-+      if (bufferSize > 65536u)
-+        bufferSize = size;
++      // Not with robustness2: there a read past the constants has to fall outside the buffer to give zero.
++      static constexpr uint32_t MinGrownBytes = 4096;
++      static constexpr uint32_t MaxGrownBytes = 65536;
++
++      uint32_t bufferSize = size;
++
++      if (!m_dxsoOptions.robustness2Supported) {
++        bufferSize = std::max(size, MinGrownBytes);
++        while (bufferSize & (bufferSize - 1))
++          bufferSize += bufferSize & -bufferSize;
++        if (bufferSize > MaxGrownBytes)
++          bufferSize = size;
++      }
 +
 +      dstBuffer = CreateConstantBuffer(useSSBO, bufferSize, DxsoProgramType::VertexShader, cBufferTarget);
        slice = dstBuffer->getSliceHandle();
      } else {
        slice = dstBuffer->allocSlice();
-@@ -5097,6 +5236,9 @@
+@@ -5097,6 +5252,9 @@
      }
      floatCount = std::min(constSet.meta.maxConstIndexF, floatCount);
  
@@ -304,7 +320,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      const uint32_t intRange = caps::MaxOtherConstants * sizeof(Vector4i);
      const uint32_t intDataSize = constSet.meta.maxConstIndexI * sizeof(Vector4i);
      uint32_t floatDataSize = floatCount * sizeof(Vector4);
-@@ -6109,7 +6251,42 @@
+@@ -6109,7 +6267,45 @@
    }
  
  
@@ -322,8 +338,11 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +        return "fixed";
 +      return str::format(std::hex, uintptr_t(s), std::dec, " v", common->GetInfo().majorVersion(), ".", common->GetInfo().minorVersion());
 +    };
++    // the first stages are enough to tell the game's draws apart, and keep the line readable
++    static constexpr uint32_t LoggedTextureStages = 4;
++
 +    std::string tex;
-+    for (uint32_t i = 0; i < 4; i++) {
++    for (uint32_t i = 0; i < LoggedTextureStages; i++) {
 +      auto t = state.textures[i];
 +      if (!t) continue;
 +      auto common = GetCommonTexture(t);
@@ -347,7 +366,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      if (unlikely(m_activeHazardsRT != 0)) {
        EmitCs([](DxvkContext* ctx) {
          ctx->emitRenderTargetReadbackBarrier();
-@@ -6252,6 +6429,9 @@
+@@ -6252,6 +6448,9 @@
      if (depthTextureMask != m_lastSamplerDepthMode)
        UpdateSamplerDepthModeSpecConstant(depthTextureMask);
  
@@ -357,7 +376,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      if (m_flags.test(D3D9DeviceFlag::DirtySharedPixelShaderData)) {
        m_flags.clr(D3D9DeviceFlag::DirtySharedPixelShaderData);
  
-@@ -6302,6 +6482,12 @@
+@@ -6302,6 +6501,12 @@
    void D3D9DeviceEx::BindShader(
    const D3D9CommonShader*                 pShaderModule,
          D3D9ShaderPermutation             Permutation) {
@@ -370,7 +389,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      EmitCs([
        cShader = pShaderModule->GetShader(Permutation)
      ] (DxvkContext* ctx) {
-@@ -6310,6 +6496,62 @@
+@@ -6310,6 +6515,62 @@
    }
  
  
@@ -433,7 +452,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
    void D3D9DeviceEx::BindInputLayout() {
      m_flags.clr(D3D9DeviceFlag::DirtyInputLayout);
  
-@@ -6551,7 +6793,31 @@
+@@ -6551,7 +6812,34 @@
  
      if constexpr (ProgramType == DxsoProgramType::VertexShader) {
        if constexpr (ConstantType == D3D9ConstantType::Float) {
@@ -441,7 +460,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +        // Every draw copies the vertex shader constants up to this mark (with software vertex
 +        // processing that can be 8192 registers). Registers that hold zero need no copy: reads
 +        // past the copied range return zero. So only registers that become nonzero raise it:
-+        // a game that clears all 8192 once no longer pays for a 128 KB copy on every draw.
++        // a game that clears all 8192 once would otherwise copy 128 KB on every draw.
 +        uint32_t top = Count;
 +
 +        if (likely(m_mxoZeroAwareConsts)) {
@@ -452,8 +471,11 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +        }
 +
 +        if (top && StartRegister + top > m_swvpFloatHighWater) {
++          // enough to see where the mark settles, without filling the log if it keeps rising
++          static constexpr uint32_t MaxLoggedMarks = 40;
 +          static uint32_t s_logged = 0;
-+          if (s_logged < 40) {
++
++          if (s_logged < MaxLoggedMarks) {
 +            s_logged++;
 +            Logger::info(str::format("MxO: vertex shader constants now reach ", StartRegister + top,
 +              " (set ", StartRegister, "..", StartRegister + Count - 1, ")"));
@@ -466,7 +488,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
        } else if constexpr (ConstantType == D3D9ConstantType::Int) {
          m_vsIntConstsCount = std::max(m_vsIntConstsCount, StartRegister + Count);
        } else /* if constexpr (ConstantType == D3D9ConstantType::Bool) */ {
-@@ -7099,6 +7365,8 @@
+@@ -7099,6 +7387,8 @@
  
  
    HRESULT D3D9DeviceEx::ResetState(D3DPRESENT_PARAMETERS* pPresentationParameters) {
@@ -503,12 +525,12 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      D3D9ShaderMasks                 m_psShaderMasks = FixedFunctionMask;
  
      bool                            m_isSWVP;
-+    bool                            m_mxoZeroAwareConsts = env::getEnvVar("DXVK_MXO_ZERO_CONSTS") != "0";
++    bool                            m_mxoZeroAwareConsts = env::isFixEnabled("DXVK_MXO_ZERO_CONSTS");
 +
 +    // Triangle fans drawn as indexed triangle lists: Metal has no fans, and MoltenVK emulates
 +    // each fan draw with a compute pass that interrupts drawing. DXVK_MXO_FAN_TO_LIST=0 keeps fans.
 +    static constexpr uint32_t       MxoFanMaxTriangles = 65536;
-+    bool                            m_mxoFanToList = env::getEnvVar("DXVK_MXO_FAN_TO_LIST") != "0";
++    bool                            m_mxoFanToList = env::isFixEnabled("DXVK_MXO_FAN_TO_LIST");
 +    Rc<DxvkBuffer>                  m_mxoFanIndices;
 +
 +    DxvkBufferSlice GetMxoFanIndices();
@@ -565,7 +587,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_include.h b/src/d3d9/d3d9_include.h
 --- a/src/d3d9/d3d9_include.h	2026-11-19 00:00:00
 +++ b/src/d3d9/d3d9_include.h	2026-11-19 00:00:00
-@@ -79,10 +79,7 @@
+@@ -79,10 +79,6 @@
  
  // MinGW headers are broken. Who'dve guessed?
  #ifndef _MSC_VER
@@ -573,7 +595,6 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 -{
 -  char dummy;
 -} D3DDEVINFO_RESOURCEMANAGER, * LPD3DDEVINFO_RESOURCEMANAGER;
-+// (removed: current mingw-w64 headers define D3DDEVINFO_RESOURCEMANAGER themselves)
  
  #ifndef __WINE__
  extern "C" WINUSERAPI WINBOOL WINAPI SetProcessDPIAware(VOID);
@@ -601,12 +622,13 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_mxo_fastmath.cpp b/src/d3d9/d3d9_mxo_fastmath.cpp
 --- a/src/d3d9/d3d9_mxo_fastmath.cpp	2026-11-19 00:00:00
 +++ b/src/d3d9/d3d9_mxo_fastmath.cpp	2026-11-19 00:00:00
-@@ -0,0 +1,522 @@
+@@ -0,0 +1,710 @@
 +#include <windows.h>
 +#include <tlhelp32.h>
 +
 +#include <algorithm>
 +#include <atomic>
++#include <cstddef>
 +#include <cstdint>
 +#include <cstdio>
 +#include <cstring>
@@ -634,31 +656,91 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +  static uint32_t s_x87Thread = 0;
 +
-+  static bool RedirectFunction(uint8_t* target, void* replacement) {
-+    DWORD oldProtect = 0;
++  // A routine is redirected by a jump with a 32-bit displacement over its first bytes
++  static constexpr uint8_t  JumpOpcode = 0xE9;
++  static constexpr uint32_t JumpSize   = 5;
 +
-+    if (!::VirtualProtect(target, 5, PAGE_EXECUTE_READWRITE, &oldProtect))
-+      return false;
++  // Lists of routines in a log line stop growing at this length
++  static constexpr size_t MaxListLength = 120;
 +
-+    const int32_t rel = int32_t(intptr_t(replacement) - intptr_t(target + 5));
-+    target[0] = 0xE9; // jmp rel32
-+    std::memcpy(target + 1, &rel, sizeof(rel));
++  // Where the flag files of the diagnostics are looked for and where their output goes
++  static const char* const DiagnosticsFolder = "C:\\Games\\dxvk\\";
 +
-+    ::VirtualProtect(target, 5, oldProtect, &oldProtect);
-+    ::FlushInstructionCache(::GetCurrentProcess(), target, 5);
-+    return true;
++
++  std::string GetMxoDiagnosticsPath(const char* fileName) {
++    return str::format(DiagnosticsFolder, fileName);
++  }
++
++
++  uint32_t GetModuleImageSize(const void* module) {
++    if (!module)
++      return 0;
++
++    auto base = reinterpret_cast<const uint8_t*>(module);
++    auto dos  = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
++
++    if (dos->e_magic != IMAGE_DOS_SIGNATURE)
++      return 0;
++
++    auto nt = reinterpret_cast<const IMAGE_NT_HEADERS32*>(base + dos->e_lfanew);
++
++    if (nt->Signature != IMAGE_NT_SIGNATURE)
++      return 0;
++
++    return nt->OptionalHeader.SizeOfImage;
++  }
++
++
++  // True if size bytes at rva lie inside an image of imageSize bytes
++  static bool IsInImage(uint32_t imageSize, uint32_t rva, uint32_t size) {
++    return rva <= imageSize && size <= imageSize - rva;
++  }
++
++
++  // What is written into client.dll points into this DLL, so this DLL has to stay loaded for good
++  static void PinThisModule() {
++    static bool s_pinned = false;
++
++    if (s_pinned)
++      return;
++
++    s_pinned = true;
++    HMODULE self = nullptr;
++
++    if (!::GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN,
++          reinterpret_cast<LPCSTR>(&PinThisModule), &self))
++      Logger::warn("MxO fast math: this DLL could not be pinned. The game crashes if something unloads it");
++  }
++
++
++  struct Redirect {
++    uint32_t    rva;            // start of the routine in client.dll
++    const void* replacement;
++  };
++
++  enum class RedirectResult : uint8_t {
++    Installed,
++    NotWritable,                // the code could not be made writable
++    Busy,                       // a thread was inside the bytes the jump replaces
++  };
++
++  static void WriteJump(uint8_t* target, const void* replacement) {
++    const int32_t displacement = int32_t(intptr_t(replacement) - intptr_t(target + JumpSize));
++    target[0] = JumpOpcode;
++    std::memcpy(target + 1, &displacement, sizeof(displacement));
 +  }
 +
 +
 +  // Writes the entry jumps of all given routines while every other thread of the process is
 +  // suspended, and leaves out any routine a thread is just entering. Nothing in the suspended
 +  // section allocates or takes locks.
-+  static uint32_t InstallRedirects(uint8_t* base, const std::vector<const MxoXFunc*>& funcs) {
-+    std::vector<DWORD> oldProtect(funcs.size(), 0);
-+    std::vector<uint8_t> writable(funcs.size(), 0);
++  static std::vector<RedirectResult> InstallRedirects(uint8_t* base, const std::vector<Redirect>& redirects) {
++    std::vector<RedirectResult> results(redirects.size(), RedirectResult::NotWritable);
++    std::vector<DWORD> oldProtect(redirects.size(), 0);
++    std::vector<uint8_t> writable(redirects.size(), 0);
 +
-+    for (size_t i = 0; i < funcs.size(); i++)
-+      writable[i] = ::VirtualProtect(base + funcs[i]->rva, 5, PAGE_EXECUTE_READWRITE, &oldProtect[i]) ? 1 : 0;
++    for (size_t i = 0; i < redirects.size(); i++)
++      writable[i] = ::VirtualProtect(base + redirects[i].rva, JumpSize, PAGE_EXECUTE_READWRITE, &oldProtect[i]) ? 1 : 0;
 +
 +    std::vector<HANDLE> threads;
 +    HANDLE snapshot = ::CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
@@ -678,13 +760,15 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +      ::CloseHandle(snapshot);
 +    }
 +
++    std::vector<uint8_t> suspended(threads.size(), 0);
 +    std::vector<uint32_t> eips(threads.size(), 0);
-+    uint32_t installed = 0;
 +
 +    // ---- no allocation, logging or locking from here ...
 +    for (size_t t = 0; t < threads.size(); t++) {
 +      if (::SuspendThread(threads[t]) == DWORD(-1))
 +        continue;
++
++      suspended[t] = 1;
 +
 +      CONTEXT context;
 +      context.ContextFlags = CONTEXT_CONTROL;
@@ -693,42 +777,243 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +        eips[t] = uint32_t(context.Eip);
 +    }
 +
-+    for (size_t i = 0; i < funcs.size(); i++) {
++    for (size_t i = 0; i < redirects.size(); i++) {
 +      if (!writable[i])
 +        continue;
 +
-+      uint8_t* target = base + funcs[i]->rva;
++      uint8_t* target = base + redirects[i].rva;
 +      const uint32_t address = uint32_t(uintptr_t(target));
 +      bool busy = false;
 +
 +      for (size_t t = 0; t < eips.size() && !busy; t++)
-+        busy = eips[t] > address && eips[t] < address + 5;
++        busy = eips[t] > address && eips[t] < address + JumpSize;
 +
-+      if (busy)
++      if (busy) {
++        results[i] = RedirectResult::Busy;
 +        continue;
++      }
 +
-+      const int32_t rel = int32_t(intptr_t(funcs[i]->replacement) - intptr_t(target + 5));
-+      target[0] = 0xE9; // jmp rel32
-+      std::memcpy(target + 1, &rel, sizeof(rel));
-+      installed++;
++      WriteJump(target, redirects[i].replacement);
++      results[i] = RedirectResult::Installed;
 +    }
 +
-+    for (size_t t = 0; t < threads.size(); t++)
-+      ::ResumeThread(threads[t]);
++    // a thread that could not be suspended here may be one the game itself keeps suspended
++    for (size_t t = 0; t < threads.size(); t++) {
++      if (suspended[t])
++        ::ResumeThread(threads[t]);
++    }
 +    // ---- ... to here
 +
 +    for (HANDLE thread : threads)
 +      ::CloseHandle(thread);
 +
-+    for (size_t i = 0; i < funcs.size(); i++) {
++    // In reverse: where routines share a page, only the first one saved what the page had before
++    for (size_t i = redirects.size(); i-- > 0; ) {
 +      if (writable[i]) {
 +        DWORD ignored = 0;
-+        ::VirtualProtect(base + funcs[i]->rva, 5, oldProtect[i], &ignored);
-+        ::FlushInstructionCache(::GetCurrentProcess(), base + funcs[i]->rva, 5);
++        ::VirtualProtect(base + redirects[i].rva, JumpSize, oldProtect[i], &ignored);
++        ::FlushInstructionCache(::GetCurrentProcess(), base + redirects[i].rva, JumpSize);
 +      }
 +    }
 +
-+    return installed;
++    return results;
++  }
++
++
++  // The hand-written replacements. The originals are recognised by position, length and a hash of
++  // their code (address fields excluded), so no game code is carried in this file.
++  struct HandWritten {
++    const char* name;
++    uint32_t    rva;
++    uint32_t    size;
++    uint64_t    hash;
++    uint32_t    refCount;       // address fields inside the routine, each of which must point at the float 1.0
++    uint32_t    refs[3];
++    const void* replacement;
++  };
++
++  static const HandWritten s_handWritten[] = {
++    { "matrix multiply",      0x45e10, 554, 0xb89ece1419908b6bull, 0, { 0, 0, 0 },       reinterpret_cast<const void*>(&MxoMatMulSSE)    },
++    { "quaternion to matrix", 0x46510, 214, 0x4b661a4a028dab20ull, 3, { 118, 159, 201 }, reinterpret_cast<const void*>(&MxoQuatToMatSSE) },
++  };
++
++  static constexpr uint32_t HandWrittenCount = sizeof(s_handWritten) / sizeof(s_handWritten[0]);
++
++  // FNV-1a, the hash translator/xlat.py prints for a routine
++  static constexpr uint64_t FnvOffsetBasis = 0xcbf29ce484222325ull;
++  static constexpr uint64_t FnvPrime       = 0x100000001b3ull;
++
++  static bool MatchesHandWritten(const uint8_t* base, uint32_t imageSize, const HandWritten& h) {
++    if (!IsInImage(imageSize, h.rva, h.size))
++      return false;
++
++    const uint8_t* code = base + h.rva;
++    uint64_t hash = FnvOffsetBasis;
++
++    for (uint32_t i = 0; i < h.size; ) {
++      bool isRef = false;
++
++      for (uint32_t k = 0; k < h.refCount; k++)
++        isRef = isRef || h.refs[k] == i;
++
++      if (isRef) {
++        uint32_t address;
++        std::memcpy(&address, code + i, sizeof(address));
++
++        const uint32_t imageBase = uint32_t(uintptr_t(base));
++        float one = 0.0f;
++
++        if (address >= imageBase && address <= imageBase + imageSize - sizeof(float))
++          std::memcpy(&one, reinterpret_cast<const void*>(uintptr_t(address)), sizeof(one));
++
++        if (one != 1.0f)
++          return false;
++
++        i += sizeof(address);
++      } else {
++        hash = (hash ^ code[i]) * FnvPrime;
++        i += 1;
++      }
++    }
++
++    return hash == h.hash;
++  }
++
++
++  // x87max.txt in the diagnostics folder may hold a number N to install only the first N routines
++  // (for bisecting). The hand-written routines count after the translated ones.
++  static uint32_t ReadInstallLimit() {
++    uint32_t limit = ~0u;
++
++    if (FILE* file = std::fopen(GetMxoDiagnosticsPath("x87max.txt").c_str(), "r")) {
++      if (std::fscanf(file, "%u", &limit) != 1)
++        limit = ~0u;
++      std::fclose(file);
++    }
++
++    return limit;
++  }
++
++
++  // True for a .NET assembly: its PE optional header has a CLR header among the data directories
++  static bool IsDotNetAssembly(const std::vector<uint8_t>& file) {
++    if (file.size() < sizeof(IMAGE_DOS_HEADER))
++      return false;
++
++    uint32_t nt;
++    std::memcpy(&nt, &file[offsetof(IMAGE_DOS_HEADER, e_lfanew)], sizeof(nt));
++
++    if (nt > file.size() || file.size() - nt < sizeof(IMAGE_NT_HEADERS64))
++      return false;
++
++    const size_t optional = size_t(nt) + offsetof(IMAGE_NT_HEADERS32, OptionalHeader);
++    uint16_t magic;
++    std::memcpy(&magic, &file[optional], sizeof(magic));
++
++    const size_t directories = optional + (magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC
++      ? offsetof(IMAGE_OPTIONAL_HEADER64, DataDirectory)
++      : offsetof(IMAGE_OPTIONAL_HEADER32, DataDirectory));
++
++    IMAGE_DATA_DIRECTORY clr;
++    std::memcpy(&clr, &file[directories + IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR * sizeof(clr)], sizeof(clr));
++    return clr.VirtualAddress != 0;
++  }
++
++
++  // Game add-ons (Revived's mxrdisp, the mxowrap wrappers) check and hook client.dll code at
++  // fixed addresses. A routine they point into is left as it is, so their checks still pass and
++  // their hooks still run. Any address inside client.dll found in such a module counts.
++  // DXVK_MXO_RESPECT_ADDONS=0 replaces those routines anyway.
++  // Returns the addresses found, as sorted offsets into client.dll.
++  static std::vector<uint32_t> FindAddonReferences(const uint8_t* base, uint32_t imageSize) {
++    // a larger file is left unread: reading it would cost address space the game needs
++    static constexpr long MaxAddonFileBytes = 64 << 20;
++
++    std::vector<uint32_t> addonRefs;
++
++    if (!env::isFixEnabled("DXVK_MXO_RESPECT_ADDONS"))
++      return addonRefs;
++
++    // Add-on files (mx*.dll) next to the game executable and next to client.dll, read from disk:
++    // some of them load only after the device exists. The executable itself is not scanned.
++    std::vector<std::string> folders;
++    char path[MAX_PATH];
++
++    if (::GetModuleFileNameA(nullptr, path, MAX_PATH))
++      folders.push_back(path);
++    if (::GetModuleFileNameA(HMODULE(base), path, MAX_PATH))
++      folders.push_back(path);
++
++    std::vector<std::string> files;
++
++    for (auto& folder : folders) {
++      const size_t slash = folder.find_last_of("\\/");
++      folder = slash == std::string::npos ? std::string() : folder.substr(0, slash + 1);
++
++      WIN32_FIND_DATAA found;
++      HANDLE search = ::FindFirstFileA((folder + "mx*.dll").c_str(), &found);
++
++      if (search == INVALID_HANDLE_VALUE)
++        continue;
++
++      do {
++        std::string file = folder + found.cFileName;
++        bool known = false;
++        for (const auto& f : files)
++          known = known || _stricmp(f.c_str(), file.c_str()) == 0;
++        if (!known)
++          files.push_back(file);
++      } while (::FindNextFileA(search, &found));
++
++      ::FindClose(search);
++    }
++
++    for (const auto& file : files) {
++      std::vector<uint8_t> bytes;
++
++      if (FILE* f = std::fopen(file.c_str(), "rb")) {
++        std::fseek(f, 0, SEEK_END);
++        const long length = std::ftell(f);
++        std::fseek(f, 0, SEEK_SET);
++        if (length > 0 && length < MaxAddonFileBytes) {
++          bytes.resize(size_t(length));
++          if (std::fread(bytes.data(), 1, bytes.size(), f) != bytes.size())
++            bytes.clear();
++        }
++        std::fclose(f);
++      }
++
++      // .NET assemblies (Revived's launcher is one) never run inside the game
++      if (bytes.empty() || IsDotNetAssembly(bytes))
++        continue;
++
++      // add-ons name client.dll code by its address at the preferred base
++      const uint32_t lo = MxoX_imagebase + ModuleHeaderSize;
++      const uint32_t hi = MxoX_imagebase + imageSize;
++      uint32_t count = 0;
++
++      for (size_t off = 0; off + sizeof(uint32_t) <= bytes.size(); off++) {
++        uint32_t value;
++        std::memcpy(&value, &bytes[off], sizeof(value));
++        if (value >= lo && value < hi) {
++          addonRefs.push_back(value - MxoX_imagebase);
++          count++;
++        }
++      }
++
++      const size_t slash = file.find_last_of("\\/");
++      Logger::info(str::format("MxO fast math: add-on ", file.substr(slash + 1), " names ", count, " client.dll addresses"));
++    }
++
++    std::sort(addonRefs.begin(), addonRefs.end());
++    return addonRefs;
++  }
++
++
++  // True if an add-on names an address inside the routine of size bytes at rva
++  static bool IsNamedByAddon(const std::vector<uint32_t>& addonRefs, uint32_t rva, uint32_t size) {
++    auto ref = std::lower_bound(addonRefs.begin(), addonRefs.end(), rva);
++    return ref != addonRefs.end() && *ref < rva + size;
 +  }
 +
 +
@@ -738,108 +1023,50 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +    if (s_done.exchange(true))
 +      return;
 +
-+    if (env::getEnvVar("DXVK_MXO_FASTMATH") == "0")
++    if (!env::isFixEnabled("DXVK_MXO_FASTMATH"))
 +      return;
 +
 +    HMODULE client = ::GetModuleHandleA("client.dll");
 +
-+    if (!client)
++    if (!client) {
++      Logger::info("MxO fast math: no client.dll is loaded, nothing replaced");
 +      return;
-+
-+    auto base = reinterpret_cast<uint8_t*>(client);
-+    auto dos  = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
-+
-+    if (dos->e_magic != IMAGE_DOS_SIGNATURE)
-+      return;
-+
-+    auto nt = reinterpret_cast<const IMAGE_NT_HEADERS32*>(base + dos->e_lfanew);
-+
-+    if (nt->Signature != IMAGE_NT_SIGNATURE)
-+      return;
-+
-+    const uint32_t imageSize = nt->OptionalHeader.SizeOfImage;
-+
-+    // Two hand-written replacements. The originals are recognised by position, length and a hash of
-+    // their code (address fields excluded), so no game code is carried in this file.
-+    struct HandWritten {
-+      uint32_t    rva;
-+      uint32_t    size;
-+      uint64_t    hash;
-+      uint32_t    refCount;       // address fields inside the routine, each of which must point at the float 1.0
-+      uint32_t    refs[3];
-+      void*       replacement;
-+    };
-+
-+    const HandWritten handWritten[2] = {
-+      { 0x45e10, 554, 0xb89ece1419908b6bull, 0, { 0, 0, 0 },       reinterpret_cast<void*>(&MxoMatMulSSE)    },
-+      { 0x46510, 214, 0x4b661a4a028dab20ull, 3, { 118, 159, 201 }, reinterpret_cast<void*>(&MxoQuatToMatSSE) },
-+    };
-+
-+    bool replaced[2] = { false, false };
-+
-+    for (uint32_t r = 0; r < 2; r++) {
-+      const HandWritten& h = handWritten[r];
-+
-+      if (h.rva > imageSize || h.size > imageSize - h.rva)
-+        continue;
-+
-+      const uint8_t* code = base + h.rva;
-+      uint64_t hash = 0xcbf29ce484222325ull;   // FNV-1a
-+      bool same = true;
-+
-+      for (uint32_t i = 0; i < h.size; ) {
-+        bool isRef = false;
-+
-+        for (uint32_t k = 0; k < h.refCount; k++)
-+          isRef = isRef || h.refs[k] == i;
-+
-+        if (isRef) {
-+          uint32_t address;
-+          std::memcpy(&address, code + i, sizeof(address));
-+
-+          const uint32_t imageBase = uint32_t(uintptr_t(base));
-+          float one = 0.0f;
-+
-+          if (address >= imageBase && address <= imageBase + imageSize - sizeof(float))
-+            std::memcpy(&one, reinterpret_cast<const void*>(uintptr_t(address)), sizeof(one));
-+
-+          same = same && one == 1.0f;
-+          i += 4;
-+        } else {
-+          hash = (hash ^ code[i]) * 0x100000001b3ull;
-+          i += 1;
-+        }
-+      }
-+
-+      replaced[r] = same && hash == h.hash && RedirectFunction(base + h.rva, h.replacement);
 +    }
 +
-+    Logger::info(str::format("MxO fast math: matrix multiply ", replaced[0] ? "replaced" : "left alone",
-+      ", quaternion to matrix ", replaced[1] ? "replaced" : "left alone"));
++    auto base = reinterpret_cast<uint8_t*>(client);
++    const uint32_t imageSize = GetModuleImageSize(client);
++
++    if (!imageSize) {
++      Logger::warn("MxO fast math: client.dll has no valid image header, nothing replaced");
++      return;
++    }
++
++    HMODULE crt = ::GetModuleHandleA("msvcr71.dll");
 +
 +    // MSVCR71!sqrt: client.dll's import slot for it (from the translator's table, so it is the slot of the
 +    // client.dll this build was made from) is pointed at MxoSqrtSSE, but only if it holds the runtime's own sqrt.
 +    // An add-on may have hooked it, and a different client.dll may keep something else there.
 +    // DXVK_MXO_SQRT=0 leaves it alone.
-+    if (env::getEnvVar("DXVK_MXO_SQRT") != "0") {
++    if (env::isFixEnabled("DXVK_MXO_SQRT")) {
 +      const char* result = "left alone (no import slot known)";
-+      HMODULE crt = ::GetModuleHandleA("msvcr71.dll");
 +      auto crtSqrt = crt ? reinterpret_cast<uint32_t>(::GetProcAddress(crt, "sqrt")) : 0u;
 +
-+      for (const uint32_t* e = MxoX_crtslots; e[0]; e += 2) {
-+        if (e[1] != 2 || e[0] > imageSize || imageSize - e[0] < 4)
++      for (auto e = reinterpret_cast<const MxoXCrtSlot*>(MxoX_crtslots); e->slot; e++) {
++        if (e->function != MxoXCrtSqrt || !IsInImage(imageSize, e->slot, sizeof(uint32_t)))
 +          continue;
 +
-+        auto slot = reinterpret_cast<uint32_t*>(base + e[0]);
++        auto slot = reinterpret_cast<uint32_t*>(base + e->slot);
 +        result = "left alone (the import slot does not hold msvcr71's sqrt)";
 +
 +        if (crtSqrt && *slot == crtSqrt) {
 +          MxoSqrtOriginal = crtSqrt;
 +          DWORD oldProtect = 0;
++          result = "left alone (the import slot could not be made writable)";
 +
-+          if (::VirtualProtect(slot, 4, PAGE_READWRITE, &oldProtect)) {
++          if (::VirtualProtect(slot, sizeof(*slot), PAGE_READWRITE, &oldProtect)) {
++            PinThisModule();
 +            reinterpret_cast<std::atomic<uint32_t>*>(slot)->store(reinterpret_cast<uint32_t>(&MxoSqrtSSE));
-+            ::VirtualProtect(slot, 4, oldProtect, &oldProtect);
++            ::VirtualProtect(slot, sizeof(*slot), oldProtect, &oldProtect);
 +            result = "replaced";
 +          }
 +        }
@@ -848,23 +1075,30 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +      Logger::info(str::format("MxO fast math: sqrt ", result));
 +    }
 +
-+    if (env::getEnvVar("DXVK_MXO_X87") == "0")
-+      return;
++    const uint32_t limit = ReadInstallLimit();
++    const std::vector<uint32_t> addonRefs = FindAddonReferences(base, imageSize);
++
++    bool handWrittenMatches[HandWrittenCount];
++
++    for (uint32_t r = 0; r < HandWrittenCount; r++)
++      handWrittenMatches[r] = MatchesHandWritten(base, imageSize, s_handWritten[r]);
++
++    uint32_t total = 0;
++
++    for (auto f = reinterpret_cast<const MxoXFunc*>(MxoX_funcs); f->size; f++)
++      total++;
 +
 +    // Translated routines. They assume the FPU setup of the thread that owns the device (24-bit
 +    // precision, round to nearest) and send every other thread back into the original code.
-+    // C:\Games\dxvk\x87max.txt may hold a number to install only the first N (for bisecting).
-+    uint32_t limit = ~0u;
++    // DXVK_MXO_X87=0 leaves them out.
++    const bool translated = env::isFixEnabled("DXVK_MXO_X87");
++    std::vector<const MxoXFunc*> todo;
++    std::string differing, respected, paired;
++    uint32_t matching = 0, handWrittenInstead = 0, overLimit = 0, needDeps = 0, pairedCount = 0;
 +
-+    if (FILE* file = std::fopen("C:\\Games\\dxvk\\x87max.txt", "r")) {
-+      if (std::fscanf(file, "%u", &limit) != 1)
-+        limit = ~0u;
-+      std::fclose(file);
-+    }
-+
-+    uint32_t total = 0, matching = 0, installed = 0;
-+
-+    if (MxoXFixups(base, MxoX_imagebase, MxoX_absfix, MxoX_relfix, MxoX_code_begin, MxoX_code_end)) {
++    if (translated && !MxoXFixups(base, MxoX_imagebase, MxoX_absfix, MxoX_relfix, MxoX_code_begin, MxoX_code_end)) {
++      Logger::warn("MxO fast math: the translated code could not be made writable, none of it is installed");
++    } else if (translated) {
 +      s_x87Thread = ::GetCurrentThreadId();
 +      MxoX_tid    = s_x87Thread;
 +
@@ -874,121 +1108,18 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +      for (auto f = reinterpret_cast<const MxoXFunc*>(MxoX_deps); f->size; f++)
 +        depsIntact = depsIntact && MxoXMatches(base, imageSize, MxoX_imagebase, *f);
 +
-+      std::vector<const MxoXFunc*> todo;
-+      std::string differing;
-+
-+      // Game add-ons (Revived's mxrdisp, the mxowrap wrappers) check and hook client.dll code at
-+      // fixed addresses. A routine they point into is left as it is, so their checks still pass and
-+      // their hooks still run. Any address inside client.dll found in such a module counts.
-+      // DXVK_MXO_RESPECT_ADDONS=0 replaces those routines anyway.
-+      std::vector<uint32_t> addonRefs;
-+
-+      if (env::getEnvVar("DXVK_MXO_RESPECT_ADDONS") != "0") {
-+        // Add-on files (mx*.dll) next to the game executable and next to client.dll, read from disk:
-+        // some of them load only after the device exists. The executable itself is not scanned.
-+        std::vector<std::string> folders;
-+        char path[MAX_PATH];
-+
-+        if (::GetModuleFileNameA(nullptr, path, MAX_PATH))
-+          folders.push_back(path);
-+        if (::GetModuleFileNameA(HMODULE(base), path, MAX_PATH))
-+          folders.push_back(path);
-+
-+        std::vector<std::string> files;
-+
-+        for (auto& folder : folders) {
-+          const size_t slash = folder.find_last_of("\\/");
-+          folder = slash == std::string::npos ? std::string() : folder.substr(0, slash + 1);
-+
-+          WIN32_FIND_DATAA found;
-+          HANDLE search = ::FindFirstFileA((folder + "mx*.dll").c_str(), &found);
-+
-+          if (search == INVALID_HANDLE_VALUE)
-+            continue;
-+
-+          do {
-+            std::string file = folder + found.cFileName;
-+            bool known = false;
-+            for (const auto& f : files)
-+              known = known || _stricmp(f.c_str(), file.c_str()) == 0;
-+            if (!known)
-+              files.push_back(file);
-+          } while (::FindNextFileA(search, &found));
-+
-+          ::FindClose(search);
-+        }
-+
-+        for (const auto& file : files) {
-+          std::vector<uint8_t> bytes;
-+
-+          if (FILE* f = std::fopen(file.c_str(), "rb")) {
-+            std::fseek(f, 0, SEEK_END);
-+            const long length = std::ftell(f);
-+            std::fseek(f, 0, SEEK_SET);
-+            if (length > 0 && length < (64 << 20)) {
-+              bytes.resize(size_t(length));
-+              if (std::fread(bytes.data(), 1, bytes.size(), f) != bytes.size())
-+                bytes.clear();
-+            }
-+            std::fclose(f);
-+          }
-+
-+          // .NET assemblies (Revived's launcher is one) never run inside the game: skip them.
-+          // The CLR header is data directory 14 of the PE optional header.
-+          if (bytes.size() > 0x40) {
-+            uint32_t pe;
-+            std::memcpy(&pe, &bytes[0x3c], 4);
-+            if (size_t(pe) + 24 + 96 + 15 * 8 <= bytes.size()) {
-+              uint16_t magic;
-+              std::memcpy(&magic, &bytes[pe + 24], 2);
-+              const size_t dirs = pe + 24 + (magic == 0x20b ? 112 : 96);
-+              uint32_t clr = 0;
-+              if (dirs + 14 * 8 + 4 <= bytes.size())
-+                std::memcpy(&clr, &bytes[dirs + 14 * 8], 4);
-+              if (clr)
-+                bytes.clear();
-+            }
-+          }
-+
-+          if (bytes.empty())
-+            continue;
-+
-+          // add-ons name client.dll code by its address at the preferred base
-+          const uint32_t lo = MxoX_imagebase + 0x1000;
-+          const uint32_t hi = MxoX_imagebase + imageSize;
-+          uint32_t count = 0;
-+
-+          for (size_t off = 0; off + 4 <= bytes.size(); off++) {
-+            uint32_t value;
-+            std::memcpy(&value, &bytes[off], 4);
-+            if (value >= lo && value < hi) {
-+              addonRefs.push_back(value - MxoX_imagebase);
-+              count++;
-+            }
-+          }
-+
-+          const size_t slash = file.find_last_of("\\/");
-+          Logger::info(str::format("MxO fast math: add-on ", file.substr(slash + 1), " names ", count, " client.dll addresses"));
-+        }
-+
-+        std::sort(addonRefs.begin(), addonRefs.end());
-+      }
-+
-+      std::string respected;
-+
 +      // Routines that compute msvcr71's floor or ceil in place instead of calling them through the import table:
 +      // only if the slot still holds the runtime's own function (an add-on could have hooked it).
 +      std::vector<uint32_t> inlineBlocked;
-+      HMODULE crtModule = ::GetModuleHandleA("msvcr71.dll");
-+      const uint32_t crtFns[2] = {
-+        crtModule ? reinterpret_cast<uint32_t>(::GetProcAddress(crtModule, "floor")) : 0u,
-+        crtModule ? reinterpret_cast<uint32_t>(::GetProcAddress(crtModule, "ceil"))  : 0u };
++      const uint32_t crtFns[] = {
++        crt ? reinterpret_cast<uint32_t>(::GetProcAddress(crt, "floor")) : 0u,     // MxoXCrtFloor
++        crt ? reinterpret_cast<uint32_t>(::GetProcAddress(crt, "ceil"))  : 0u };   // MxoXCrtCeil
 +
-+      for (const uint32_t* e = MxoX_inlined; e[0]; e += 3) {
-+        const bool inImage = e[0] + 4 <= imageSize;
-+        const uint32_t slot = inImage ? *reinterpret_cast<const uint32_t*>(base + e[0]) : 0u;
-+        if (e[2] > 1 || !crtFns[e[2]] || slot != crtFns[e[2]])
-+          inlineBlocked.push_back(e[1]);
++      for (auto e = reinterpret_cast<const MxoXInlinedImport*>(MxoX_inlined); e->slot; e++) {
++        const uint32_t held = IsInImage(imageSize, e->slot, sizeof(uint32_t))
++          ? *reinterpret_cast<const uint32_t*>(base + e->slot) : 0u;
++        if (e->function > MxoXCrtCeil || !crtFns[e->function] || held != crtFns[e->function])
++          inlineBlocked.push_back(e->rva);
 +      }
 +
 +      if (!inlineBlocked.empty())
@@ -996,14 +1127,22 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +      // Which routines go in. "matching" counts every routine whose code in memory is the code its translation
 +      // was made from. Each reason for leaving a matching routine out is logged with its own count.
-+      std::string paired;
-+      uint32_t overLimit = 0, needDeps = 0, pairedCount = 0;
++      uint32_t index = 0;
 +
-+      for (auto f = reinterpret_cast<const MxoXFunc*>(MxoX_funcs); f->size; f++) {
-+        const uint32_t index = total++;
++      for (auto f = reinterpret_cast<const MxoXFunc*>(MxoX_funcs); f->size; f++, index++) {
++        // a routine with a hand-written replacement can be on the routine list as well
++        bool handWritten = false;
++
++        for (uint32_t r = 0; r < HandWrittenCount; r++)
++          handWritten = handWritten || (handWrittenMatches[r] && s_handWritten[r].rva == f->rva);
++
++        if (handWritten) {
++          handWrittenInstead++;
++          continue;
++        }
 +
 +        if (!MxoXMatches(base, imageSize, MxoX_imagebase, *f)) {
-+          if (differing.size() < 80)
++          if (differing.size() < MaxListLength)
 +            differing += str::format(" ", std::hex, f->rva);
 +          continue;
 +        }
@@ -1015,7 +1154,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +          continue;
 +        }
 +
-+        if ((f->flags & 1) && !depsIntact) {
++        if ((f->flags & MxoXNeedsDeps) && !depsIntact) {
 +          needDeps++;
 +          continue;
 +        }
@@ -1023,9 +1162,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +        if (std::find(inlineBlocked.begin(), inlineBlocked.end(), f->rva) != inlineBlocked.end())
 +          continue;   // logged above
 +
-+        auto ref = std::lower_bound(addonRefs.begin(), addonRefs.end(), f->rva);
-+        if (ref != addonRefs.end() && *ref < f->rva + f->size) {
-+          if (respected.size() < 120)
++        if (IsNamedByAddon(addonRefs, f->rva, f->size)) {
++          if (respected.size() < MaxListLength)
 +            respected += str::format(" ", std::hex, f->rva);
 +          continue;
 +        }
@@ -1037,12 +1175,12 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +      // with that routine. Repeat until nothing changes, since callees can have such callees too.
 +      for (bool changed = true; changed; ) {
 +        changed = false;
-+        for (const uint32_t* d = MxoX_xrdeps; d[0]; d += 2) {
-+          auto caller = std::find_if(todo.begin(), todo.end(), [d] (const MxoXFunc* f) { return f->rva == d[0]; });
++        for (auto d = reinterpret_cast<const MxoXDirectCall*>(MxoX_xrdeps); d->caller; d++) {
++          auto caller = std::find_if(todo.begin(), todo.end(), [d] (const MxoXFunc* f) { return f->rva == d->caller; });
 +          if (caller == todo.end())
 +            continue;
-+          if (std::none_of(todo.begin(), todo.end(), [d] (const MxoXFunc* f) { return f->rva == d[1]; })) {
-+            if (paired.size() < 120)
++          if (std::none_of(todo.begin(), todo.end(), [d] (const MxoXFunc* f) { return f->rva == d->callee; })) {
++            if (paired.size() < MaxListLength)
 +              paired += str::format(" ", std::hex, (*caller)->rva);
 +            pairedCount++;
 +            todo.erase(caller);
@@ -1050,71 +1188,142 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +          }
 +        }
 +      }
-+
-+      installed = InstallRedirects(base, todo);
-+
-+      if (!differing.empty())
-+        Logger::info(str::format("MxO fast math: left alone because the code in memory differs (rva):", differing));
-+      if (overLimit)
-+        Logger::info(str::format("MxO fast math: ", overLimit, " left out by x87max.txt"));
-+      if (needDeps)
-+        Logger::info(str::format("MxO fast math: ", needDeps, " left alone because code they rely on differs"));
-+      if (!respected.empty())
-+        Logger::info(str::format("MxO fast math: left alone because a game add-on uses them (rva):", respected));
-+      if (pairedCount)
-+        Logger::info(str::format("MxO fast math: ", pairedCount,
-+          " left alone because a translated routine they call directly is left alone (rva):", paired));
 +    }
 +
-+    Logger::info(str::format("MxO fast math: ", installed, " of ", total, " translated x87 routines installed (",
-+      matching, " match this client.dll)"));
++    std::vector<Redirect> redirects;
++
++    for (const MxoXFunc* f : todo)
++      redirects.push_back({ f->rva, f->replacement });
++
++    // The hand-written routines go in with the translated ones, so that add-ons and x87max.txt
++    // count for them too. Unlike the translated ones they run on every thread.
++    const char* handWrittenState[HandWrittenCount];
++    size_t handWrittenSlot[HandWrittenCount];
++
++    for (uint32_t r = 0; r < HandWrittenCount; r++) {
++      const HandWritten& h = s_handWritten[r];
++      handWrittenSlot[r] = redirects.size();
++
++      if (!handWrittenMatches[r])
++        handWrittenState[r] = "left alone (the code in memory differs)";
++      else if (total + r >= limit)
++        handWrittenState[r] = "left out by x87max.txt";
++      else if (IsNamedByAddon(addonRefs, h.rva, h.size))
++        handWrittenState[r] = "left alone (a game add-on uses it)";
++      else {
++        handWrittenState[r] = nullptr;
++        redirects.push_back({ h.rva, h.replacement });
++      }
++    }
++
++    std::vector<RedirectResult> results;
++
++    if (!redirects.empty()) {
++      PinThisModule();
++      results = InstallRedirects(base, redirects);
++    }
++
++    uint32_t installed = 0, notWritable = 0;
++    std::string busy;
++
++    for (size_t i = 0; i < todo.size(); i++) {
++      if (results[i] == RedirectResult::Installed)
++        installed++;
++      else if (results[i] == RedirectResult::NotWritable)
++        notWritable++;
++      else if (busy.size() < MaxListLength)
++        busy += str::format(" ", std::hex, todo[i]->rva);
++    }
++
++    for (uint32_t r = 0; r < HandWrittenCount; r++) {
++      if (handWrittenState[r])
++        continue;
++
++      switch (results[handWrittenSlot[r]]) {
++        case RedirectResult::Installed:   handWrittenState[r] = "replaced"; break;
++        case RedirectResult::NotWritable: handWrittenState[r] = "left alone (its code could not be made writable)"; break;
++        case RedirectResult::Busy:        handWrittenState[r] = "left alone (a thread was entering it)"; break;
++      }
++    }
++
++    if (!differing.empty())
++      Logger::info(str::format("MxO fast math: left alone because the code in memory differs (rva):", differing));
++    if (handWrittenInstead)
++      Logger::info(str::format("MxO fast math: ", handWrittenInstead, " left to the hand-written replacement of the same routine"));
++    if (overLimit)
++      Logger::info(str::format("MxO fast math: ", overLimit, " left out by x87max.txt"));
++    if (needDeps)
++      Logger::info(str::format("MxO fast math: ", needDeps, " left alone because code they rely on differs"));
++    if (!respected.empty())
++      Logger::info(str::format("MxO fast math: left alone because a game add-on uses them (rva):", respected));
++    if (pairedCount)
++      Logger::info(str::format("MxO fast math: ", pairedCount,
++        " left alone because a translated routine they call directly is left alone (rva):", paired));
++    if (!busy.empty())
++      Logger::info(str::format("MxO fast math: left alone because a thread was entering them (rva):", busy));
++    if (notWritable)
++      Logger::warn(str::format("MxO fast math: ", notWritable, " left alone because their code could not be made writable"));
++
++    std::string handWritten;
++
++    for (uint32_t r = 0; r < HandWrittenCount; r++)
++      handWritten += str::format(r ? ", " : "", s_handWritten[r].name, " ", handWrittenState[r]);
++
++    Logger::info(str::format("MxO fast math: ", handWritten));
++
++    if (translated) {
++      Logger::info(str::format("MxO fast math: ", installed, " of ", total, " translated x87 routines installed (",
++        matching, " match this client.dll)"));
++    }
 +  }
 +
 +
 +  float GetMxoRenderThrottle() {
-+    // The client keeps its render throttle (1 = full draw distance, down to 0.25) at [[client+0x9f84e8]+0x14].
-+    // Only trusted if the throttle routine at client+0x28e0 really loads that pointer where expected.
++    // The client keeps its render throttle (1 = full draw distance, down to 0.25) in an object whose
++    // address is in one of its globals. That is only trusted if the throttle routine at client+0x28e0
++    // really stores to that object where expected.
++    static constexpr uint32_t ThrottleObjectRva   = 0x9f84e8;   // the global
++    static constexpr uint8_t  ThrottleFieldOffset = 0x14;       // the throttle inside the object
++    static constexpr uint32_t ThrottleStoreRva    = 0x2900;     // the store inside the routine
++
 +    static const uint8_t* s_client = [] () -> const uint8_t* {
 +      auto base = reinterpret_cast<const uint8_t*>(::GetModuleHandleA("client.dll"));
 +
-+      if (!base)
++      if (!IsInImage(GetModuleImageSize(base), ThrottleObjectRva, sizeof(uint32_t)))
 +        return nullptr;
 +
-+      auto nt = reinterpret_cast<const IMAGE_NT_HEADERS32*>(base + reinterpret_cast<const IMAGE_DOS_HEADER*>(base)->e_lfanew);
-+
-+      if (nt->OptionalHeader.SizeOfImage < 0xa00000)
-+        return nullptr;
-+
-+      const uint32_t global = uint32_t(uintptr_t(base)) + 0x9f84e8;
++      const uint32_t global = uint32_t(uintptr_t(base)) + ThrottleObjectRva;
 +      uint64_t hash = 0xcbf29ce484222325ull;   // FNV-1a of the store's code around its address, which has to name the global
-+      for (uint32_t i : { 0u, 1u, 6u, 7u, 8u }) hash = (hash ^ base[0x2900 + i]) * 0x100000001b3ull;
-+      return hash != 0xb7258c7ae11ecf31ull || std::memcmp(base + 0x2900 + 2, &global, 4) ? nullptr : base;
++      for (uint32_t i : { 0u, 1u, 6u, 7u, 8u }) hash = (hash ^ base[ThrottleStoreRva + i]) * 0x100000001b3ull;
++      return hash != 0xb7258c7ae11ecf31ull || std::memcmp(base + ThrottleStoreRva + 2, &global, sizeof(global)) ? nullptr : base;
 +    }();
 +
 +    if (!s_client)
 +      return -1.0f;
 +
 +    uint32_t object = 0;
-+    std::memcpy(&object, s_client + 0x9f84e8, 4);
++    std::memcpy(&object, s_client + ThrottleObjectRva, sizeof(object));
 +
 +    if (!object)
 +      return -1.0f;
 +
 +    float throttle = -1.0f;
-+    std::memcpy(&throttle, reinterpret_cast<const void*>(uintptr_t(object + 0x14)), 4);
++    std::memcpy(&throttle, reinterpret_cast<const void*>(uintptr_t(object + ThrottleFieldOffset)), sizeof(throttle));
 +    return throttle;
 +  }
 +
 +
 +  void CheckMxoFastMathFpu() {
++    // precision control (bits 8-9) must be 24-bit and rounding control (bits 10-11) nearest: all four bits clear
++    static constexpr uint16_t PrecisionAndRoundingMask = 0x0f00;
++
 +    if (!s_x87Thread || ::GetCurrentThreadId() != s_x87Thread)
 +      return;
 +
-+    // precision control (bits 8-9) must be 24-bit and rounding control (bits 10-11) nearest
 +    uint16_t control = 0;
 +    __asm__ __volatile__("fnstcw %0" : "=m" (*&control));
 +
-+    const bool usable = !(control & 0x0f00);
++    const bool usable = !(control & PrecisionAndRoundingMask);
 +
 +    if (usable != (MxoX_tid != 0)) {
 +      MxoX_tid = usable ? s_x87Thread : 0;
@@ -1127,8 +1336,11 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_mxo_fastmath.h b/src/d3d9/d3d9_mxo_fastmath.h
 --- a/src/d3d9/d3d9_mxo_fastmath.h	2026-11-19 00:00:00
 +++ b/src/d3d9/d3d9_mxo_fastmath.h	2026-11-19 00:00:00
-@@ -0,0 +1,32 @@
+@@ -0,0 +1,55 @@
 +#pragma once
++
++#include <cstdint>
++#include <string>
 +
 +namespace dxvk {
 +
@@ -1158,6 +1370,26 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +   * \brief The game's current render throttle (1 = full draw distance), or -1 if unknown
 +   */
 +  float GetMxoRenderThrottle();
++
++  /// The first page of a loaded module holds its headers, never code
++  constexpr uint32_t ModuleHeaderSize = 0x1000;
++
++  /**
++   * \brief Size of a loaded module in memory
++   *
++   * \param [in] module Where the module is loaded, or \c nullptr
++   * \returns The size, or 0 if there is no valid image header
++   */
++  uint32_t GetModuleImageSize(const void* module);
++
++  /**
++   * \brief Path of a file in the folder of the diagnostic files
++   *
++   * The flag files that switch the diagnostics on are looked for there,
++   * and what the diagnostics write goes there.
++   * \param [in] fileName Name of the file
++   */
++  std::string GetMxoDiagnosticsPath(const char* fileName);
 +
 +}
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_mxo_fastmath_asm.inc b/src/d3d9/d3d9_mxo_fastmath_asm.inc
@@ -1314,7 +1546,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_mxo_x87.h b/src/d3d9/d3d9_mxo_x87.h
 --- a/src/d3d9/d3d9_mxo_x87.h	2026-11-19 00:00:00
 +++ b/src/d3d9/d3d9_mxo_x87.h	2026-11-19 00:00:00
-@@ -0,0 +1,71 @@
+@@ -0,0 +1,100 @@
 +// Runtime side of the x87 -> SSE2 translations generated by xlat.py.
 +#pragma once
 +
@@ -1328,7 +1560,36 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +  void*           replacement;  // translated code
 +  const uint8_t*  orig;         // original bytes, as linked at the preferred base
 +  const uint32_t* relocs;       // ascending offsets of relocated dwords, ends with 0xffffffff
-+  uint32_t        flags;        // 1: relies on every entry of the dependency table being intact
++  uint32_t        flags;        // MxoXNeedsDeps or 0
++};
++
++// MxoXFunc::flags: the routine relies on every entry of the dependency table being intact
++const uint32_t MxoXNeedsDeps = 1;
++
++// msvcr71.dll functions, by their number in the two import tables below
++enum MxoXCrtFunction : uint32_t {
++  MxoXCrtFloor = 0,
++  MxoXCrtCeil  = 1,
++  MxoXCrtSqrt  = 2,
++};
++
++// Entry of the crtslots table, which ends with slot 0: where the image imports a function of msvcr71.dll
++struct MxoXCrtSlot {
++  uint32_t slot;      // rva of the import slot
++  uint32_t function;  // MxoXCrtFunction
++};
++
++// Entry of the inlined table, which ends with slot 0: a routine whose translation computes floor or ceil itself
++struct MxoXInlinedImport {
++  uint32_t slot;      // rva of the import slot the original calls through
++  uint32_t rva;       // the routine
++  uint32_t function;  // MxoXCrtFunction
++};
++
++// Entry of the xrdeps table, which ends with caller 0: a translated routine that calls another one directly
++struct MxoXDirectCall {
++  uint32_t caller;
++  uint32_t callee;
 +};
 +
 +// Points the translated code at an image loaded at 'base'. Call once.
@@ -1402,7 +1663,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      this->deviceLocalConstantBuffers    = config.getOption<bool>        ("d3d9.deviceLocalConstantBuffers",    false);
      this->allowDirectBufferMapping      = config.getOption<bool>        ("d3d9.allowDirectBufferMapping",      true);
 +    this->lockRenameCopy                = config.getOption<bool>        ("d3d9.lockRenameCopy",                true)
-+                                       && env::getEnvVar("DXVK_LOCK_RENAME_COPY") != "0";
++                                       && env::isFixEnabled("DXVK_LOCK_RENAME_COPY");
      this->seamlessCubes                 = config.getOption<bool>        ("d3d9.seamlessCubes",                 false);
  
      // If we are not Nvidia, enable general hazards.
@@ -1554,6 +1815,15 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
    };
  
    enum class D3D9RenderStateItem {
+@@ -59,6 +62,8 @@
+     PointScaleA,
+     PointScaleB,
+     PointScaleC,
++
++    SwvpFloatCount,
+ 
+     Count
+   };
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_swapchain.cpp b/src/d3d9/d3d9_swapchain.cpp
 --- a/src/d3d9/d3d9_swapchain.cpp	2026-11-19 00:00:00
 +++ b/src/d3d9/d3d9_swapchain.cpp	2026-11-19 00:00:00
@@ -1598,15 +1868,16 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      else if (message == WM_SIZE)
      {
        D3DDEVICE_CREATION_PARAMETERS create_parms;
-@@ -184,6 +213,575 @@
+@@ -184,6 +213,660 @@
    };
  
  
-+  // Optional sampling profiler, enabled by creating the file C:\\Games\\dxvk\\sample.flag before the game starts.
-+  // A helper thread looks at every thread of the process every few milliseconds: where it is executing, and
-+  // the nearest return addresses on its stack that lie in this DLL, in the game's client.dll and in
-+  // winevulkan.dll (so that time spent waiting or inside Vulkan can be attributed to its caller). Samples are
-+  // appended to C:\\Games\\dxvk\\samples.bin every ten seconds. translator/profile2.py reads the file.
++  // Optional sampling profiler, enabled by creating the file sample.flag in the diagnostics folder
++  // (GetMxoDiagnosticsPath) before the game starts. A helper thread looks at every thread of the process
++  // every few milliseconds: where it is executing, and the nearest return addresses on its stack that lie
++  // in this DLL, in the game's client.dll and in winevulkan.dll (so that time spent waiting or inside Vulkan
++  // can be attributed to its caller). Samples are appended to samples.bin in that folder every ten seconds.
++  // translator/profile2.py reads the file, so this is its record format.
 +  struct SampleRecord {
 +    uint32_t tid, eip, retSelf[3], retClient[3], retVulkan;
 +  };
@@ -1628,23 +1899,38 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +  static std::atomic<bool> s_hudHidden = { true };
 +
 +  static void UpdateHudToggle() {
++    static constexpr DWORD LookIntervalMs = 100;
++    static constexpr int   KeyIsDown      = 0x8000;
++
 +    static bool  s_wasDown  = false;
 +    static DWORD s_lastLook = 0;
 +    const DWORD now = ::GetTickCount();
 +
-+    if (now - s_lastLook < 100)
++    if (now - s_lastLook < LookIntervalMs)
 +      return;
 +
 +    s_lastLook = now;
-+    const bool down = (::GetAsyncKeyState(VK_CONTROL) & 0x8000) && (::GetAsyncKeyState(VK_SHIFT) & 0x8000)
-+                   && (::GetAsyncKeyState('F') & 0x8000);
++    const bool down = (::GetAsyncKeyState(VK_CONTROL) & KeyIsDown) && (::GetAsyncKeyState(VK_SHIFT) & KeyIsDown)
++                   && (::GetAsyncKeyState('F') & KeyIsDown);
 +    if (down && !s_wasDown)
 +      s_hudHidden = !s_hudHidden.load();
 +    s_wasDown = down;
 +  }
 +
-+  // Stall recorder (with debug.flag): while the thread that presents has not presented for 200 ms,
-+  // record where it is every 20 ms, and log the most common places when the frame finally ends.
++  // Stall recorder (with debug.flag): while the thread that presents has not presented for some time,
++  // record where it is at short intervals, and log the most common places when the frame finally ends.
++  static constexpr uint32_t StallAfterMs           = 200;
++  static constexpr uint32_t StallSampleIntervalMs  = 20;
++  static constexpr uint32_t StallOtherThreadsEvery = 5;     // in samples: the other threads are looked at less often
++  static constexpr size_t   StallListedPlaces      = 3;
++  static constexpr size_t   StallListedOtherPlaces = 4;
++
++  // A stall lasts as long as the game does not draw, and it does not draw in the background.
++  // So the sampling of one stall ends after some time, and the recorder after some logged stalls.
++  static constexpr uint32_t MaxStallSampledMs      = 30000;
++  static constexpr size_t   MaxStallSamples        = MaxStallSampledMs / StallSampleIntervalMs;
++  static constexpr uint32_t MaxLoggedStalls        = 300;
++
 +  static std::atomic<uint64_t> s_lastPresentMs = { 0 };
 +
 +  static uint64_t NowMs() {
@@ -1672,10 +1958,14 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +    struct Sample { uint32_t eip; uint32_t ret[8]; };
 +    std::vector<Sample> samples;
-+    std::vector<std::pair<DWORD, Sample>> others;   // other threads of the game, every 100 ms of a stall
++    std::vector<std::pair<DWORD, Sample>> others;   // other threads of the game
 +    uint32_t logged = 0;
++    uint64_t stallBegan = 0;
 +
 +    auto takeSample = [] (HANDLE t, Sample& sample) {
++      static constexpr uint32_t StackWords        = 256;       // how far up the stack return addresses are looked for
++      static constexpr uint32_t LowestCodeAddress = 0x10000;   // nothing is ever mapped below it
++
 +      sample = { };
 +      if (::SuspendThread(t) == DWORD(-1))
 +        return false;
@@ -1685,11 +1975,11 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +        sample.eip = uint32_t(context.Eip);
 +        auto stack = reinterpret_cast<const uint32_t*>(uintptr_t(context.Esp));
 +        uint32_t n = 0;
-+        if (context.Esp && !::IsBadReadPtr(stack, 4 * 256)) {
-+          for (uint32_t k = 0; k < 256 && n < 8; k++) {
++        if (context.Esp && !::IsBadReadPtr(stack, sizeof(uint32_t) * StackWords)) {
++          for (uint32_t k = 0; k < StackWords && n < std::size(sample.ret); k++) {
 +            const uint32_t v = stack[k];
 +            MEMORY_BASIC_INFORMATION mbi;
-+            if (v > 0x10000 && ::VirtualQuery(reinterpret_cast<void*>(uintptr_t(v - 8)), &mbi, sizeof(mbi))
++            if (v > LowestCodeAddress && ::VirtualQuery(reinterpret_cast<void*>(uintptr_t(v - 8)), &mbi, sizeof(mbi))
 +             && mbi.Type == MEM_IMAGE && (mbi.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY))
 +             && FollowsCall(v))
 +              sample.ret[n++] = v;
@@ -1724,18 +2014,24 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +    };
 +
 +    for (;;) {
-+      ::Sleep(20);
++      ::Sleep(StallSampleIntervalMs);
 +      const uint64_t last = s_lastPresentMs.load();
 +      const uint64_t now = NowMs();
 +
-+      if (last && now - last >= 200) {
-+        if (samples.empty())
++      if (last && now - last >= StallAfterMs) {
++        if (samples.size() >= MaxStallSamples)
++          continue;
++
++        if (samples.empty()) {
 +          focusAtStart = describeFocus();
++          stallBegan   = last;
++        }
++
 +        Sample sample;
 +        if (takeSample(thread, sample))
 +          samples.push_back(sample);
 +
-+        if (++stallTicks % 5 == 0) {
++        if (++stallTicks % StallOtherThreadsEvery == 0) {
 +          HANDLE snapshot = ::CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
 +          if (snapshot != INVALID_HANDLE_VALUE) {
 +            THREADENTRY32 entry = { };
@@ -1756,42 +2052,49 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +        }
 +      } else if (!samples.empty()) {
 +        // the stall is over: names are resolved now, with the game thread running again
-+        if (logged < 300) {
-+          logged++;
-+          std::unordered_map<std::string, uint32_t> counts;
-+          for (const auto& s : samples) {
-+            std::string key = DescribeAddress(s.eip);
-+            for (uint32_t r : s.ret)
-+              if (r) key += " < " + DescribeAddress(r);
-+            counts[key]++;
-+          }
-+          std::vector<std::pair<uint32_t, std::string>> sorted;
-+          for (auto& c : counts)
-+            sorted.push_back({ c.second, c.first });
-+          std::sort(sorted.begin(), sorted.end(), [] (const auto& a, const auto& b) { return a.first > b.first; });
-+          std::string text = str::format("STALL ", 200 + samples.size() * 20, "+ ms, ", samples.size(), " samples; ",
-+            focusAtStart, "; at the end: ", describeFocus());
-+          for (size_t i = 0; i < sorted.size() && i < 3; i++)
-+            text += str::format("\n    ", sorted[i].first, "x  ", sorted[i].second);
-+          // other threads that were not simply waiting in ntdll
-+          std::unordered_map<std::string, uint32_t> otherCounts;
-+          for (const auto& o : others) {
-+            const std::string at = DescribeAddress(o.second.eip);
-+            if (at.rfind("ntdll.dll+", 0) == 0 || at.rfind("win32u.dll+", 0) == 0)
-+              continue;
-+            std::string key = str::format("thread ", o.first, ": ", at);
-+            for (uint32_t r : o.second.ret)
-+              if (r) key += " < " + DescribeAddress(r);
-+            otherCounts[key]++;
-+          }
-+          std::vector<std::pair<uint32_t, std::string>> otherSorted;
-+          for (auto& c : otherCounts)
-+            otherSorted.push_back({ c.second, c.first });
-+          std::sort(otherSorted.begin(), otherSorted.end(), [] (const auto& a, const auto& b) { return a.first > b.first; });
-+          for (size_t i = 0; i < otherSorted.size() && i < 4; i++)
-+            text += str::format("\n    other ", otherSorted[i].first, "x  ", otherSorted[i].second);
-+          Logger::info(text);
++        std::unordered_map<std::string, uint32_t> counts;
++        for (const auto& s : samples) {
++          std::string key = DescribeAddress(s.eip);
++          for (uint32_t r : s.ret)
++            if (r) key += " < " + DescribeAddress(r);
++          counts[key]++;
 +        }
++        std::vector<std::pair<uint32_t, std::string>> sorted;
++        for (auto& c : counts)
++          sorted.push_back({ c.second, c.first });
++        std::sort(sorted.begin(), sorted.end(), [] (const auto& a, const auto& b) { return a.first > b.first; });
++        std::string text = str::format("STALL ", last - stallBegan, " ms, ", samples.size(), " samples",
++          samples.size() >= MaxStallSamples
++            ? str::format(" (of its first ", MaxStallSampledMs / 1000, " seconds); ")
++            : std::string("; "),
++          focusAtStart, "; at the end: ", describeFocus());
++        for (size_t i = 0; i < sorted.size() && i < StallListedPlaces; i++)
++          text += str::format("\n    ", sorted[i].first, "x  ", sorted[i].second);
++        // other threads that were not simply waiting in ntdll
++        std::unordered_map<std::string, uint32_t> otherCounts;
++        for (const auto& o : others) {
++          const std::string at = DescribeAddress(o.second.eip);
++          if (at.rfind("ntdll.dll+", 0) == 0 || at.rfind("win32u.dll+", 0) == 0)
++            continue;
++          std::string key = str::format("thread ", o.first, ": ", at);
++          for (uint32_t r : o.second.ret)
++            if (r) key += " < " + DescribeAddress(r);
++          otherCounts[key]++;
++        }
++        std::vector<std::pair<uint32_t, std::string>> otherSorted;
++        for (auto& c : otherCounts)
++          otherSorted.push_back({ c.second, c.first });
++        std::sort(otherSorted.begin(), otherSorted.end(), [] (const auto& a, const auto& b) { return a.first > b.first; });
++        for (size_t i = 0; i < otherSorted.size() && i < StallListedOtherPlaces; i++)
++          text += str::format("\n    other ", otherSorted[i].first, "x  ", otherSorted[i].second);
++        Logger::info(text);
++
++        if (++logged == MaxLoggedStalls) {
++          Logger::info(str::format("STALL lines end here, ", MaxLoggedStalls, " are logged"));
++          ::CloseHandle(thread);
++          return 0;
++        }
++
 +        samples.clear();
 +        others.clear();
 +        stallTicks = 0;
@@ -1801,24 +2104,39 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +  static void SamplerMarker() { }
 +
-+  static uint32_t ImageSize(HMODULE module) {
-+    if (!module)
-+      return 0;
++  // True if the diagnostics folder holds a file of this name
++  static bool HasDiagnosticsFile(const char* fileName) {
++    return ::GetFileAttributesA(GetMxoDiagnosticsPath(fileName).c_str()) != INVALID_FILE_ATTRIBUTES;
++  }
 +
-+    auto base = reinterpret_cast<const uint8_t*>(module);
-+    auto nt   = reinterpret_cast<const IMAGE_NT_HEADERS32*>(base + reinterpret_cast<const IMAGE_DOS_HEADER*>(base)->e_lfanew);
-+    return nt->OptionalHeader.SizeOfImage;
++  // A request file asks for something once: true if it is there, and then it is deleted
++  static bool TakeDiagnosticsRequest(const char* fileName) {
++    const std::string path = GetMxoDiagnosticsPath(fileName);
++
++    if (::GetFileAttributesA(path.c_str()) == INVALID_FILE_ATTRIBUTES)
++      return false;
++
++    ::DeleteFileA(path.c_str());
++    return true;
 +  }
 +
 +  static DWORD WINAPI SamplerThreadProc(void*) {
-+    static const uint32_t MaxSamples = 60000;
++    static constexpr uint32_t MaxSamples       = 60000;   // per write to the file
++    static constexpr uint32_t MaxThreads       = 64;
++    static constexpr DWORD    IntervalMs       = 5;
++    static constexpr DWORD    LightIntervalMs  = 20;
++    static constexpr DWORD    ScanIntervalMs   = 2000;    // for new threads and modules
++    static constexpr DWORD    WriteIntervalMs  = 10000;
++    static constexpr uint32_t StackWords       = 192;     // how far up the stack return addresses are looked for
++
 +    static SampleRecord samples[MaxSamples];
 +    struct Thread { DWORD tid; HANDLE handle; };
-+    static Thread threads[64];
++    static Thread threads[MaxThreads];
 +    uint32_t threadCount = 0;
 +    uint32_t count = 0;
-+    DWORD lastFlush = ::GetTickCount();
-+    DWORD lastScan  = lastFlush - 10000;
++    bool reportedFull = false;
++    DWORD lastWrite = ::GetTickCount();
++    DWORD lastScan  = lastWrite - ScanIntervalMs;
 +
 +    HMODULE self = nullptr;
 +    ::GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
@@ -1826,23 +2144,26 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +    uint32_t range[3][2] = { };   // [this DLL, client.dll, winevulkan.dll] x [base, end)
 +    range[0][0] = uint32_t(uintptr_t(self));
-+    range[0][1] = range[0][0] + ImageSize(self);
++    range[0][1] = range[0][0] + GetModuleImageSize(self);
 +
-+    // Light mode (C:\\Games\\dxvk\\sample-light.flag): only the thread that presents, every 20 ms.
-+    // Pausing every thread every 5 ms makes the game's own memory writes far slower than they are.
-+    const bool light = ::GetFileAttributesA("C:\\Games\\dxvk\\sample-light.flag") != INVALID_FILE_ATTRIBUTES;
++    // Light mode (sample-light.flag): only the thread that presents and DXVK's own, at the longer interval.
++    // Pausing every thread at the short one makes the game's own memory writes far slower than they are.
++    const bool light = HasDiagnosticsFile("sample-light.flag");
++
++    const std::string modulesPath = GetMxoDiagnosticsPath("modules.txt");
++    const std::string samplesPath = GetMxoDiagnosticsPath("samples.bin");
 +
 +    for (;;) {
-+      ::Sleep(light ? 20 : 5);
++      ::Sleep(light ? LightIntervalMs : IntervalMs);
 +      const DWORD now = ::GetTickCount();
 +
-+      if (now - lastScan >= 2000) {
++      if (now - lastScan >= ScanIntervalMs) {
 +        lastScan = now;
 +
 +        HMODULE client = ::GetModuleHandleA("client.dll");
 +        HMODULE vulkan = ::GetModuleHandleA("winevulkan.dll");
-+        range[1][0] = uint32_t(uintptr_t(client)); range[1][1] = range[1][0] + ImageSize(client);
-+        range[2][0] = uint32_t(uintptr_t(vulkan)); range[2][1] = range[2][0] + ImageSize(vulkan);
++        range[1][0] = uint32_t(uintptr_t(client)); range[1][1] = range[1][0] + GetModuleImageSize(client);
++        range[2][0] = uint32_t(uintptr_t(vulkan)); range[2][1] = range[2][0] + GetModuleImageSize(vulkan);
 +
 +        HANDLE snapshot = ::CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
 +
@@ -1859,7 +2180,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +            for (uint32_t i = 0; i < threadCount && !known; i++)
 +              known = threads[i].tid == entry.th32ThreadID;
 +
-+            if (known || threadCount >= 64)
++            if (known || threadCount >= MaxThreads)
 +              continue;
 +
 +            if (HANDLE handle = ::OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION, FALSE, entry.th32ThreadID))
@@ -1869,7 +2190,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +          ::CloseHandle(snapshot);
 +        }
 +
-+        // Where every module sits (C:\\Games\\dxvk\\modules.txt, rewritten when the list changes), so that
++        // Where every module sits (modules.txt, rewritten when the list changes), so that
 +        // samples outside this DLL and client.dll can be named: "base size name", hex.
 +        static uint32_t s_moduleSum = 0;
 +        snapshot = ::CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, 0);
@@ -1893,7 +2214,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +          if (sum != s_moduleSum) {
 +            s_moduleSum = sum;
-+            if (FILE* file = std::fopen("C:\\Games\\dxvk\\modules.txt", "w")) {
++            if (FILE* file = std::fopen(modulesPath.c_str(), "w")) {
 +              std::fwrite(text, 1, used, file);
 +              std::fclose(file);
 +            }
@@ -1926,15 +2247,15 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +          uint32_t selfCount = 0;
 +          auto stack = reinterpret_cast<const uint32_t*>(uintptr_t(context.Esp));
 +
-+          if (context.Esp && !::IsBadReadPtr(stack, 4 * 192)) {
-+            for (uint32_t k = 0; k < 192; k++) {
++          if (context.Esp && !::IsBadReadPtr(stack, sizeof(uint32_t) * StackWords)) {
++            for (uint32_t k = 0; k < StackWords; k++) {
 +              const uint32_t value = stack[k];
 +
-+              if (value >= range[0][0] + 0x1000 && value < range[0][1]) {
-+                if (selfCount < 3 && FollowsCall(value)) record.retSelf[selfCount++] = value;
-+              } else if (value >= range[1][0] + 0x1000 && value < range[1][1]) {
-+                if (clientCount < 3 && FollowsCall(value)) record.retClient[clientCount++] = value;
-+              } else if (value >= range[2][0] + 0x1000 && value < range[2][1]) {
++              if (value >= range[0][0] + ModuleHeaderSize && value < range[0][1]) {
++                if (selfCount < std::size(record.retSelf) && FollowsCall(value)) record.retSelf[selfCount++] = value;
++              } else if (value >= range[1][0] + ModuleHeaderSize && value < range[1][1]) {
++                if (clientCount < std::size(record.retClient) && FollowsCall(value)) record.retClient[clientCount++] = value;
++              } else if (value >= range[2][0] + ModuleHeaderSize && value < range[2][1]) {
 +                if (!record.retVulkan && FollowsCall(value)) record.retVulkan = value;
 +              }
 +            }
@@ -1946,17 +2267,23 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +        ::ResumeThread(threads[i].handle);
 +      }
 +
-+      if (now - lastFlush < 10000)
++      if (count == MaxSamples && !reportedFull) {
++        reportedFull = true;
++        Logger::info(str::format("MxO: the profiler holds ", MaxSamples, " samples between writes to its file, the rest of each interval is lost"));
++      }
++
++      if (now - lastWrite < WriteIntervalMs)
 +        continue;
 +
-+      lastFlush = now;
++      lastWrite = now;
 +
-+      if (FILE* file = std::fopen("C:\\Games\\dxvk\\samples.bin", "ab")) {
++      if (FILE* file = std::fopen(samplesPath.c_str(), "ab")) {
 +        const env::ThreadNameEntry* names = nullptr;
 +        const uint32_t nameCount = env::getThreadNames(&names);
-+        const uint32_t head[10] = { 0x34504d53u /* SMP4 */, count, range[1][0], range[0][0], range[0][1] - range[0][0],
++        static constexpr uint32_t FileMagic = 0x34504d53u;   // "SMP4", the format profile2.py expects
++        const uint32_t head[] = { FileMagic, count, range[1][0], range[0][0], range[0][1] - range[0][0],
 +          range[2][0], range[2][1] - range[2][0], uint32_t(s_presentThreadId), nameCount, 0 };
-+        std::fwrite(head, 4, 10, file);
++        std::fwrite(head, sizeof(head[0]), std::size(head), file);
 +        std::fwrite(names, sizeof(env::ThreadNameEntry), nameCount, file);
 +        std::fwrite(samples, sizeof(SampleRecord), count, file);
 +        std::fclose(file);
@@ -1968,8 +2295,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +  static void StartSamplerOnce() {
 +    static const bool s_started = [] {
-+      if (::GetFileAttributesA("C:\\Games\\dxvk\\sample.flag") == INVALID_FILE_ATTRIBUTES
-+       && ::GetFileAttributesA("C:\\Games\\dxvk\\sample-light.flag") == INVALID_FILE_ATTRIBUTES)
++      if (!HasDiagnosticsFile("sample.flag") && !HasDiagnosticsFile("sample-light.flag"))
 +        return false;
 +
 +      s_presentThreadId = ::GetCurrentThreadId();
@@ -1985,11 +2311,16 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +  }
 +
 +
-+  // Optional diagnostics, enabled by creating the file C:\Games\dxvk\debug.flag before the game starts:
-+  //  - logs the number of presented frames every five seconds
-+  //  - saves the back buffer to C:\Games\dxvk\shot.bmp whenever C:\Games\dxvk\shot.req appears
++  // Optional diagnostics, enabled by creating the file debug.flag in the diagnostics folder before the game starts:
++  //  - logs the number of presented frames at regular intervals, and every slow frame
++  //  - saves the back buffer to shot.bmp in that folder whenever shot.req appears there
 +  static void DebugFrameTools(D3D9DeviceEx* device, IDirect3DSurface9* backBuffer) {
-+    static const bool s_enabled = ::GetFileAttributesA("C:\\Games\\dxvk\\debug.flag") != INVALID_FILE_ATTRIBUTES;
++    static constexpr uint64_t LogIntervalSeconds = 5;
++    static constexpr uint64_t RequestChecksPerSecond = 2;   // how often the request files are looked for
++    static constexpr uint64_t SpikeUs = 40000;              // a frame this slow gets a SPIKE line
++    static constexpr uint32_t MaxSpikeLines = 400;
++
++    static const bool s_enabled = HasDiagnosticsFile("debug.flag");
 +
 +    if (likely(!s_enabled))
 +      return;
@@ -2019,7 +2350,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +    if (!s_lastLog)
 +      s_lastLog = now;
 +
-+    // Spike lines: any frame slower than 40 ms, with what happened during it
++    // Spike lines: any slow frame, with what happened during it
 +    {
 +      static uint64_t s_prevPresent = 0;
 +      static uint32_t s_spikes = 0;
@@ -2028,33 +2359,30 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +      const uint64_t frameUs = s_prevPresent ? (now - s_prevPresent) * 1000000 / second : 0;
 +      s_prevPresent = now;
 +
-+      static const char* const spikeNames[] = { "SetRenderTarget", "Clear", "EndScene", "StretchRect", "texture locks",
-+        "texture uploads", "buffer uploads", "buffer renames", "ColorFill", "GetRenderTargetData",
-+        "SWVP constant uploads", "SWVP vec4s", "HW constant uploads", "new buffers", "KB cleared", "KB new mapped memory",
-+        "KB copied by renames", "KB zero-filled", "us zero-filling", "us clearing", "us prefaulting", "prefault failures",
-+        "KB warmed", "us warming", "warm chunks used", "warm misses", "pipelines built", "us building pipelines" };
-+      static_assert(sizeof(spikeNames) / sizeof(spikeNames[0]) == uint32_t(DxvkDebugCounter::Count));
-+
++      const bool spike = frameUs >= SpikeUs && s_spikes < MaxSpikeLines;
 +      std::string what;
++
 +      for (uint32_t i = 0; i < uint32_t(DxvkDebugCounter::Count); i++) {
 +        const uint32_t n = DxvkDebugCounters::s_frame[i].exchange(0);
-+        if (n && frameUs >= 40000)
-+          what += str::format(", ", spikeNames[i], " ", n);
++        if (n && spike)
++          what += str::format(", ", DxvkDebugCounterNames[i], " ", n);
 +      }
 +
-+      if (frameUs >= 40000 && s_spikes < 400) {
-+        s_spikes++;
++      if (spike) {
 +        auto d = [&] (DxvkStatCounter c) { return frameCounters.getCtr(c) - s_prevFrame.getCtr(c); };
 +        Logger::info(str::format("SPIKE ", frameUs / 1000, " ms: draws ", d(DxvkStatCounter::CmdDrawCalls),
 +          ", waits for render thread ", d(DxvkStatCounter::CsSyncCount), " = ", d(DxvkStatCounter::CsSyncTicks), " us",
 +          ", waits for GPU ", d(DxvkStatCounter::GpuSyncCount), " = ", d(DxvkStatCounter::GpuSyncTicks), " us",
 +          ", pipelines total ", frameCounters.getCtr(DxvkStatCounter::PipeCountGraphics), what));
++
++        if (++s_spikes == MaxSpikeLines)
++          Logger::info(str::format("SPIKE lines end here, ", MaxSpikeLines, " are logged"));
 +      }
 +
 +      s_prevFrame = frameCounters;
 +    }
 +
-+    if (now - s_lastLog >= 5 * second) {
++    if (now - s_lastLog >= LogIntervalSeconds * second) {
 +      // what the graphics layer did per frame, and how long this thread sat waiting for it
 +      static DxvkStatCounters s_lastCounters;
 +      const DxvkStatCounters counters = device->GetDXVKDevice()->getStatCounters();
@@ -2074,15 +2402,12 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +      s_lastCounters = counters;
 +
 +      // what the game asked for, and where render passes were broken up (callers by offset in this DLL)
-+      static const char* const names[] = { "SetRenderTarget", "Clear", "EndScene", "StretchRect", "texture locks",
-+        "texture uploads", "buffer uploads", "buffer renames", "ColorFill", "GetRenderTargetData",
-+        "SWVP constant uploads", "SWVP constant vec4s copied", "HW constant uploads", "new buffers", "KB cleared", "KB new mapped memory", "KB copied by renames", "KB zero-filled at creation", "us zero-filling", "us clearing", "us prefaulting", "prefault failures", "KB warmed (background)", "us warming (background)", "warm chunks used", "warm misses", "pipelines built at draw time", "us building pipelines" };
 +      std::string calls;
 +
 +      for (uint32_t i = 0; i < uint32_t(DxvkDebugCounter::Count); i++) {
 +        const uint32_t n = DxvkDebugCounters::s_value[i].exchange(0);
 +        if (n)
-+          calls += str::format(" ", names[i], " ", n * 10 / frames, "/10");
++          calls += str::format(" ", DxvkDebugCounterNames[i], " ", n * 10 / frames, "/10");
 +      }
 +
 +      HMODULE self = nullptr;
@@ -2105,27 +2430,33 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +    if (DxvkDrawLog::s_active.load() && DxvkDrawLog::s_active.fetch_sub(1) == 1)
 +      Logger::info(str::format("DRAWLOG end: ", DxvkDrawLog::s_index.load(), " draws"));
 +
-+    if (now - s_lastCheck < second / 2)
++    if (now - s_lastCheck < second / RequestChecksPerSecond)
 +      return;
 +
 +    s_lastCheck = now;
 +
-+    if (::GetFileAttributesA("C:\\Games\\dxvk\\drawlog.req") != INVALID_FILE_ATTRIBUTES) {
-+      ::DeleteFileA("C:\\Games\\dxvk\\drawlog.req");
++    if (TakeDiagnosticsRequest("drawlog.req")) {
 +      DxvkDrawLog::s_index = 0;
 +      Logger::info("DRAWLOG begin");
 +      DxvkDrawLog::s_active = 1;
 +    }
 +
-+    if (::GetFileAttributesA("C:\\Games\\dxvk\\shot.req") == INVALID_FILE_ATTRIBUTES)
++    if (!TakeDiagnosticsRequest("shot.req"))
 +      return;
-+
-+    ::DeleteFileA("C:\\Games\\dxvk\\shot.req");
 +
 +    D3DSURFACE_DESC desc;
 +
 +    if (!backBuffer || FAILED(backBuffer->GetDesc(&desc)))
 +      return;
++
++    // the copy below takes three of four bytes per pixel
++    static constexpr uint32_t SourceBytesPerPixel = 4;
++    static constexpr uint32_t BmpBytesPerPixel    = 3;
++
++    if (desc.Format != D3DFMT_X8R8G8B8 && desc.Format != D3DFMT_A8R8G8B8) {
++      Logger::warn(str::format("SHOT not saved: the back buffer has format ", uint32_t(desc.Format), ", which is not one with 8 bits per colour"));
++      return;
++    }
 +
 +    Com<IDirect3DSurface9> dst;
 +    HRESULT hr = device->CreateOffscreenPlainSurface(desc.Width, desc.Height, desc.Format, D3DPOOL_SYSTEMMEM, &dst, nullptr);
@@ -2139,42 +2470,66 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +      hr = dst->LockRect(&lr, nullptr, D3DLOCK_READONLY);
 +
 +    if (FAILED(hr)) {
-+      Logger::info(str::format("SHOT failed hr=0x", std::hex, uint32_t(hr)));
++      Logger::warn(str::format("SHOT not saved: reading the back buffer failed, hr=0x", std::hex, uint32_t(hr)));
 +      return;
 +    }
 +
-+    const uint32_t w = desc.Width, h = desc.Height, stride = (w * 3 + 3) & ~3u, size = stride * h;
-+    std::vector<uint8_t> out(54 + size, 0);
-+    uint8_t* hd = out.data();
-+    hd[0] = 'B'; hd[1] = 'M';
-+    auto put32 = [&] (uint32_t off, uint32_t v) { std::memcpy(hd + off, &v, 4); };
-+    put32(2, 54 + size); put32(10, 54); put32(14, 40); put32(18, w); put32(22, h);
-+    hd[26] = 1; hd[28] = 24; put32(34, size);
++    // a BMP file: two headers, then the rows from the bottom up, each padded to four bytes
++    const uint32_t w = desc.Width, h = desc.Height;
++    const uint32_t stride = (w * BmpBytesPerPixel + 3) & ~3u;
++    const uint32_t size   = stride * h;
++
++    BITMAPFILEHEADER fileHeader = { };
++    BITMAPINFOHEADER infoHeader = { };
++    const uint32_t headerSize = sizeof(fileHeader) + sizeof(infoHeader);
++    static_assert(sizeof(fileHeader) + sizeof(infoHeader) == 54, "the two BMP headers are written as they are in memory");
++
++    fileHeader.bfType      = 0x4d42;   // "BM"
++    fileHeader.bfSize      = headerSize + size;
++    fileHeader.bfOffBits   = headerSize;
++    infoHeader.biSize      = sizeof(infoHeader);
++    infoHeader.biWidth     = LONG(w);
++    infoHeader.biHeight    = LONG(h);
++    infoHeader.biPlanes    = 1;
++    infoHeader.biBitCount  = 8 * BmpBytesPerPixel;
++    infoHeader.biSizeImage = size;
++
++    std::vector<uint8_t> out(headerSize + size, 0);
++    std::memcpy(out.data(), &fileHeader, sizeof(fileHeader));
++    std::memcpy(out.data() + sizeof(fileHeader), &infoHeader, sizeof(infoHeader));
 +
 +    for (uint32_t y = 0; y < h; y++) {
 +      const uint8_t* src = reinterpret_cast<const uint8_t*>(lr.pBits) + size_t(lr.Pitch) * y;
-+      uint8_t* row = hd + 54 + size_t(stride) * (h - 1 - y);
-+      for (uint32_t x = 0; x < w; x++) { row[x * 3] = src[x * 4]; row[x * 3 + 1] = src[x * 4 + 1]; row[x * 3 + 2] = src[x * 4 + 2]; }
++      uint8_t* row = out.data() + headerSize + size_t(stride) * (h - 1 - y);
++
++      for (uint32_t x = 0; x < w; x++)
++        std::memcpy(row + x * BmpBytesPerPixel, src + x * SourceBytesPerPixel, BmpBytesPerPixel);
 +    }
 +
 +    dst->UnlockRect();
 +
-+    HANDLE f = ::CreateFileA("C:\\Games\\dxvk\\shot.bmp", GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
++    HANDLE f = ::CreateFileA(GetMxoDiagnosticsPath("shot.bmp").c_str(), GENERIC_WRITE, 0, nullptr,
++      CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
++    DWORD written = 0;
++    const bool saved = f != INVALID_HANDLE_VALUE
++      && ::WriteFile(f, out.data(), DWORD(out.size()), &written, nullptr)
++      && written == out.size();
++    const DWORD error = saved ? 0 : ::GetLastError();
 +
-+    if (f != INVALID_HANDLE_VALUE) {
-+      DWORD written = 0;
-+      ::WriteFile(f, out.data(), DWORD(out.size()), &written, nullptr);
++    if (f != INVALID_HANDLE_VALUE)
 +      ::CloseHandle(f);
-+    }
 +
-+    Logger::info(str::format("SHOT saved ", w, "x", h));
++    if (saved)
++      Logger::info(str::format("SHOT saved ", w, "x", h));
++    else
++      Logger::warn(str::format("SHOT not saved: shot.bmp could not be written, error ", error));
 +  }
 +
 +
    D3D9SwapChainEx::D3D9SwapChainEx(
            D3D9DeviceEx*          pDevice,
            D3DPRESENT_PARAMETERS* pPresentParams,
-@@ -255,6 +853,12 @@
+@@ -255,6 +938,12 @@
            HWND     hDestWindowOverride,
      const RGNDATA* pDirtyRegion,
            DWORD    dwFlags) {
@@ -2187,7 +2542,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      D3D9DeviceLock lock = m_parent->LockDevice();
  
      uint32_t presentInterval = m_presentParams.PresentationInterval;
-@@ -852,11 +1456,103 @@
+@@ -852,11 +1541,105 @@
          {  int32_t(m_dstRect.left),                    int32_t(m_dstRect.top)                    },
          { uint32_t(m_dstRect.right - m_dstRect.left), uint32_t(m_dstRect.bottom - m_dstRect.top) } };
  
@@ -2209,8 +2564,10 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +      // Log every size involved in placing the picture whenever one of them changes, so that a
 +      // picture in the wrong place can be explained from the log alone. The cheap sizes are compared
-+      // every frame, the window and monitor rectangles every 60 frames, the client size and display
++      // every frame, the window and monitor rectangles every few frames, the client size and display
 +      // mode are read only when something changed. All of this is kept per swap chain.
++      static constexpr uint32_t WindowCheckFrames = 60;
++
 +      const int32_t cheap[] = {
 +        int32_t(m_presentParams.BackBufferWidth), int32_t(m_presentParams.BackBufferHeight),
 +        int32_t(m_dstRect.right - m_dstRect.left), int32_t(m_dstRect.bottom - m_dstRect.top),
@@ -2218,7 +2575,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +      static_assert(sizeof(cheap) == sizeof(m_mxoLoggedSizes));
 +      const bool cheapChanged = std::memcmp(cheap, m_mxoLoggedSizes, sizeof(cheap)) != 0;
 +
-+      if (cheapChanged || m_frameId % 60 == 0) {
++      if (cheapChanged || m_frameId % WindowCheckFrames == 0) {
 +        std::memcpy(m_mxoLoggedSizes, cheap, sizeof(cheap));
 +
 +        RECT win = { };
@@ -2380,7 +2737,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +      if (dynamicCount) {
 +        uint32_t floatType = m_module.defFloatType(32);
-+        uint32_t member    = m_module.constu32(11);
++        uint32_t member    = m_module.constu32(uint32_t(D3D9RenderStateItem::SwvpFloatCount));
 +        uint32_t countPtr  = m_module.opAccessChain(
 +          m_module.defPointerType(floatType, spv::StorageClassPushConstant),
 +          m_rsBlock, 1, &member);
@@ -2471,7 +2828,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      robustness2Supported = devFeatures.extRobustness2.robustBufferAccess2;
 +
 +    swvpDynamicConstCount = !robustness2Supported
-+      && env::getEnvVar("DXVK_MXO_SWVP_COUNT") != "0";
++      && env::isFixEnabled("DXVK_MXO_SWVP_COUNT");
    }
  
  }
@@ -2550,7 +2907,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +  // tile-based GPU every interrupted pass costs a full store and reload of the render targets.
 +  // DXVK_HOIST_UPLOADS=0 turns this off.
 +  static bool earlyUploadsEnabled() {
-+    static const bool s_enabled = env::getEnvVar("DXVK_HOIST_UPLOADS") != "0";
++    static const bool s_enabled = env::isFixEnabled("DXVK_HOIST_UPLOADS");
 +    return s_enabled;
 +  }
 +
@@ -2677,10 +3034,10 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/dxvk/dxvk_debug_counters.h b/src/dxvk/dxvk_debug_counters.h
 --- a/src/dxvk/dxvk_debug_counters.h	2026-11-19 00:00:00
 +++ b/src/dxvk/dxvk_debug_counters.h	2026-11-19 00:00:00
-@@ -0,0 +1,70 @@
+@@ -0,0 +1,91 @@
 +#pragma once
 +
-+// Diagnostic counters read by the D3D9 front end's optional frame log (C:\Games\dxvk\debug.flag).
++// Diagnostic counters read by the D3D9 front end's optional frame log (debug.flag).
 +// Written from the rendering threads without locking. The values are statistics, not state.
 +
 +#include <atomic>
@@ -2715,11 +3072,32 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +    }
 +  };
 +
-+  /// Calls the application made, per kind
++  /// What the frame log counts: calls of the application, the work they led to, kilobytes and microseconds
 +  enum class DxvkDebugCounter : uint32_t {
-+    SetRenderTarget, Clear, EndScene, StretchRect, TextureLock, TextureUpload, BufferUpload, BufferRename,
-+    ColorFill, GetRenderTargetData, SwvpConstUploads, SwvpConstVec4, HwConstUploads, BufferAllocs, BufferClearKB, NewMappedKB, RenameCopyKB, InitFillKB, InitFillUs, ClearUs, PrefaultUs, PrefaultFailed, WarmKB, WarmUs, WarmChunksUsed, WarmMisses, PipelineBuilds, PipelineBuildUs, Count
++    SetRenderTarget, Clear, EndScene, StretchRect,
++    TextureLock, TextureUpload, BufferUpload, BufferRename,
++    ColorFill, GetRenderTargetData,
++    SwvpConstUploads, SwvpConstVec4, HwConstUploads,
++    BufferAllocs, BufferClearKB, NewMappedKB, RenameCopyKB,
++    InitFillKB, InitFillUs, ClearUs,
++    PrefaultUs, PrefaultFailed,
++    PipelineBuilds, PipelineBuildUs,
++    Count
 +  };
++
++  /// What the frame log calls each counter, in the order of the enum
++  inline constexpr const char* DxvkDebugCounterNames[] = {
++    "SetRenderTarget", "Clear", "EndScene", "StretchRect",
++    "texture locks", "texture uploads", "buffer uploads", "buffer renames",
++    "ColorFill", "GetRenderTargetData",
++    "SWVP constant uploads", "SWVP constant vec4s copied", "HW constant uploads",
++    "new buffers", "KB cleared", "KB new mapped memory", "KB copied by renames",
++    "KB zero-filled at creation", "us zero-filling", "us clearing",
++    "us prefaulting", "prefault failures",
++    "pipelines built at draw time", "us building pipelines",
++  };
++
++  static_assert(sizeof(DxvkDebugCounterNames) / sizeof(DxvkDebugCounterNames[0]) == uint32_t(DxvkDebugCounter::Count));
 +
 +  struct DxvkDebugCounters {
 +    static inline std::atomic<uint32_t> s_value[uint32_t(DxvkDebugCounter::Count)] = { };
@@ -2728,7 +3106,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +    static void add(DxvkDebugCounter c, uint32_t n) { s_value[uint32_t(c)] += n; s_frame[uint32_t(c)] += n; }
 +  };
 +
-+  /// One-frame draw log (debug.flag + C:\Games\dxvk\drawlog.req): nonzero while active
++  /// One-frame draw log (debug.flag and drawlog.req): nonzero while active
 +  struct DxvkDrawLog {
 +    static inline std::atomic<uint32_t> s_active = { 0 };
 +    static inline std::atomic<uint32_t> s_index  = { 0 };
@@ -2779,146 +3157,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
  
  namespace dxvk {
    
-@@ -232,12 +233,128 @@
-         }
-       }
-     }
-+
-+    const std::string warm = env::getEnvVar("DXVK_WARM_MEMORY_MB");
-+    m_warmTarget = VkDeviceSize(warm.empty() ? 0u : uint32_t(std::strtoul(warm.c_str(), nullptr, 10))) << 20;
-+
-+    if (m_warmTarget)
-+      m_warmThread = dxvk::thread([this] { warmFunc(); });
-   }
-   
-   
-   DxvkMemoryAllocator::~DxvkMemoryAllocator() {
--    
-+    if (m_warmThread.joinable()) {
-+      { std::lock_guard<dxvk::mutex> lock(m_mutex);
-+        m_warmStop = true; }
-+
-+      m_warmCond.notify_all();
-+      m_warmThread.join();
-+    }
-+
-+    for (uint32_t i = 0; i < VK_MAX_MEMORY_TYPES; i++) {
-+      for (const auto& memory : m_warmPool[i])
-+        freeDeviceMemory(&m_memTypes[i], memory);
-+    }
-   }
-+
-+
-+  DxvkDeviceMemory DxvkMemoryAllocator::takeWarmMemory(
-+          DxvkMemoryType*       type,
-+          VkMemoryPropertyFlags flags,
-+          VkDeviceSize          size) {
-+    if (!m_warmTarget || !(type->memType.propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT))
-+      return DxvkDeviceMemory();
-+
-+    const uint32_t t = type->memTypeId;
-+
-+    if (m_warmChunkSize[t] != size) {
-+      // first chunk of this type: start keeping a reserve for it
-+      if (!m_warmChunkSize[t]) {
-+        m_warmChunkSize[t] = size;
-+        m_warmCond.notify_one();
-+      }
-+      return DxvkDeviceMemory();
-+    }
-+
-+    auto& pool = m_warmPool[t];
-+
-+    if (pool.empty()) {
-+      DxvkDebugCounters::add(DxvkDebugCounter::WarmMisses);
-+      return DxvkDeviceMemory();
-+    }
-+
-+    DxvkDeviceMemory result = pool.back();
-+    pool.pop_back();
-+    result.memFlags = flags;
-+
-+    DxvkDebugCounters::add(DxvkDebugCounter::WarmChunksUsed);
-+    m_warmCond.notify_one();
-+    return result;
-+  }
-+
-+
-+  void DxvkMemoryAllocator::warmFunc() {
-+    env::setThreadName("dxvk-warm");
-+
-+    std::unique_lock<dxvk::mutex> lock(m_mutex);
-+
-+    while (!m_warmStop) {
-+      uint32_t t = VK_MAX_MEMORY_TYPES;
-+
-+      for (uint32_t i = 0; i < m_memProps.memoryTypeCount && t == VK_MAX_MEMORY_TYPES; i++) {
-+        if (m_warmChunkSize[i] && (m_warmPool[i].size() + 1) * m_warmChunkSize[i] <= m_warmTarget)
-+          t = i;
-+      }
-+
-+      if (t == VK_MAX_MEMORY_TYPES) {
-+        m_warmCond.wait(lock);
-+        continue;
-+      }
-+
-+      DxvkMemoryType* type = &m_memTypes[t];
-+      const VkDeviceSize size = m_warmChunkSize[t];
-+
-+      if (type->heap->budget && type->heap->stats.memoryAllocated + size > type->heap->budget) {
-+        m_warmCond.wait(lock);
-+        continue;
-+      }
-+
-+      lock.unlock();
-+
-+      VkMemoryAllocateInfo info = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
-+      info.allocationSize  = size;
-+      info.memoryTypeIndex = t;
-+
-+      DxvkDeviceMemory memory;
-+      memory.memSize  = size;
-+      memory.memFlags = type->memType.propertyFlags;
-+
-+      bool ok = m_vkd->vkAllocateMemory(m_vkd->device(), &info, nullptr, &memory.memHandle) == VK_SUCCESS;
-+
-+      if (ok && m_vkd->vkMapMemory(m_vkd->device(), memory.memHandle, 0, VK_WHOLE_SIZE, 0, &memory.memPointer) != VK_SUCCESS) {
-+        m_vkd->vkFreeMemory(m_vkd->device(), memory.memHandle, nullptr);
-+        ok = false;
-+      }
-+
-+      if (ok) {
-+        DxvkDebugCounters::add(DxvkDebugCounter::WarmKB, uint32_t(size >> 10));
-+        DxvkDebugTimer timer(DxvkDebugCounter::WarmUs);
-+        std::memset(memory.memPointer, 0, size);
-+      }
-+
-+      lock.lock();
-+
-+      if (!ok) {
-+        Logger::warn("DxvkMemoryAllocator: memory warming stopped, allocation failed");
-+        m_warmTarget = 0;
-+        break;
-+      }
-+
-+      type->heap->stats.memoryAllocated += size;
-+      m_device->adapter()->notifyHeapMemoryAlloc(type->heapId, size);
-+      m_warmPool[t].push_back(memory);
-+    }
-+  }
-   
-   
-   DxvkMemory DxvkMemoryAllocator::alloc(
-@@ -370,6 +487,8 @@
-         if (this->shouldFreeEmptyChunks(type->heap, chunkSize))
-           this->freeEmptyChunks(type->heap);
- 
-+        devMem = takeWarmMemory(type, flags, chunkSize);
-+
-         for (uint32_t i = 0; i < 6 && (chunkSize >> i) >= size && !devMem.memHandle; i++)
-           devMem = tryAllocDeviceMemory(type, flags, chunkSize >> i, hints, nullptr);
- 
-@@ -389,6 +508,35 @@
+@@ -389,6 +390,46 @@
    }
    
    
@@ -2934,8 +3173,11 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +  // memory again takes about a second. Locked pages are never compressed or swapped. They are
 +  // released when the memory is freed. DXVK_LOCK_MAPPED_MEMORY=0 unlocks them right away instead.
 +  static void PrefaultMappedMemory(void* ptr, VkDeviceSize size) {
-+    static const bool s_enabled = env::getEnvVar("DXVK_PREFAULT_MAPPED_MEMORY") != "0";
-+    static const bool s_keepLocked = env::getEnvVar("DXVK_LOCK_MAPPED_MEMORY") != "0";
++    // enough to see that locking fails, without a line for every allocation
++    static constexpr uint32_t MaxWarnings = 4;
++
++    static const bool s_enabled = env::isFixEnabled("DXVK_PREFAULT_MAPPED_MEMORY");
++    static const bool s_keepLocked = env::isFixEnabled("DXVK_LOCK_MAPPED_MEMORY");
 +
 +    if (!s_enabled || !ptr || !size)
 +      return;
@@ -2946,7 +3188,15 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +      if (!s_keepLocked)
 +        ::VirtualUnlock(ptr, SIZE_T(size));
 +    } else {
++      const DWORD error = ::GetLastError();
++      static std::atomic<uint32_t> s_warnings = { 0u };
++
 +      DxvkDebugCounters::add(DxvkDebugCounter::PrefaultFailed);
++
++      if (s_warnings++ < MaxWarnings) {
++        Logger::warn(str::format("MxO: ", size >> 10, " KB of mapped memory could not be locked (error ", error,
++          "), the first write to each page of it will stall"));
++      }
 +    }
 +  }
 +
@@ -2954,7 +3204,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
    DxvkDeviceMemory DxvkMemoryAllocator::tryAllocDeviceMemory(
            DxvkMemoryType*                   type,
            VkMemoryPropertyFlags             flags,
-@@ -435,6 +583,9 @@
+@@ -435,6 +476,9 @@
          m_vkd->vkFreeMemory(m_vkd->device(), result.memHandle, nullptr);
          return DxvkDeviceMemory();
        }
@@ -2964,7 +3214,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      }
  
      type->heap->stats.memoryAllocated += size;
-@@ -524,6 +675,27 @@
+@@ -524,6 +568,29 @@
      // Under memory pressure, we should start freeing everything.
      if (this->shouldFreeEmptyChunks(type->heap, 0))
        return true;
@@ -2972,12 +3222,14 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +    // Wine maps all memory of a game whose executable is not NX-compatible as executable, and
 +    // under Rosetta the first write to each page of new memory is slow. Keep emptied
 +    // host-visible chunks for reuse instead of handing them back, up to
-+    // DXVK_KEEP_EMPTY_CHUNKS_MB (default 256) per memory type. 0 restores the old behaviour.
++    // DXVK_KEEP_EMPTY_CHUNKS_MB (default 256) per memory type. 0 keeps one, as DXVK does.
 +    if (type->memType.propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) {
-+      static const VkDeviceSize s_keep = [] {
-+        const std::string v = env::getEnvVar("DXVK_KEEP_EMPTY_CHUNKS_MB");
-+        return VkDeviceSize(v.empty() ? 256u : uint32_t(std::strtoul(v.c_str(), nullptr, 10))) << 20;
-+      } ();
++      static constexpr uint32_t DefaultKeptMB = 256;
++      // a 32-bit game has 4 GB of address space for everything it maps
++      static constexpr uint32_t MaxKeptMB = 1024;
++
++      static const VkDeviceSize s_keep =
++        VkDeviceSize(env::getEnvSizeMB("DXVK_KEEP_EMPTY_CHUNKS_MB", DefaultKeptMB, MaxKeptMB)) << 20;
 +
 +      VkDeviceSize empty = 0;
 +
@@ -2995,39 +3247,19 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/dxvk/dxvk_memory.h b/src/dxvk/dxvk_memory.h
 --- a/src/dxvk/dxvk_memory.h	2026-11-19 00:00:00
 +++ b/src/dxvk/dxvk_memory.h	2026-11-19 00:00:00
-@@ -257,6 +257,8 @@
+@@ -257,6 +257,12 @@
       */
      bool isCompatible(const Rc<DxvkMemoryChunk>& other) const;
  
++    /**
++     * \brief Size of the chunk
++     * \returns Size of the chunk's memory, in bytes
++     */
 +    VkDeviceSize size() const { return m_memory.memSize; }
 +
    private:
      
      struct FreeSlice {
-@@ -392,6 +394,23 @@
- 
-     void freeEmptyChunks(
-       const DxvkMemoryHeap*       heap);
-+
-+    // Background warming of host-visible memory: a thread allocates whole chunks ahead of
-+    // time and writes every page once, so the rendering threads get memory whose first-write
-+    // cost has already been paid. DXVK_WARM_MEMORY_MB per memory type (default 0 = off. Revived never needed it once freed chunks are kept).
-+    dxvk::condition_variable                                       m_warmCond;
-+    dxvk::thread                                                   m_warmThread;
-+    bool                                                           m_warmStop   = false;
-+    VkDeviceSize                                                   m_warmTarget = 0;
-+    std::array<std::vector<DxvkDeviceMemory>, VK_MAX_MEMORY_TYPES> m_warmPool;
-+    std::array<VkDeviceSize, VK_MAX_MEMORY_TYPES>                  m_warmChunkSize = { };
-+
-+    void warmFunc();
-+
-+    DxvkDeviceMemory takeWarmMemory(
-+            DxvkMemoryType*       type,
-+            VkMemoryPropertyFlags flags,
-+            VkDeviceSize          size);
- 
-   };
-   
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/dxvk/dxvk_resource.h b/src/dxvk/dxvk_resource.h
 --- a/src/dxvk/dxvk_resource.h	2026-11-19 00:00:00
 +++ b/src/dxvk/dxvk_resource.h	2026-11-19 00:00:00
@@ -3073,26 +3305,112 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/util/util_env.cpp b/src/util/util_env.cpp
 --- a/src/util/util_env.cpp	2026-11-19 00:00:00
 +++ b/src/util/util_env.cpp	2026-11-19 00:00:00
-@@ -8,6 +8,9 @@
+@@ -8,9 +8,15 @@
  #include <limits.h>
  #endif
  
 +#include <atomic>
 +#include <algorithm>
++#include <string>
++#include <vector>
 +
  #include "util_env.h"
  
  #include "./com/com_include.h"
-@@ -89,8 +92,25 @@
++#include "./log/log.h"
+ 
+ namespace dxvk::env {
+ 
+@@ -30,6 +36,76 @@
+   }
+ 
+ 
++  // Some switches are read for every device. Each is reported in the log only the first time.
++  static bool isFirstReport(const char* name) {
++    static dxvk::mutex              s_mutex;
++    static std::vector<std::string> s_reported;
++
++    std::lock_guard<dxvk::mutex> lock(s_mutex);
++
++    if (std::find(s_reported.begin(), s_reported.end(), name) != s_reported.end())
++      return false;
++
++    s_reported.push_back(name);
++    return true;
++  }
++
++
++  EnvSwitch getEnvSwitch(const char* name) {
++    const std::string value = getEnvVar(name);
++
++    if (value == "0")
++      return EnvSwitch::Zero;
++
++    if (value == "1")
++      return EnvSwitch::One;
++
++    if (!value.empty() && isFirstReport(name))
++      Logger::warn(str::format("MxO: ", name, "=", value, " is not understood and has no effect, only 0 and 1 are"));
++
++    return EnvSwitch::Unset;
++  }
++
++
++  bool isFixEnabled(const char* name, EnvSwitch off) {
++    const bool enabled = getEnvSwitch(name) != off;
++
++    if (!enabled && isFirstReport(name))
++      Logger::info(str::format("MxO: ", name, "=", off == EnvSwitch::Zero ? "0" : "1", " is set, which is not the default"));
++
++    return enabled;
++  }
++
++
++  uint32_t getEnvSizeMB(const char* name, uint32_t defaultMB, uint32_t maxMB) {
++    // a number with more digits is above any limit, and need not fit the integer
++    constexpr size_t MaxDigits = 9;
++
++    const std::string value = getEnvVar(name);
++
++    if (value.empty())
++      return defaultMB;
++
++    // digits only: strtoul would accept a sign, and read "12abc" as 12
++    if (value.find_first_not_of("0123456789") != std::string::npos) {
++      if (isFirstReport(name))
++        Logger::warn(str::format("MxO: ", name, "=", value, " is not a number of megabytes, using ", defaultMB));
++
++      return defaultMB;
++    }
++
++    const uint32_t asked = value.size() > MaxDigits ? maxMB : uint32_t(std::strtoul(value.c_str(), nullptr, 10));
++    const uint32_t size  = std::min(asked, maxMB);
++
++    if (size != defaultMB && isFirstReport(name)) {
++      Logger::info(str::format("MxO: ", name, " is set to ", size, " MB, which is not the default",
++        size != asked || value.size() > MaxDigits ? " (and the most it takes)" : ""));
++    }
++
++    return size;
++  }
++
++
+   size_t matchFileExtension(const std::string& name, const char* ext) {
+     auto pos = name.find_last_of('.');
+ 
+@@ -89,8 +165,28 @@
    }
    
    
-+  static ThreadNameEntry      s_threadNames[32];
++  // A thread named after the table is full shows without a name in the profile
++  static constexpr uint32_t MaxThreadNames = 32;
++
++  static ThreadNameEntry       s_threadNames[MaxThreadNames];
 +  static std::atomic<uint32_t> s_threadNameCount = { 0u };
 +
 +  uint32_t getThreadNames(const ThreadNameEntry** table) {
 +    *table = s_threadNames;
-+    return std::min<uint32_t>(s_threadNameCount.load(), 32u);
++    return std::min<uint32_t>(s_threadNameCount.load(), MaxThreadNames);
 +  }
 +
 +
@@ -3101,7 +3419,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +    // remembered for the sampling profiler, which labels its samples with thread names
 +    const uint32_t slot = s_threadNameCount++;
 +
-+    if (slot < 32) {
++    if (slot < MaxThreadNames) {
 +      s_threadNames[slot].tid = ::GetCurrentThreadId();
 +      dxvk::str::strlcpy(s_threadNames[slot].name, name.c_str(), sizeof(s_threadNames[slot].name));
 +    }
@@ -3120,19 +3438,77 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
  #include "util_string.h"
  
  namespace dxvk::env {
-@@ -67,6 +69,16 @@
+@@ -27,6 +29,48 @@
+    * \returns Value of the variable
+    */
+   std::string getEnvVar(const char* name);
++
++  /**
++   * \brief What a switch in the environment is set to
++   */
++  enum class EnvSwitch : uint32_t {
++    Unset = 0,  ///< Not set, or set to something else
++    Zero  = 1,  ///< "0"
++    One   = 2,  ///< "1"
++  };
++
++  /**
++   * \brief Reads a switch
++   *
++   * Warns once per variable if it holds something
++   * other than "0" or "1", which has no effect.
++   * \param [in] name Name of the variable
++   * \returns What the variable is set to
++   */
++  EnvSwitch getEnvSwitch(const char* name);
++
++  /**
++   * \brief Checks whether a fix is switched on
++   *
++   * A fix is on unless its variable is set to \c off.
++   * Logs one line per variable if the fix is off.
++   * \param [in] name Name of the variable
++   * \param [in] off The setting that switches the fix off
++   * \returns \c true if the fix is on
++   */
++  bool isFixEnabled(const char* name, EnvSwitch off = EnvSwitch::Zero);
++
++  /**
++   * \brief Reads a size in megabytes
++   *
++   * Logs one line per variable if it changes the size. A value
++   * that is not a number is ignored with a warning.
++   * \param [in] name Name of the variable
++   * \param [in] defaultMB Size if the variable is not set
++   * \param [in] maxMB Largest size to return
++   * \returns Size in megabytes
++   */
++  uint32_t getEnvSizeMB(const char* name, uint32_t defaultMB, uint32_t maxMB);
+   
+   /**
+    * \brief Checks whether a file name has a given extension
+@@ -67,6 +111,25 @@
     * \param [in] name Thread name
     */
    void setThreadName(const std::string& name);
 +
 +  /**
-+   * \brief Names given to threads with setThreadName
++   * \brief Name given to a thread with setThreadName
++   *
++   * The sampling profiler writes these entries to its
++   * file as they are, so their size is part of the format.
 +   */
 +  struct ThreadNameEntry {
 +    uint32_t tid;
 +    char     name[28];
 +  };
 +
++  /**
++   * \brief Gets the names given to threads so far
++   *
++   * \param [out] table The entries
++   * \returns Number of entries
++   */
 +  uint32_t getThreadNames(const ThreadNameEntry** table);
  
    /**

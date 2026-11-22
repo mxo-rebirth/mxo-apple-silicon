@@ -12,11 +12,11 @@ Current output for the reference `client.dll`:
 
 | | |
 |---|---|
-| Routines translated | 537 of 537 in `routines.list` |
-| Instructions emitted | 66,694 |
+| Routines translated | 535 of 535 in `routines.list` |
+| Instructions emitted | 66,336 |
 | Compare branches taken directly | 1,365 of 1,698 |
 | `floor`/`ceil` calls computed in place | 12 |
-| Calls that return a float in `xmm0` | 152, to 47 routines |
+| Calls that return a float in `xmm0` | 244, to 47 routines |
 | Float compares (`ucomiss`) | 1,490 |
 
 ## Translation rules
@@ -34,10 +34,16 @@ divide and square root is rounded to 24 significant bits, the precision of a `fl
 still hold far larger and smaller numbers than a `float` can.
 
 The translation computes in double precision and rounds each result by converting it to `float`
-and back (two instructions). **That is exact as long as the intermediate result fits in a
-`float`.** Outside that range it differs: a value above `FLT_MAX` becomes infinity where the FPU
-would keep it, and a value below the smallest normal `float` loses precision. Bounding-box code
-uses values like `FLT_MAX` to mean "no limit", so this is a real trade-off.
+and back (two instructions). **That is exact as long as both operands have at most 24
+significant bits and the result fits in a `float`.** Every `float` and every earlier result has
+24 bits. Outside the `float` range it differs: a value above `FLT_MAX` becomes infinity where
+the FPU would keep it, and a value below the smallest normal `float` loses precision.
+Bounding-box code uses values like `FLT_MAX` to mean "no limit", so this is a real trade-off.
+
+An operand with more bits (a double from memory, a 32-bit integer, the constant π) makes the
+result be rounded twice, first to a double and then to 24 bits. Where the exact result lies
+almost halfway between two floats, that can differ from the FPU in the last bit. This is rare
+and `--exact-range` does not change it.
 
 `xlat.py --exact-range` produces the other form, which reproduces the extended range bit for
 bit at 13 instructions per rounding instead of 2. The game has been played with the faster form
@@ -94,9 +100,10 @@ the x87 stack. The DLL installs a caller only together with its callees.
 ### Everything else
 
 - Integer instructions are copied unchanged.
-- Translated code leaves the CPU flags alone, as x87 code does and the surrounding integer code
-  expects. The compare branches above are the one exception, and only where the flags are
-  provably unused.
+- x87 code leaves the CPU flags alone, and the surrounding integer code expects that. Translated
+  code changes them only where nothing reads them afterwards: at a status word read (flow
+  analysis proves it, or the flags are saved and restored), at a call to the float-to-integer
+  helper and on entry to the routine.
 - Calls into other client routines, absolute addresses and switch tables are adjusted at load
   time to wherever `client.dll` sits in memory.
 
@@ -108,6 +115,7 @@ The translator refuses anything it cannot prove safe, and the routine then stays
 - FPU stacks deeper than six.
 - routines that take arguments on the FPU stack.
 - routines that other code jumps into the middle of.
+- a jump, call or return with a prefix in front of it.
 
 ## The routine list
 
@@ -116,18 +124,29 @@ and a hash. The hash is FNV-1a over the routine with address fields left out. Th
 no game code. It was built from sampling profiles of the game. A routine is translated only if
 its code matches the hash.
 
-The line `ftol 6a92d8` names the compiler's float-to-integer helper.
+The line `ftol 6a92d8 75 401dfa8ffc792418` names the compiler's float-to-integer helper, with
+its length and hash.
+
+The head of the list describes the format. That text is `LIST_HEAD` in `translator/xlat.py`,
+which `--write-list` puts at the head of every list it writes. A line that does not fit the
+format stops the run.
 
 ## Hand-written replacements
 
-Four routines are not translated but replaced by hand-written SSE code in the DLL:
+Four routines are replaced by code written for them:
 
 | Routine | Replacement |
 |---|---|
-| `0x45E10`, 4×4 matrix multiply | SSE |
-| `0x46510`, quaternion to rotation matrix | SSE |
-| `0x6A92D8`, `_ftol2` | handles the 32-bit range with SSE2, falls back to the original otherwise |
-| `msvcr71!sqrt` (import slot `0x8682AC`) | `MxoSqrtSSE`, below |
+| `0x45E10`, 4×4 matrix multiply | hand-written SSE in the DLL |
+| `0x46510`, quaternion to rotation matrix | hand-written SSE in the DLL |
+| `0x6A92D8`, `_ftol2` | written out by `xlat.py`: handles the 32-bit range with SSE2, falls back to the original otherwise |
+| `msvcr71!sqrt` (import slot `0x8682AC`) | `MxoSqrtSSE` in the DLL, below |
+
+The two matrix routines are not on the routine list. The DLL recognises them by position,
+length and hash, and installs them together with the translated routines. A game add-on that
+names an address inside one keeps it original, and `x87max.txt` counts them after the
+translated routines. Unlike a translation they make no assumption about the FPU setup, so they
+run on every thread. No test in `tests/` covers them.
 
 **`sqrt`.** Wine implements `msvcr71!sqrt` with the x87 `fsqrt`: about 500 ns per call under
 Rosetta, 3% of the main thread. The client's import now points at an SSE2 version (about 50 ns)
@@ -144,20 +163,24 @@ When the game creates its Direct3D device, the DLL:
    was generated from, and skips any that differ (for example because a wrapper has hooked it).
 2. skips routines whose `floor`/`ceil` import slot is not msvcr71's, and callers whose callees
    were skipped.
-3. pauses all other threads, writes a 5-byte jump at the start of each remaining routine, and
-   resumes them.
-4. on every frame checks that the FPU control word is still what the translation assumes
+3. pins itself, so that nothing can unload it while `client.dll` jumps into it.
+4. pauses all other threads, writes a 5-byte jump at the start of each remaining routine, and
+   resumes them. A routine that a thread is just entering is left out.
+5. on every frame checks that the FPU control word is still what the translation assumes
    (24-bit precision, round to nearest) and switches the replacements off if it is not.
 
-The log names every routine it left alone and why.
+The log names every routine it left alone and why: its code in memory differs, an add-on uses
+it, a routine it calls was left alone, a thread was entering it, or its code could not be made
+writable.
 
 The replacements run only on the thread that owns the Direct3D device. Other threads have a
 different FPU precision, so for them the jump leads to a few instructions that do what the jump
 overwrote and then continue in the original routine.
 
-Installed in the last sessions: 535 of 538 in Rejacked, 524 of 528 in Revived (an earlier
-build). The exceptions are listed in
-[client-notes.md](client-notes.md#routines-something-else-has-changed).
+Installed in the last sessions, taken while the two matrix routines were still on the list: 535
+of 538 in Rejacked, 524 of 528 in Revived (an earlier build). Without them the count for
+Rejacked should read 535 of 536, which has not been looked at in the game yet. The exceptions
+are listed in [client-notes.md](client-notes.md#routines-something-else-has-changed).
 
 ## How it was checked
 
@@ -166,15 +189,22 @@ code and as translation on the same input and compare everything it wrote, bit f
 
 | Check | Result |
 |---|---|
-| Synthetic routines covering every instruction form the translator handles, random inputs including huge, tiny, zero, infinite and NaN values, `--exact-range` | 6.6 million comparisons, all identical |
+| Synthetic routines for the instruction forms the translator handles, random inputs including huge, tiny, zero, infinite and NaN values, `--exact-range` | 10.8 million comparisons, all identical |
 | Synthetic routines, faster rounding, ordinary values | 200,000 cases per routine, no differences |
 | Synthetic routines, single precision against the double form | 3.3 million cases identical |
 | The game's routines on random memory (taken with 468 routines, 278 could be run this way) | 20,504 comparisons. 262 routines identical in every run, 16 differed only in situations random input creates and the game does not |
 | The map routine `0x47DDB0` on plausible input | 100,000 calls, about 60,000 reach the result, all identical |
-| The current translation of all 537 routines against the previous one | no differing line, with ordinary and with random input |
+| The translation of the 537 routines then on the list against the one before it | no differing line, with ordinary and with random input |
+| The current translation of the 535 routines against that one | the same assembly text apart from label names, and the same bytes once assembled |
 | `_ftol2` replacement | 400,000 values over the whole range, identical |
 | `sqrt` replacement against Wine's, under seven FPU control words | 7 million cases, no differences |
 | `roundsd` against Wine's `floor` and `ceil` | no differences |
+
+The synthetic routines do not cover jump tables, the call to the float-to-integer helper and the
+`floor` and `ceil` imports. Those need a PE image and are left to the game part.
+
+The game part also compares `al` for the 266 routines whose own integer code sets it before
+every return, the byte a `bool` comes back in. That comparison is new and has not been run yet.
 
 The differences that random input produces and the game does not:
 

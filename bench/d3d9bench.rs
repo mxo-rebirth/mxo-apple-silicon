@@ -27,7 +27,7 @@
 //            11 as 10, and the draws use the filled texture
 //
 // The arguments are numbers in this order. A RESULT line gives the timings and a PIXELS line a check of
-// the back buffer, which expects it to be at least 830 x 100.
+// the back buffer. For that check the back buffer has to be at least 830 x 100.
 //
 // Exit code: 0, or 1 bad arguments, 2 no window, 3 no Direct3D, 4 no device, 6 a call the run depends on
 // failed, 99 a panic. 5 is left out: it is what Wine reports when a program crashes.
@@ -449,6 +449,34 @@ const STREAM_LEVELS: u32 = 3;
 const WARM_UP_MS: u32 = 1500;
 /// Larger back buffers are refused: a backend that accepts one anyway hands back memory that is not there.
 const MAX_SIZE: u32 = 16384;
+
+/// The UI row: UI_QUADS squares along the bottom edge. draw_ui places them and check_pixels reads the
+/// middle of each, so both take the row from here.
+const UI_LEFT: u32 = 10;
+const UI_PITCH: u32 = 34;
+const UI_QUAD_SIZE: u32 = 28;
+/// From the top of the UI quads to the bottom edge of the picture.
+const UI_ROW_HEIGHT: u32 = 44;
+/// What check_pixels leaves to the UI at the bottom of the picture: the row and some room above it.
+const UI_AREA_HEIGHT: u32 = 60;
+/// check_pixels reads the world at the middles of a grid of this many cells each way.
+const WORLD_GRID: u32 = 16;
+/// Smaller back buffers are refused: check_pixels would read past a row, or past the picture.
+const MIN_WIDTH: u32 = 2 * UI_LEFT + (UI_QUADS - 1) * UI_PITCH + UI_QUAD_SIZE;
+const MIN_HEIGHT: u32 = 100;
+// The usage text at the top names this size.
+const _: () = assert!(MIN_WIDTH == 830 && MIN_HEIGHT > UI_AREA_HEIGHT);
+
+/// The world is walls of WALL_COLUMNS x WALL_ROWS meshes, one wall behind the other.
+const WALL_COLUMNS: u32 = 64;
+const WALL_ROWS: u32 = 36;
+/// Between the middles of two meshes. A mesh is one unit across.
+const WALL_PITCH: f32 = 1.15;
+/// From the camera to the first wall, and from one wall to the next.
+const WALL_DISTANCE: f32 = 36.0;
+const WALL_SPACING: f32 = 4.0;
+/// The world changes its texture every so many draws, and the streaming modes fill one as often.
+const TEXTURE_RUN: u32 = 8;
 
 const GRID: usize = 8;
 const MESH_VERTS: usize = GRID * GRID * 6;
@@ -989,14 +1017,13 @@ unsafe fn draw_world(b: &mut Bench, dev: P, readback: bool) {
 
     let mut world: [f32; 16] = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
     for i in 0..b.draws {
-        // a wall of 64 x 36 meshes, further walls behind it
-        let (x, y, z) = (i % 64, (i / 64) % 36, i / (64 * 36));
-        world[12] = (x as f32 - 32.0) * 1.15;
-        world[13] = (y as f32 - 18.0) * 1.15;
-        world[14] = 36.0 + z as f32 * 4.0;
+        let (x, y, z) = (i % WALL_COLUMNS, (i / WALL_COLUMNS) % WALL_ROWS, i / (WALL_COLUMNS * WALL_ROWS));
+        world[12] = (x as f32 - (WALL_COLUMNS / 2) as f32) * WALL_PITCH;
+        world[13] = (y as f32 - (WALL_ROWS / 2) as f32) * WALL_PITCH;
+        world[14] = WALL_DISTANCE + z as f32 * WALL_SPACING;
         d3d::set_transform(dev, TS_WORLD, world.as_ptr());
-        if i % 8 == 0 {
-            d3d::set_texture(dev, 0, b.textures[((i / 8) % 2) as usize]);
+        if i % TEXTURE_RUN == 0 {
+            d3d::set_texture(dev, 0, b.textures[((i / TEXTURE_RUN) % 2) as usize]);
         }
         match b.mode {
             mode::SHADER | mode::SHADER_PS11 | mode::SHADER_PS20 => {
@@ -1027,13 +1054,13 @@ unsafe fn draw_world(b: &mut Bench, dev: P, readback: bool) {
                 d3d::draw_primitive(dev, PT_TRIANGLELIST, place * 6, 2);
             }
             mode::STREAM | mode::STREAM_DRAW => {
-                if i % 8 == 0 {
+                if i % TEXTURE_RUN == 0 {
                     // The next texture of the pool, so one comes round again only after a few frames. Its
                     // contents alternate: the checkerboard on the frame that is read back, magenta on the
                     // others, so an upload that runs at the wrong time shows in the pixel check.
                     b.spare_next = (b.spare_next + 1) % SPARE_TEXTURES;
                     let texture = b.spare[b.spare_next];
-                    let dark = DARK[((i / 8) % 2) as usize];
+                    let dark = DARK[((i / TEXTURE_RUN) % 2) as usize];
                     for level in 0..STREAM_LEVELS {
                         let mut r = LockedRect::EMPTY;
                         d3d::tex_lock_rect(texture, level, &mut r, null_mut(), 0);
@@ -1093,8 +1120,8 @@ unsafe fn draw_ui(b: &mut Bench, dev: P, start: u64) {
     b.time.ui_state += ticks().wrapping_sub(start);
 
     for q in 0..UI_QUADS {
-        let (x0, y0) = (10.0 + q as f32 * 34.0, b.height as f32 - 44.0);
-        let (x1, y1) = (x0 + 28.0, y0 + 28.0);
+        let (x0, y0) = ((UI_LEFT + q * UI_PITCH) as f32, b.height as f32 - UI_ROW_HEIGHT as f32);
+        let (x1, y1) = (x0 + UI_QUAD_SIZE as f32, y0 + UI_QUAD_SIZE as f32);
         let c = 0xC0FF_FFFFu32;
         let quad = [
             UiVert { x: x0, y: y0, z: 0.0, rhw: 1.0, c, u: 0.0, v: 0.0 },
@@ -1204,7 +1231,8 @@ unsafe fn print_result(b: &Bench, frames: u32, ms: u32) {
         field(b" end=", us(t.end));
         field(b"] ui: state=", us(t.ui_state));
         field(b" first-quad=", us(t.ui_first_quad));
-        field(b" other-23=", us(t.ui_other_quads));
+        field(b" other-", UI_QUADS - 1);
+        field(b"=", us(t.ui_other_quads));
     }
     print(b"\n");
 }
@@ -1227,20 +1255,25 @@ unsafe fn check_pixels(b: &mut Bench, dev: P, o: &Options) {
     let (w, h) = (o.width as usize, o.height as usize);
     let pixel = |x: usize, y: usize| *(r.bits.add(y * r.pitch as usize + x * 4) as *const u32);
     let drawn = |x: usize, y: usize| pixel(x, y) & RGB != CLEAR_COLOR & RGB;
-    // a 16 x 16 grid over the picture above the UI row, then the middle of each UI quad
+    // the middles of a grid over the picture above the UI, then the middle of each UI quad
+    let grid = WORLD_GRID as usize;
+    let world_height = h.saturating_sub(UI_AREA_HEIGHT as usize);
     let mut world = 0u32;
-    for sy in 0..16 {
-        for sx in 0..16 {
-            world += drawn(w * (2 * sx + 1) / 32, h.saturating_sub(60) * (2 * sy + 1) / 32) as u32;
+    for sy in 0..grid {
+        for sx in 0..grid {
+            world += drawn(w * (2 * sx + 1) / (2 * grid), world_height * (2 * sy + 1) / (2 * grid)) as u32;
         }
     }
+    let ui_middle_y = h.saturating_sub((UI_ROW_HEIGHT - UI_QUAD_SIZE / 2) as usize);
     let mut ui = 0u32;
-    for q in 0..UI_QUADS as usize {
-        ui += drawn(10 + q * 34 + 14, h.saturating_sub(30)) as u32;
+    for q in 0..UI_QUADS {
+        ui += drawn((UI_LEFT + q * UI_PITCH + UI_QUAD_SIZE / 2) as usize, ui_middle_y) as u32;
     }
     field(b"PIXELS world-samples-drawn=", world);
-    field(b"/256 ui-quads-drawn=", ui);
-    print(b"/24 centre=");
+    field(b"/", WORLD_GRID * WORLD_GRID);
+    field(b" ui-quads-drawn=", ui);
+    field(b"/", UI_QUADS);
+    print(b" centre=");
     print_hex(pixel(w / 2, h / 2));
     print(b"\n");
 }
@@ -1255,8 +1288,12 @@ pub unsafe extern "C" fn mainCRTStartup() -> ! {
     field(b" tris/draw=", MESH_TRIANGLES);
     field(b" mode=", o.mode);
     print(b"\n");
-    if o.width > MAX_SIZE || o.height > MAX_SIZE {
-        print(b"FAIL size: at most 16384 x 16384\n");
+    if o.width < MIN_WIDTH || o.height < MIN_HEIGHT || o.width > MAX_SIZE || o.height > MAX_SIZE {
+        field(b"FAIL size: at least ", MIN_WIDTH);
+        field(b" x ", MIN_HEIGHT);
+        field(b" for the pixel check, at most ", MAX_SIZE);
+        field(b" x ", MAX_SIZE);
+        print(b"\n");
         ExitProcess(EXIT_BAD_ARGUMENTS);
     }
 

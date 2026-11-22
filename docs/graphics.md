@@ -5,7 +5,9 @@ MoltenVK), made from the DXVK 1.10.3 source CodeWeavers publish for CrossOver 26
 `dxvk/dxvk-d3d9-mxo.patch`. It is installed into the bottle and enabled for the game executable
 only, so launchers and everything else keep Wine's Direct3D 9. No game file is modified on disk.
 
-Each fix has a switch that turns it off. They are listed in [building.md](building.md#switches).
+The fixes for problems 2 and 4 to 11 each have a switch that turns them off, listed in
+[building.md](building.md#switches). Fixes 1, 13 and 14 are always on, 3 and 12 are settings of
+the bottle, and 15 is the choice of compiler.
 
 ## CrossOver's two stock paths
 
@@ -71,7 +73,8 @@ about 40 times per frame. This DXVK version then sends everything queued so far 
 stops drawing into the current target, and waits until the GPU has finished with the buffer.
 
 Fix: the game gets a fresh copy of the buffer to write into. Draws already queued keep using
-the old one. Standalone test that locks before every draw: 1 fps to 22 fps, same picture.
+the old one. A buffer that is still locked from an earlier call keeps its memory, and that lock
+waits as before. Standalone test that locks before every draw: 1 fps to 22 fps, same picture.
 
 ### 7. Texture uploads that break up the frame
 
