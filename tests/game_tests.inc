@@ -26,6 +26,10 @@ static const uint32_t FpuOneValue = 0x3fff;    // the FPU tag word with one valu
 static const uint32_t MapRoutine = 0x47ddb0;       // world position to map grid cell
 static const uint32_t SortComparator = 0x4859d0;
 static const uint32_t SortDirection = 0xa76a08;    // three floats
+static const uint32_t KeyTable = 0x2fe4d0;         // a value from a table of keys, between two keys by their times
+static const uint32_t KeyTableStep = 0x2fe560;     // two values per key, blended by a weight, from the last key reached
+static const uint32_t KeyTableBlend = 0x2fe670;    // two values per key, between two keys and blended
+static const uint32_t MaxKeys = 24;                // the longest table the shaping makes
 
 static jmp_buf g_crashJmp;
 static volatile int g_guard = 0;
@@ -115,6 +119,7 @@ static void putd(size_t byteOff, double v) { memcpy((uint8_t*)g_init + byteOff, 
 static double rndRange(double lo, double hi) { return lo + (hi - lo) * double(rnd32() % 1000001) / 1000000.0; }
 
 static int g_reached = 0;   // shaped calls whose first output was written by the original
+static bool g_betweenKeys = false;   // the last key table was asked for a time between two of its keys
 
 static void putGlobalFloat(uint32_t rva, float v) {   // in the data both runs of this routine start from. Later routines start from the loaded image again
   const size_t off = size_t(rva) - size_t(g_data - g_base);
@@ -127,7 +132,42 @@ static float rndShapeFloat() {   // ordinary values, sometimes repeated exactly
   return last = float(int32_t(rnd32() % 200001) - 100000) / float(1 + rnd32() % 100);
 }
 
-static void shapeInput(const GameFn& g) {
+static void putf(size_t byteOff, float v) { memcpy((uint8_t*)g_init + byteOff, &v, 4); }
+static bool isKeyTable(uint32_t rva) { return rva == KeyTable || rva == KeyTableStep || rva == KeyTableBlend; }
+
+// A key table is a 16-bit count and then, from byte 2 on, the keys with rising times: a time and one
+// value (KeyTable), or a time and two values (the other two). arg0 = table, arg1 = time, arg2 = the
+// weight that blends the two values. The floats sit two bytes into a word, so the arena's own values
+// would reach these routines as arbitrary bit patterns.
+static void shapeKeyTable(const GameFn& g, uint32_t* args) {
+  const size_t table = BlockSize * 1;                    // where arg0 points
+  const size_t keySize = g.rva == KeyTable ? 8 : 12;
+  // mostly a few keys, sometimes none or one. Two keys are always written, so a short table has no garbage behind it
+  const uint16_t count = uint16_t(rnd32() % 8 == 0 ? rnd32() % 2 : 2 + rnd32() % (MaxKeys - 1));
+  const uint32_t written = count < 2 ? 2 : count, picked = rnd32() % written;
+  memcpy((uint8_t*)g_init + table, &count, 2);
+  float time = float(rndRange(-100, 100)), first = time, last = time, onKey = time;
+  for (uint32_t k = 0; k < written; k++) {
+    if (k) time += float(rndRange(0.01, 20));
+    putf(table + 2 + keySize * k, time);
+    for (size_t value = 4; value < keySize; value += 4) putf(table + 2 + keySize * k + value, rndShapeFloat());
+    if (k < count) last = time;
+    if (k == picked) onKey = time;
+  }
+  // the time asked for: mostly between the keys, sometimes exactly on one, before the first or after the last
+  const uint32_t where = rnd32() % 10;
+  const float asked = where == 0 ? onKey : where == 1 ? first - float(rndRange(0, 50)) : where == 2 ? last + float(rndRange(0, 50))
+                    : float(rndRange(first, last));
+  args[1] = fbits(asked);
+  if (g.rva != KeyTable) {   // the weight: from 0 to 1, sometimes exactly at an end
+    const uint32_t end = rnd32() % 8;
+    args[2] = fbits(end == 0 ? 0.0f : end == 1 ? 1.0f : float(rndRange(0, 1)));
+  }
+  g_betweenKeys = count >= 2 && asked >= first && asked < last;
+}
+
+static void shapeInput(const GameFn& g, uint32_t* args) {
+  if (isKeyTable(g.rva)) { shapeKeyTable(g, args); return; }
   if (g.rva == SortComparator) {
     // two pointers to element pointers. Each element has a box at +24..+2c (min) and +30..+38
     // (max), compared along the direction held in the globals at SortDirection
@@ -178,16 +218,18 @@ static DWORD WINAPI gameWorker(void* param) {
       // mostly floats, with a few small integers and in-arena pointers so counts and links are sometimes sane
       g_init[k] = r < 56 ? fbits(rndf()) : r < 61 ? rnd32() % 5 : uint32_t(uintptr_t(g_arena)) + (rnd32() % (BlockSize * (Blocks - 1) / 4)) * 4;
     }
-    if (getenv("MXO_SHAPE") && *getenv("MXO_SHAPE")) shapeInput(g);
     uint32_t args[PassedArgs];
     for (int a = 0; a < PassedArgs; a++)
       args[a] = (a < g.nargs && g.kinds[a] == 'f') ? fbits(rndf()) : uint32_t(uintptr_t(g_arena)) + uint32_t(BlockSize * (a + 1));
+    g_betweenKeys = false;
+    if (getenv("MXO_SHAPE") && *getenv("MXO_SHAPE")) shapeInput(g, args);
     memcpy(g_data, g_dataInit, g_dataSize);
     memcpy(g_arena, g_init, BlockSize * Blocks);
     Result ra = runOne(g_base + g.rva, g, args);
     memcpy(g_resA, g_arena, BlockSize * Blocks);
     if (g.rva == MapRoutine && g_resA[BlockSize * 2 / 4] != 0xffffffffu && !ra.crashed) g_reached++;
     if (g.rva == SortComparator && !ra.crashed) g_reached++;
+    if (g_betweenKeys && !ra.crashed) g_reached++;
     memcpy(g_dataA, g_data, g_dataSize);
     memcpy(g_data, g_dataInit, g_dataSize);
     memcpy(g_arena, g_init, BlockSize * Blocks);

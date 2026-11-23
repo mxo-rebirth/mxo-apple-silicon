@@ -58,18 +58,21 @@ pointers, huge or tiny numbers). The translation keeps values in the float range
 must match the original exactly: any routine listed as different is a translation fault. Fewer routines
 run to completion that way, because many need pointers to work on. Two routines are the exception,
 `0x2FE4D0` and `0x2FE670`: they read a table of floats that starts two bytes into a word, so the ordinary
-values reach them as arbitrary bit patterns.
+values reach them as arbitrary bit patterns. `MXO_SHAPE=1` gives them a proper table, and on that they
+must match too.
 
 With `MXO_SHAPE=1` some routines get plausible input instead of random memory, because random memory
 rarely gets far into them. So far that is the map routine at `0x47DDB0` (world position to map grid
 cell): a map object with sane bounds, grid size and cell size, and positions mostly inside the map. The
 `reached=` count in `fuzz.txt` says how many calls got all the way to the result. The sort comparator at
 `0x4859D0` gets two elements with boxes and a direction in the image's globals. Those globals are put back
-to what the image holds before the next routine runs.
+to what the image holds before the next routine runs. The three routines that look a value up in a table
+of keys (`0x2FE4D0`, `0x2FE560`, `0x2FE670`) get a table with rising times, a time that mostly lies between
+two keys and a weight from 0 to 1. For them `reached=` counts the calls with a time between two keys.
 
 The image is loaded without its imports. Originals that call msvcr71's `floor` or `ceil` would crash
 where their translations compute the result in place, so those two import slots get the real functions.
-the translator's table (`MxoX_crtslots`) says where they are.
+The translator's table (`MxoX_crtslots`) says where they are.
 
 The game part calls each routine blind: random floats, a few small integers and pointers into a
 scratch area, with no idea what the routine expects. Many routines crash on that (in both

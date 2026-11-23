@@ -196,6 +196,7 @@ code and as translation on the same input and compare everything it wrote, bit f
 | The 535 routines on random memory, with the `al` comparison | 284 could be run, 19,457 comparisons. 32 routines differ, 2 of them on ordinary values too (below) |
 | The map routine `0x47DDB0` on plausible input | 100,000 calls, about 60,000 reach the result, all identical |
 | The sort comparator `0x4859D0` on plausible input, its yes or no included | 100 calls, all identical |
+| The three key table routines `0x2FE4D0`, `0x2FE560` and `0x2FE670` on well-formed tables | 20,000 calls each, about 13,750 of them with a time between two keys, all identical |
 | The translation of the 537 routines then on the list against the one before it | no differing line, with ordinary and with random input |
 | The current translation of the 535 routines against that one | the same assembly text apart from label names, and the same bytes once assembled |
 | `_ftol2` replacement | 400,000 values over the whole range, identical |
@@ -223,8 +224,10 @@ The differences that random input produces and the game does not:
 With ordinary values only (`MXO_PLAIN=1`), two routines differ: `0x2FE4D0` and `0x2FE670`. Both
 look a value up in a table of keys and interpolate. The table's floats start two bytes into a
 word, so the test's ordinary values reach these routines as arbitrary bit patterns, and an
-intermediate product then exceeds the `float` range. With a table as the game holds it they
-are not tested.
+intermediate product then exceeds the `float` range: the original returns a finite value there
+and the translation infinity. On a well-formed table (`MXO_SHAPE=1`: rising times, a time
+mostly between two keys, a weight from 0 to 1) both match the original in 20,000 calls each,
+and so does the third routine of that kind, `0x2FE560`.
 
 ## Translator switches
 

@@ -173,7 +173,8 @@ Left out of the list on purpose:
 `0x2FE4D0` and `0x2FE670` are in the list and differ from the original in the test with
 ordinary input. Both interpolate in a table of keys whose floats start two bytes into a word, so
 the test's values reach them as arbitrary bit patterns, and an intermediate product exceeds the
-range of a `float` (the fast rounding trade-off in [translator.md](translator.md)).
+range of a `float` (the fast rounding trade-off in [translator.md](translator.md)). On well-formed
+tables both match the original, 20,000 calls each.
 
 ### Routines something else has changed
 
