@@ -182,6 +182,13 @@ to Initialize" box. Do not try Wine's own DirectMusic instead: Revived froze at 
 
 The DLL from this repository works with Revived. See [building.md](building.md).
 
+## MxOEmu
+
+The MxOEmu project's client needs no installer: its launcher is `C:\Games\MxO\launcher.exe`,
+which comes with the game files from <https://mxoemu.info>. Start it with the bottle's Run
+Command, or let `scripts/setup.sh game` make a shortcut for it. It was not started on the test
+machine.
+
 ## A note on safety
 
 A CrossOver bottle is not a sandbox. Windows programs in it run as ordinary Mac programs under

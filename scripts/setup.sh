@@ -18,8 +18,10 @@
 # Steps:
 #   game       the game and the launchers, when the bottle has no game: makes the bottle if it is
 #              missing, gets the game from the MxOEmu project, a folder, an archive or a direct
-#              link, downloads the Rejacked and Revived installers from the projects' sites, checks
-#              them against the checksums on those sites and shows them for you to click through
+#              link, offers CrossOver's icon for the MxOEmu launcher when it came with the game,
+#              downloads the Rejacked and Revived installers from the projects' sites and checks
+#              them against the checksums on those sites. Rejacked's installs without its window,
+#              Revived's is shown for you to click through
 #   bottle     what the game needs to start: Microsoft's shader compiler, DirectMusic and DirectSound
 #   build      build d3d9.dll from this bottle's own client.dll, after asking whether to install the
 #              build tools that are missing (docs/building.md)
@@ -27,8 +29,8 @@
 #   detail     every graphics option of the game at its maximum, the main display's resolution,
 #              and 16x anisotropic filtering
 #   intro      the game starts without its logo movies
-#   icons      CrossOver's icon for the Rejacked launcher: CrossOver reads the bottle's shortcuts again,
-#              and the launcher's shortcut is made when the bottle has none
+#   icons      CrossOver's icons for the launchers: CrossOver reads the bottle's shortcuts again,
+#              and the Rejacked launcher's shortcut is made when the bottle has none
 #   music      Revived only: keep its starter from switching the game's music off
 #   video      Revived only: switch off the video behind its launcher, which keeps a processor core busy
 #   uninstall  the game executables go back to Wine's Direct3D 9 (DirectMusic stays, the game needs it)
@@ -77,6 +79,11 @@ DOTNET_RELEASES=https://builds.dotnet.microsoft.com/dotnet/release-metadata/$DOT
 MXOEMU_PAGE=https://mxoemu.info/   # the MxOEmu project offers the full client there
 # the Rejacked launcher is a Qt program: its "game/install_dir" setting is this registry value
 REJACKED_KEY='HKCU\Software\Rejacked\Rejacked Launcher\game'
+# The launchers' shortcuts, by which CrossOver's list of the bottle's icons names them. The Rejacked and
+# Revived installers make theirs, the setup makes the one for the MxOEmu project's launcher.
+REJACKED_ICON="Rejacked Launcher"
+REVIVED_ICON="MxO Revived"
+MXOEMU_ICON="MxOEmu Launcher"
 
 # The bottle's environment for the speed-up. The install step sets the first list and, by the answers
 # and the detail step, the names in the second. Uninstall removes them all.
@@ -898,7 +905,7 @@ fetch_installer() {   # fetch_installer "URL CHECKSUM" FROM: downloads the insta
   INSTALLER="$CACHE/$name"
 }
 
-wine_run() { "$WINE" --bottle "$BOTTLE" -- "$1" >/dev/null 2>&1 || true; }
+wine_run() { "$WINE" --bottle "$BOTTLE" -- "$@" >/dev/null 2>&1 || true; }
 
 run_installer() {   # the installer's own window: nothing is answered for the user
   spin "$(basename "$1") is open: click through its window" wine_run "$1" || true
@@ -922,6 +929,14 @@ rejacked_exe() {   # the Rejacked launcher's program, or nothing
 }
 
 has_rejacked() { [ -n "$(rejacked_exe)" ]; }
+
+# The MxOEmu project's launcher is the game's own launcher.exe, changed to load that project's
+# mxowrap.dll. Both come with its game files, and nothing makes a shortcut to them.
+mxoemu_exe() {   # that launcher, or nothing
+  local d
+  d=$(client_dir)
+  if [ -n "$d" ] && [ -f "$d/launcher.exe" ] && [ -f "$d/mxowrap.dll" ]; then printf '%s' "$d/launcher.exe"; fi
+}
 has_dotnet() { ls -d "$DRIVE/Program Files/dotnet/shared/Microsoft.WindowsDesktop.App/$DOTNET_MAJOR".* >/dev/null 2>&1; }
 
 has_revived() {   # looks at the bottle afresh: Revived's installer may just have finished
@@ -1051,9 +1066,26 @@ install_rejacked() {   # the launcher from its site
     return 0
   fi
   fetch_installer "$link" mxo-rejacked.com
-  note "On the installer's last page, do not start the launcher yet: the setup has more to do first."
-  run_installer "$INSTALLER"
+  # The installer's last page offers to start the launcher, and the box is ticked. It is made with
+  # NSIS: started with /S it shows no pages, installs with its defaults and starts nothing.
+  info "The installer runs without its window. Should one open after all, do not start the launcher on its last page."
+  spin "Installing the Rejacked launcher" wine_run "$INSTALLER" /S || true
+  if ! has_rejacked; then
+    note "The installer did not finish by itself, so its window opens now."
+    note "On its last page, do not start the launcher yet: the setup has more to do first."
+    run_installer "$INSTALLER"
+  fi
   wait_for_install "Rejacked launcher" has_rejacked
+}
+
+add_mxoemu() {   # CrossOver's icon for the MxOEmu launcher, when it came with the game
+  local exe
+  exe=$(mxoemu_exe)
+  if [ -z "$exe" ]; then return 0; fi
+  if ! has_icon "$MXOEMU_ICON"; then
+    ask "Add the MxOEmu launcher to CrossOver's icons (it came with the game files)?" || return 0
+  fi
+  launcher_icon "MxOEmu launcher" "$MXOEMU_ICON" "$exe" make
 }
 
 install_dotnet() {   # Revived's launcher needs it
@@ -1102,6 +1134,7 @@ step_game() {
     get_client
     find_installs
   fi
+  add_mxoemu
   install_rejacked
   install_revived
   find_installs
@@ -1507,31 +1540,55 @@ step_video() {
 # still be without its icon after an installer has run: the sync is what puts the icon there.
 has_icon() { grep -qiF "/$1.lnk]" "$BOTTLE_DIR/cxmenu.conf" 2>/dev/null; }
 
+make_shortcut() {   # make_shortcut NAME EXE: a shortcut to a program in the bottle, made with CrossOver's own tool. Fails when CrossOver does not list it afterwards
+  local win
+  win=$(win_path "$2")
+  "$WINE" --bottle "$BOTTLE" -- cxmklnk --programs "$1.lnk" --target "$win" --workdir "${win%\\*}" || true
+  "$CX/bin/cxmenu" --bottle "$BOTTLE" --sync --mode install >/dev/null 2>&1 || true
+  has_icon "$1"
+}
+
+# launcher_icon WHAT ICON EXE [make]: says whether CrossOver lists the shortcut of a launcher that is in
+# the bottle. With "make", a missing shortcut is made first. Sets ICON_LISTED=1 when CrossOver lists it.
+ICON_LISTED=0
+launcher_icon() {
+  local what=$1 icon=$2 exe=$3
+  if has_icon "$icon"; then
+    ok "$what: CrossOver has its shortcut"
+  elif [ "${4:-}" = make ] && spin "$what: no shortcut in the bottle, making one" make_shortcut "$icon" "$exe"; then
+    ok "$what: its icon is in CrossOver"
+  else
+    note "$what: CrossOver has no icon for it. It starts with the bottle's Run Command: $(win_path "$exe")"
+    return 0
+  fi
+  ICON_LISTED=1
+}
+
 step_icons() {
   say "Icons"
-  local exe win
+  local exe
+  ICON_LISTED=0
   spin "CrossOver reads the bottle's shortcuts again" "$CX/bin/cxmenu" --bottle "$BOTTLE" --sync --mode install \
     || note "CrossOver could not read the bottle's shortcuts"
   exe=$(rejacked_exe)
-  if [ -z "$exe" ]; then info "The Rejacked launcher is not in this bottle."; return 0; fi
-  if has_icon "Rejacked Launcher"; then
-    ok "Rejacked launcher: CrossOver has its shortcut"
-  else   # the launcher is installed, but no shortcut to it is in the bottle: one made with CrossOver's own tool
-    win=$(win_path "$exe")
-    spin "Rejacked launcher: no shortcut in the bottle, making one" \
-      "$WINE" --bottle "$BOTTLE" -- cxmklnk --programs "Rejacked Launcher.lnk" --target "$win" --workdir "${win%\\*}" || true
-    "$CX/bin/cxmenu" --bottle "$BOTTLE" --sync --mode install >/dev/null 2>&1 || true
-    if ! has_icon "Rejacked Launcher"; then
-      note "CrossOver has no icon for the Rejacked launcher. It starts with the bottle's Run Command: $win"
-      return 0
-    fi
-    ok "Rejacked launcher: its icon is back in CrossOver"
+  if [ -n "$exe" ]; then
+    launcher_icon "Rejacked launcher" "$REJACKED_ICON" "$exe" make
+  elif named icons; then
+    info "The Rejacked launcher is not in this bottle."
   fi
-  info "If CrossOver does not show the icon yet, close CrossOver and open it again."
+  # Revived's setup makes its shortcut to a starter of its own, so a missing one is not made here
+  if [ -n "$REVIVED" ]; then launcher_icon "MxO Revived" "$REVIVED_ICON" "$REVIVED/MxORevived-Launcher.exe"; fi
+  exe=$(mxoemu_exe)
+  if has_icon "$MXOEMU_ICON"; then
+    launcher_icon "MxOEmu launcher" "$MXOEMU_ICON" "$exe"
+  elif [ -n "$exe" ] && named icons; then   # the game step asks before it makes this one, so only a run of this step alone says so
+    info "The MxOEmu launcher has no shortcut. To get one: scripts/setup.sh game"
+  fi
+  if [ $ICON_LISTED = 1 ]; then info "If CrossOver does not show an icon yet, close CrossOver and open it again."; fi
 }
 
-refresh_icons() {   # with the Rejacked launcher in the bottle. Whether CrossOver shows its icon cannot be read from the bottle
-  if has_rejacked; then step_icons; fi
+refresh_icons() {   # with a launcher in the bottle that has or should have an icon. Whether CrossOver shows it cannot be read from the bottle
+  if has_rejacked || [ -n "$REVIVED" ] || has_icon "$MXOEMU_ICON"; then step_icons; fi
 }
 
 step_uninstall() {

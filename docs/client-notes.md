@@ -264,6 +264,17 @@ event handling), the copy of vertex shader constants 2.7% (about 5.8 MB per fram
   `useropts.cfg` holds a block the launcher rewrites on every PLAY. Where both set a value,
   `options.cfg` wins. Both use Windows line endings.
 
+**MxOEmu**
+
+- Its launcher is the game's own `launcher.exe` (5,267,456 bytes), changed to load `mxowrap.dll`
+  (452,096 bytes), a file that project builds. Both are in its full client and in its
+  launcher-only archive, and neither comes with a shortcut.
+- The launcher's file holds the names `matrix.exe`, `-clone` and `-nopatch`, and `mxowrap.dll`
+  the folder name `MatrixOnline.%u`. So the game should run as `matrix.exe` from the temporary
+  folder here too, with the same overrides. Not tested: it has not been started in CrossOver.
+- Not tested either: whether it gets along with Rejacked in one game folder. Rejacked's launcher
+  writes its servers into `useropts.cfg` on every PLAY.
+
 **Revived**
 
 - Portable install with its own `options.cfg` in the game folder.

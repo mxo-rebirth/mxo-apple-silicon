@@ -20,9 +20,17 @@ stops before its questions while a game is running.
    - puts the client in `C:\Games\MxO`, downloaded from the link on the MxOEmu project's page
      or taken from a folder, an archive (zip, 7z, tar) or a direct `https` link. It is unpacked
      outside drive C and moved in whole.
+   - offers a shortcut to the MxOEmu project's launcher when the game folder holds it
+     (`launcher.exe` with that project's `mxowrap.dll` next to it), made with CrossOver's
+     `cxmklnk` under the name `MxOEmu Launcher`. Not tested: that launcher itself has not been
+     started in CrossOver here.
    - downloads the Rejacked launcher and the Revived installer from the projects' download
-     pages, checks each against the SHA-256 printed on its page and starts it for you to click
-     through
+     pages and checks each against the SHA-256 printed on its page
+   - runs the Rejacked installer, which is made with NSIS, with `/S`: no pages, its defaults,
+     and no launcher started at the end. The setup says beforehand not to start the launcher
+     should a window open after all. If the launcher is not there afterwards, the installer
+     opens with its window. Not tested: `/S` has not run in a real bottle yet.
+   - starts Revived's installer for you to click through
    - before Revived's, does the same with Microsoft's .NET 10 Desktop Runtime, checked against
      Microsoft's release list
    - writes the game folder into the Rejacked launcher's settings (`install_dir` under
@@ -45,10 +53,12 @@ stops before its questions while a game is running.
    (in points, or in pixels when the bottle has `RetinaMode` on), and `d3d9.samplerAnisotropy = 16`
    into `C:\Games\dxvk\dxvk.conf`, which `DXVK_CONFIG_FILE` then names.
 6. **intro**, on request: `EnableSplash = 0` in each game's `useropts.cfg`.
-7. **icons**, when the Rejacked launcher is in the bottle: `cxmenu --sync`, which has CrossOver
-   read the bottle's shortcuts again. If its list of them (`cxmenu.conf`) then has none for the
-   launcher, a shortcut is made with CrossOver's `cxmklnk`. It runs by itself in a whole run
-   and after the game step.
+7. **icons**, when the Rejacked launcher, Revived or the MxOEmu launcher's shortcut is in the
+   bottle: `cxmenu --sync`, which has CrossOver read the bottle's shortcuts again, then a line
+   for each launcher that says whether CrossOver's list (`cxmenu.conf`) has its shortcut. A
+   missing one is made with CrossOver's `cxmklnk` for the Rejacked launcher only. Revived's
+   setup makes its own, and the MxOEmu launcher's is made by the game step, which asks first.
+   It runs by itself in a whole run and after the game step.
 8. **music**: Revived only, sets its starter's music guard to `music = on` and the music setting
    in its `options.cfg` and `useropts.cfg` back to 1. A whole run in a bottle that already has
    the speed-up leaves a guard that says `music = off` alone: the setup wrote `on` there before,
@@ -65,8 +75,8 @@ scripts/setup.sh --dll /path/to/d3d9.dll  # install a DLL that is built already
 scripts/setup.sh --yes                    # no questions, in the first bottle that has a game
 ```
 
-`--yes` gives every question its default and leaves the game step out, since the installers
-need clicks. `--yes game` skips the game itself and says so: a 1.3 GB download is not started
+`--yes` gives every question its default and leaves the game step out, since Revived's
+installer needs clicks. `--yes game` skips the game itself and says so: a 1.3 GB download is not started
 unasked.
 
 The install step also merges the pipeline caches of the games in the bottle

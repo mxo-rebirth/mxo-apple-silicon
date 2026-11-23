@@ -1,7 +1,8 @@
 # The Matrix Online on Apple Silicon Macs
 
 Makes The Matrix Online run fast in CrossOver on Apple Silicon Macs. It is for any project that
-uses the 2009 client. It was tested with MxO Rejacked and MxO Revived.
+uses the 2009 client. It was tested with MxO Rejacked and MxO Revived. The MxOEmu launcher gets
+its icon from the setup, but has not been started on the test machine.
 
 On the test machine (M4, fullscreen 3440×1440, maximum detail) the game went from about 15 fps
 with a shortened draw distance to 55–89 fps at full draw distance.
@@ -31,7 +32,7 @@ It downloads this repository to `~/mxo-apple-silicon` and runs its setup. Runnin
 updates the download. By hand, the same is: download this repository and run `scripts/setup.sh`
 in it.
 
-![The setup in a Terminal window: its opening words, the frame of the server stats site and the system check](docs/setup.png)
+![The setup in a Terminal window: its opening words, the frame of the server stats site, the system check, its advice on a separate account and a new bottle being made](docs/setup.png)
 
 The setup checks the Mac, asks its few questions first (which bottle, which servers, a
 frame-rate limit, add-ons, the build tools, maximum detail, the logo movies) and then works
@@ -39,13 +40,13 @@ through these steps by itself:
 
 | Step | What it does |
 |---|---|
-| Game | Only when the bottle has no game yet. Creates the bottle if there is none. Gets the game itself: downloaded from the [MxOEmu project](https://mxoemu.info), or from a folder, an archive or a direct `https` link you give. Downloads the Rejacked launcher and the Revived installer from the projects' own sites, checks them against the checksums published there and opens them for you to click through, Microsoft's .NET 10 runtime first for Revived. Tells the Rejacked launcher where the game is. |
+| Game | Only when the bottle has no game yet. Creates the bottle if there is none. Gets the game itself: downloaded from the [MxOEmu project](https://mxoemu.info), or from a folder, an archive or a direct `https` link you give. Offers CrossOver's icon for the MxOEmu launcher, which comes with that project's game files. Downloads the Rejacked launcher and the Revived installer from the projects' own sites and checks them against the checksums published there. The Rejacked launcher installs without its window. Revived's installer opens for you to click through, Microsoft's .NET 10 runtime first. Tells the Rejacked launcher where the game is. |
 | Start fixes | Installs what the game needs to start at all: the game's own shader compiler, Microsoft's DirectMusic and DirectSound, the music sound bank, and a larger memory limit for the game. |
 | Build | Builds the speed-up (`d3d9.dll`) on your Mac from your own copy of the game. Takes a few minutes. Installs the build tools with Homebrew first if they are missing and you agree. |
 | Install | Installs it for every MxO game it found in the bottle, and lets the games share their pipeline caches so they stutter less. Everything else in the bottle keeps CrossOver's normal graphics. On request it also speeds up the routines that game add-ons hook. An add-on such as Revived's interface scaling can then stop working. |
 | Detail | On request: every graphics option at its maximum (draw distance, shadows, wet streets, weather, traffic, anti-aliasing, screen filters), the resolution of the main display and 16x anisotropic filtering. It replaces the detail settings a game has, so the answer defaults to no once a game has settings. Later: `scripts/setup.sh detail`. |
 | Intro | On request: the game starts without its logo movies. Later: `scripts/setup.sh intro`. |
-| Icons | With the Rejacked launcher in the bottle: has CrossOver read the bottle's shortcuts again, so the launcher gets its icon, and makes the shortcut when the bottle has none. Later: `scripts/setup.sh icons`. |
+| Icons | Has CrossOver read the bottle's shortcuts again, so the launchers get their icons, and makes the Rejacked launcher's shortcut when the bottle has none. Later: `scripts/setup.sh icons`. |
 | Music | Revived only: keeps the game's music on. Revived's starter switches it off otherwise. In a bottle the setup has been through before, music that is off stays off. To switch it on: `scripts/setup.sh music`. |
 | Launcher video | Revived only: switches off the video behind the launcher's window, which keeps a processor core busy. |
 
@@ -64,8 +65,8 @@ folder, choose `C:\Games\MxO` in its settings.
   reaches up to 200 fps in light scenes, which only makes heat. For another limit run
   `~/mxo-apple-silicon/scripts/setup.sh --fps 120 install`. `--fps 0` removes it. A later run of
   the setup offers the limit the bottle has.
-- **A second launcher later:** `~/mxo-apple-silicon/scripts/setup.sh game` offers the one that
-  is not installed yet.
+- **Another launcher later:** `~/mxo-apple-silicon/scripts/setup.sh game` offers what the
+  bottle does not have yet: the Rejacked launcher, Revived, the icon for the MxOEmu launcher.
 - **Another project's client:** if its game executable is not `matrix.exe` or `mxorev.exe`, add
   its name to the end of the command: `--exe name.exe`.
 - **Rejacked:** untick "Use the new glow shader for 'Screen Filter: Over-Bright' (BETA)" in the
