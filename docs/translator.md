@@ -193,7 +193,9 @@ code and as translation on the same input and compare everything it wrote, bit f
 | Synthetic routines, faster rounding, ordinary values | 200,000 cases per routine, no differences |
 | Synthetic routines, single precision against the double form | 3.3 million cases identical |
 | The game's routines on random memory (taken with 468 routines, 278 could be run this way) | 20,504 comparisons. 262 routines identical in every run, 16 differed only in situations random input creates and the game does not |
+| The 535 routines on random memory, with the `al` comparison | 284 could be run, 19,457 comparisons. 32 routines differ, 2 of them on ordinary values too (below) |
 | The map routine `0x47DDB0` on plausible input | 100,000 calls, about 60,000 reach the result, all identical |
+| The sort comparator `0x4859D0` on plausible input, its yes or no included | 100 calls, all identical |
 | The translation of the 537 routines then on the list against the one before it | no differing line, with ordinary and with random input |
 | The current translation of the 535 routines against that one | the same assembly text apart from label names, and the same bytes once assembled |
 | `_ftol2` replacement | 400,000 values over the whole range, identical |
@@ -203,8 +205,12 @@ code and as translation on the same input and compare everything it wrote, bit f
 The synthetic routines do not cover jump tables, the call to the float-to-integer helper and the
 `floor` and `ceil` imports. Those need a PE image and are left to the game part.
 
-The game part also compares `al` for the 266 routines whose own integer code sets it before
-every return, the byte a `bool` comes back in. That comparison is new and has not been run yet.
+The game part also compares `al`, the byte a `bool` comes back in, for the 266 routines whose
+own integer code sets it before every return. On ordinary values 130 of them could be run:
+34,761 comparisons, no difference. On random memory 168 could be run, and 2 of them differ, in
+5 of 11,875 comparisons: `0x4D1F80` and `0x1B3B20`. The first difference of each is in a call
+with huge values, infinities and NaNs among the input. `0x1B3B20` asks whether a point lies
+within a radius, and its squared distances leave the `float` range there.
 
 The differences that random input produces and the game does not:
 
@@ -214,8 +220,11 @@ The differences that random input produces and the game does not:
   stack bits in `eax`.
 - an unused `ah` after a `bool` return, and whatever `eax` held after a float return.
 
-With ordinary values only (`MXO_PLAIN=1`), one routine differs: `0x2FE670`, where an
-intermediate product exceeds the `float` range.
+With ordinary values only (`MXO_PLAIN=1`), two routines differ: `0x2FE4D0` and `0x2FE670`. Both
+look a value up in a table of keys and interpolate. The table's floats start two bytes into a
+word, so the test's ordinary values reach these routines as arbitrary bit patterns, and an
+intermediate product then exceeds the `float` range. With a table as the game holds it they
+are not tested.
 
 ## Translator switches
 

@@ -56,7 +56,9 @@ routines, as x87 code and as translation.
 With `MXO_PLAIN=1` the game part fills the scratch area with ordinary float values only (no integers,
 pointers, huge or tiny numbers). The translation keeps values in the float range, so on such input it
 must match the original exactly: any routine listed as different is a translation fault. Fewer routines
-run to completion that way, because many need pointers to work on.
+run to completion that way, because many need pointers to work on. Two routines are the exception,
+`0x2FE4D0` and `0x2FE670`: they read a table of floats that starts two bytes into a word, so the ordinary
+values reach them as arbitrary bit patterns.
 
 With `MXO_SHAPE=1` some routines get plausible input instead of random memory, because random memory
 rarely gets far into them. So far that is the map routine at `0x47DDB0` (world position to map grid

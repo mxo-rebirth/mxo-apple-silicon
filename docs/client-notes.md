@@ -170,9 +170,10 @@ Left out of the list on purpose:
 | `0x14580` | cannot be run in the tests (0.6% of the main thread) |
 | `0x4E8F30`, `0x4D7640`, `0x3AF700` and ten smaller ones | translate, but never run to completion on random input, so they are unverified |
 
-`0x2FE670` is in the list and differs from the original on ordinary input: an intermediate
-product exceeds the range of a `float` (the fast rounding trade-off in
-[translator.md](translator.md)).
+`0x2FE4D0` and `0x2FE670` are in the list and differ from the original in the test with
+ordinary input. Both interpolate in a table of keys whose floats start two bytes into a word, so
+the test's values reach them as arbitrary bit patterns, and an intermediate product exceeds the
+range of a `float` (the fast rounding trade-off in [translator.md](translator.md)).
 
 ### Routines something else has changed
 
