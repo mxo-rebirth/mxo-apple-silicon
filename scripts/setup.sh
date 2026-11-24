@@ -684,11 +684,16 @@ fi
 
 # The CrossOver app shows a bottle's new icons only after it starts again. Its window, in this account
 # only: the programs in the bottles run on without it.
-crossover_pid() {   # the app's process number, or nothing. "ww": ps cuts its lines to the terminal's width otherwise
+# crossover_pid [all]: the app's process number in this account, or in any account, or nothing. The
+# path can differ from the one in /Applications: macOS runs a freshly downloaded app from a folder
+# of its own. "ww": ps cuts its lines to the terminal's width otherwise.
+crossover_pid() {
   local pid program
   while read -r pid program; do
-    if [ "$program" = "${CX%/SharedSupport/*}/MacOS/CrossOver" ]; then printf '%s' "$pid"; return 0; fi
-  done < <(ps -xwwo pid=,comm=)
+    case "$program" in
+      */CrossOver.app/Contents/MacOS/CrossOver) printf '%s' "$pid"; return 0 ;;
+    esac
+  done < <(ps -x${1:+a}wwo pid=,comm=)
 }
 
 crossover_open() { [ -n "$(crossover_pid)" ]; }
@@ -712,7 +717,11 @@ ask_crossover_to_quit() {
 CROSSOVER_CLOSED=0
 quit_crossover() {   # asks first. With --yes it stays open: an app is not closed unasked
   local pid
-  crossover_open || return 0
+  if ! crossover_open; then
+    # in another account of this Mac it shows that account's bottles and can stay
+    if [ -n "$(crossover_pid all)" ]; then info "CrossOver is open in another account of this Mac. It is left alone."; fi
+    return 0
+  fi
   if [ $YES = 1 ] || ! ask "CrossOver is open. Quit it now? It shows new icons only after it starts again."; then
     note "CrossOver stays open. Quit and open it again when the setup is done, to see new icons"
     return 0
