@@ -149,7 +149,7 @@ The DLL replaces the `sqrt` slot and the translator computes `floor` and `ceil` 
 | `0x2F9900`–`0x2FF400` | about a dozen routines that look like skeletal animation | translated |
 | `0x47DDB0` | world position to map grid cell, calls `_ftol2` | translated, was 18% of the main thread with the map open |
 | `0x4859D0` | comparator handed to a sort | translated, about 1% |
-| `0x393E10`, `0x48FA40` | 3D-sound helpers | translated |
+| `0x393E10`, `0x48FA40` | which projector lights reach an object: `0x48FA40` walks the lights and writes an entry with position and colour for each one in range, `0x393E10` is the distance from a point to a box. Called three times from `0x49DA40`, each time only while the setting `WR_Projector_Light_Chars` is on | translated |
 | `0x29283D` | calls the DirectSound 3D-buffer setters | not touched, 2.3% of the main thread inside `dsound` |
 | `0xDE70`, `0xDEB0`, `0xDEF0`, `0x66EBF0`, `0x66ED40` | double-precision helpers | translated |
 | `0x7670`, `0x7690` | thin wrappers around C runtime math imports | not translated |
@@ -185,6 +185,8 @@ replacement was generated from. These fail that check:
 |---|---|---|
 | `0x1736F0` | changed in memory before the device is created (the file is unchanged) | the file itself differs (jump at `0x174758`) |
 | `0x1B5890` | unchanged, replaced | changed in memory before the device is created |
+
+With the MxOEmu launcher the picture is Rejacked's: `0x1736F0` fails the check, nothing else.
 
 ## The render throttle
 
@@ -254,6 +256,30 @@ Inside "Wine and system code": `PeekMessage` 2–6% (one call per frame, the cos
 event handling), the copy of vertex shader constants 2.7% (about 5.8 MB per frame), `r3d9.dll`
 2.7%, DirectSound 2.3%.
 
+### In a crowd
+
+The numbers are in [measurements.md](measurements.md#in-a-crowd). What they come from:
+
+- **Draw calls.** One frame of 9,012 draw calls: 5,377 into the picture, 1,989 into 77 shadow
+  pictures of 512×512, about 26 each and one per character, and 1,620 into one 256×256 picture
+  at the start of the frame (not identified). The shadow pictures alternate with the main one,
+  which makes 200 to 340 render passes per frame against 60 to 100 elsewhere. Without character
+  shadows (`ModelShadow_Enable` and `ModelShadow_Proj_Enable` at 0) the frame rate was 12 to 13%
+  higher both times. The GPU was 25 to 66% idle in these sessions, so the main thread stayed
+  the limit.
+- **The light loop.** `0x49DA40` calls `0x48FA40` for each object, and that walks every
+  projector light: `0x48FA40` itself, the distance routine `0x393E10`, `0xE130`, and through the
+  light's table of functions `0x4B3FE0`, which jumps to `0x4A98C0` (it returns one stored value),
+  twice per light. It ran in the two later sessions and not in the two before, minutes apart
+  in the same place: the guess is that the projector lights are lit at night only. It cost the
+  step from 54 to 37 fps. The light filter ([translator.md](translator.md#hand-written-replacements))
+  is the answer to it. The list had 255 to 635 lights in the one session that counted them, and
+  the loop is asked 40,000 to 160,000 times per frame whether a light reaches an object. With
+  the filter 80 to 180 of those reach it.
+- **`WR_Projector_Light_Chars`** gates the three calls of the loop. Two sessions with `0` and
+  `1` in `useropts.cfg` were taken by day, when the loop did not run either way, so whether that
+  line reaches the game is not known.
+
 ## Launchers and add-ons
 
 **Rejacked**
@@ -269,11 +295,14 @@ event handling), the copy of vertex shader constants 2.7% (about 5.8 MB per fram
 - Its launcher is the game's own `launcher.exe` (5,267,456 bytes), changed to load `mxowrap.dll`
   (452,096 bytes), a file that project builds. Both are in its full client and in its
   launcher-only archive, and neither comes with a shortcut.
-- The launcher's file holds the names `matrix.exe`, `-clone` and `-nopatch`, and `mxowrap.dll`
-  the folder name `MatrixOnline.%u`. So the game should run as `matrix.exe` from the temporary
-  folder here too, with the same overrides. Not tested: it has not been started in CrossOver.
-- Not tested either: whether it gets along with Rejacked in one game folder. Rejacked's launcher
-  writes its servers into `useropts.cfg` on every PLAY.
+- The game runs as `matrix.exe` here too, with `mxowrap.dll` loaded, so the same overrides
+  apply. Seen in one session of about a minute in the world, among more than 100 characters:
+  535 of 536 routines installed, `0x1736F0` left alone as with Rejacked.
+- The main thread in that session: 37% translated math, 32% the client's integer code, 17% Wine
+  and system code, 7% this DLL, 6% waiting. That is Rejacked's picture
+  ([the main thread](#the-main-thread)).
+- Not tested: whether it gets along with Rejacked in one game folder. Rejacked's launcher writes
+  its servers into `useropts.cfg` on every PLAY.
 
 **Revived**
 

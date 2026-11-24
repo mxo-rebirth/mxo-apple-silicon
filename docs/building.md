@@ -22,8 +22,8 @@ stops before its questions while a game is running.
      outside drive C and moved in whole.
    - offers a shortcut to the MxOEmu project's launcher when the game folder holds it
      (`launcher.exe` with that project's `mxowrap.dll` next to it), made with CrossOver's
-     `cxmklnk` under the name `MxOEmu Launcher`. Not tested: that launcher itself has not been
-     started in CrossOver here.
+     `cxmklnk` under the name `MxOEmu Launcher`. Not tested: the shortcut has not been made in
+     a real bottle yet.
    - downloads the Rejacked launcher and the Revived installer from the projects' download
      pages and checks each against the SHA-256 printed on its page
    - runs the Rejacked installer, which is made with NSIS, with `/S`: no pages, its defaults,

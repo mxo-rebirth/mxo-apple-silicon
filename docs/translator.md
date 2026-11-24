@@ -210,9 +210,9 @@ The replacements run only on the thread that owns the Direct3D device. Other thr
 different FPU precision, so for them the jump leads to a few instructions that do what the jump
 overwrote and then continue in the original routine.
 
-Installed in the last sessions: 534 of 536 in Revived. In Rejacked 535 of 538, taken while the
-two matrix routines were still on the list. Without them that should read 535 of 536, which has
-not been looked at in the game yet. The exceptions are listed in
+Installed in the last sessions: 534 of 536 in Revived, and 535 of 536 with the MxOEmu launcher,
+which runs the `client.dll` Rejacked runs. In Rejacked itself the last count is 535 of 538,
+taken while the two matrix routines were still on the list. The exceptions are listed in
 [client-notes.md](client-notes.md#routines-something-else-has-changed).
 
 ## How it was checked

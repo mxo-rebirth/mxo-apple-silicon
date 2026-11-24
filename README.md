@@ -1,8 +1,8 @@
 # The Matrix Online on Apple Silicon Macs
 
 Makes The Matrix Online run fast in CrossOver on Apple Silicon Macs. It is for any project that
-uses the 2009 client. It was tested with MxO Rejacked and MxO Revived. The MxOEmu launcher gets
-its icon from the setup, but has not been started on the test machine.
+uses the 2009 client. It was tested with MxO Rejacked and MxO Revived, and in one short session
+with the MxOEmu launcher.
 
 On the test machine (M4, fullscreen 3440×1440, maximum detail) the game went from about 15 fps
 with a shortened draw distance to 55–89 fps at full draw distance.

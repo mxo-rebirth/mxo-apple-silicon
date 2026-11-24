@@ -107,6 +107,31 @@ What is left in "Wine and system code":
 | Anti-aliasing | a few fps |
 | The green tint | nothing measurable |
 
+## In a crowd
+
+Among more than 100 characters with the MxOEmu launcher, maximum detail, 3440×1440. Every row
+is the steady part of one session of one to three minutes, read from the frame log. The frame
+log and the light profiler ran in all of them, so the frame rates are lower than in play and
+only compare with each other. The light loop's share comes from the profile of the same
+session ([client-notes.md](client-notes.md#in-a-crowd) says what the loop is).
+
+| | Draw calls per frame | Frame rate | Light loop's share of the main thread |
+|---|---|---|---|
+| The usual scene (v36, no profiler) | 3,600 | 74 fps | |
+| Crowd by day, character shadows on | 9,300 | 48 fps | 0% |
+| Crowd by day, character shadows off | 7,750 | 54 fps | 0% |
+| The same crowd minutes later, the light loop running, shadows on | 9,650 | 33 fps | 27% |
+| The same, shadows off | 8,100 | 37 fps | 31% |
+| A later session with the light loop running, shadows on | 10,200 | 30 fps | 28 to 31% |
+| The next session, with the light filter | 9,700 to 9,950 | 42 fps | under 1%, the filter 1 to 3% |
+| Seven minutes with the filter, the 67 windows before the lights came on | 8,370 | 45.7 fps | 0% |
+| The same session, the 15 windows with the lights on | 8,470 | 46.2 fps | 0%, the filter 1 to 2% |
+
+In the session of 42 fps the one five-second window with more draw calls than the row before
+it (10,500) ran at 38 fps. The last two rows are one session through the change, in one place:
+with the filter the lights coming on no longer shows in the frame rate. Not measured: the same
+place with and without the filter in one session, and any of this without the profiler.
+
 ## Open problems
 
 - **Single slow frames.** Mostly frames with 4,000–6,000 draw calls, a few pauses of some
