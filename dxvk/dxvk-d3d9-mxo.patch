@@ -618,7 +618,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_mxo_fastmath.cpp b/src/d3d9/d3d9_mxo_fastmath.cpp
 --- a/src/d3d9/d3d9_mxo_fastmath.cpp	2026-11-19 00:00:00
 +++ b/src/d3d9/d3d9_mxo_fastmath.cpp	2026-11-19 00:00:00
-@@ -0,0 +1,736 @@
+@@ -0,0 +1,773 @@
 +#include <windows.h>
 +#include <tlhelp32.h>
 +
@@ -720,6 +720,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +    Installed,
 +    NotWritable,
 +    Busy,                       // a thread was inside the bytes the jump replaces
++    NotStopped,                 // a thread of the game could not be stopped: nothing was written
 +  };
 +
 +  static void WriteJump(uint8_t* target, const void* replacement) {
@@ -729,7 +730,10 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +  }
 +
 +
-+  // Writes the entry jumps with all other threads suspended, and skips a routine a thread is entering
++  // Writes the entry jumps with all other threads suspended, and skips a routine a thread is entering.
++  // When a thread cannot be stopped or its position not read, nothing is written. A thread started
++  // after the list of threads was taken is not stopped: the device is made before the game starts
++  // its worker threads.
 +  static std::vector<RedirectResult> InstallRedirects(uint8_t* base, const std::vector<Redirect>& redirects) {
 +    std::vector<RedirectResult> results(redirects.size(), RedirectResult::NotWritable);
 +    std::vector<DWORD> oldProtect(redirects.size(), 0);
@@ -740,6 +744,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +    std::vector<HANDLE> threads;
 +    HANDLE snapshot = ::CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
++    bool allStopped = snapshot != INVALID_HANDLE_VALUE;
 +
 +    if (snapshot != INVALID_HANDLE_VALUE) {
 +      THREADENTRY32 entry = { };
@@ -751,6 +756,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +        if (HANDLE thread = ::OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT, FALSE, entry.th32ThreadID))
 +          threads.push_back(thread);
++        else if (::GetLastError() != ERROR_INVALID_PARAMETER)   // that one: the thread has ended
++          allStopped = false;
 +      }
 +
 +      ::CloseHandle(snapshot);
@@ -761,8 +768,10 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +    // ---- no allocation, logging or locking from here ...
 +    for (size_t t = 0; t < threads.size(); t++) {
-+      if (::SuspendThread(threads[t]) == DWORD(-1))
++      if (::SuspendThread(threads[t]) == DWORD(-1)) {
++        allStopped = false;
 +        continue;
++      }
 +
 +      suspended[t] = 1;
 +
@@ -771,11 +780,18 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +      if (::GetThreadContext(threads[t], &context))
 +        eips[t] = uint32_t(context.Eip);
++      else
++        allStopped = false;
 +    }
 +
 +    for (size_t i = 0; i < redirects.size(); i++) {
 +      if (!writable[i])
 +        continue;
++
++      if (!allStopped) {
++        results[i] = RedirectResult::NotStopped;
++        continue;
++      }
 +
 +      uint8_t* target = base + redirects[i].rva;
 +      const uint32_t address = uint32_t(uintptr_t(target));
@@ -921,25 +937,28 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +  // Game add-ons (Revived's mxrdisp, the mxowrap wrappers) check and hook client.dll code at
 +  // fixed addresses, so a routine they point into is left alone unless DXVK_MXO_RESPECT_ADDONS=0.
-+  // Returns every client.dll address found in such a module, as sorted offsets.
-+  static std::vector<uint32_t> FindAddonReferences(const uint8_t* base, uint32_t imageSize) {
++  // Returns a bit for each byte of client.dll that such a module names by its address.
++  static std::vector<uint8_t> FindAddonReferences(const uint8_t* base, uint32_t imageSize) {
 +    // a larger file is left unread: reading it would cost address space the game needs
 +    static constexpr long MaxAddonFileBytes = 64 << 20;
 +
-+    std::vector<uint32_t> addonRefs;
++    std::vector<uint8_t> addonRefs;
 +
 +    if (!env::isFixEnabled("DXVK_MXO_RESPECT_ADDONS"))
 +      return addonRefs;
++
++    addonRefs.resize((size_t(imageSize) + 7) / 8, 0);
 +
 +    // mx*.dll next to the game executable and next to client.dll, read from disk:
 +    // some load only after the device exists. The executable itself is not scanned.
 +    std::vector<std::string> folders;
 +    char path[MAX_PATH];
 +
-+    if (::GetModuleFileNameA(nullptr, path, MAX_PATH))
-+      folders.push_back(path);
-+    if (::GetModuleFileNameA(HMODULE(base), path, MAX_PATH))
-+      folders.push_back(path);
++    for (HMODULE module : { HMODULE(nullptr), HMODULE(base) }) {
++      const DWORD length = ::GetModuleFileNameA(module, path, MAX_PATH);
++      if (length > 0 && length < MAX_PATH)   // a full buffer may have no terminating zero
++        folders.push_back(std::string(path, length));
++    }
 +
 +    std::vector<std::string> files;
 +
@@ -973,7 +992,11 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +        const long length = std::ftell(f);
 +        std::fseek(f, 0, SEEK_SET);
 +        if (length > 0 && length < MaxAddonFileBytes) {
-+          bytes.resize(size_t(length));
++          try {
++            bytes.resize(size_t(length));
++          } catch (const std::bad_alloc&) {
++            Logger::warn(str::format("MxO fast math: no memory to read ", file, ", what it names is not known"));
++          }
 +          if (std::fread(bytes.data(), 1, bytes.size(), f) != bytes.size())
 +            bytes.clear();
 +        }
@@ -993,7 +1016,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +        uint32_t value;
 +        std::memcpy(&value, &bytes[off], sizeof(value));
 +        if (value >= lo && value < hi) {
-+          addonRefs.push_back(value - MxoX_imagebase);
++          const uint32_t rva = value - MxoX_imagebase;
++          addonRefs[rva / 8] |= uint8_t(1u << (rva % 8));
 +          count++;
 +        }
 +      }
@@ -1002,14 +1026,16 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +      Logger::info(str::format("MxO fast math: add-on ", file.substr(slash + 1), " names ", count, " client.dll addresses"));
 +    }
 +
-+    std::sort(addonRefs.begin(), addonRefs.end());
 +    return addonRefs;
 +  }
 +
 +
-+  static bool IsNamedByAddon(const std::vector<uint32_t>& addonRefs, uint32_t rva, uint32_t size) {
-+    auto ref = std::lower_bound(addonRefs.begin(), addonRefs.end(), rva);
-+    return ref != addonRefs.end() && *ref < rva + size;
++  static bool IsNamedByAddon(const std::vector<uint8_t>& addonRefs, uint32_t rva, uint32_t size) {
++    for (uint64_t at = rva; at < uint64_t(rva) + size && at / 8 < addonRefs.size(); at++) {
++      if (addonRefs[at / 8] & (1u << (at % 8)))
++        return true;
++    }
++    return false;
 +  }
 +
 +
@@ -1071,7 +1097,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +    }
 +
 +    const uint32_t limit = ReadInstallLimit();
-+    const std::vector<uint32_t> addonRefs = FindAddonReferences(base, imageSize);
++    const std::vector<uint8_t> addonRefs = FindAddonReferences(base, imageSize);
 +
 +    bool handWrittenMatches[HandWrittenCount];
 +
@@ -1242,7 +1268,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +      results = InstallRedirects(base, redirects);
 +    }
 +
-+    uint32_t installed = 0, notWritable = 0;
++    uint32_t installed = 0, notWritable = 0, notStopped = 0;
 +    std::string busy;
 +
 +    for (size_t i = 0; i < todo.size(); i++) {
@@ -1250,6 +1276,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +        installed++;
 +      else if (results[i] == RedirectResult::NotWritable)
 +        notWritable++;
++      else if (results[i] == RedirectResult::NotStopped)
++        notStopped++;
 +      else if (busy.size() < MaxListLength)
 +        busy += str::format(" ", std::hex, todo[i]->rva);
 +    }
@@ -1265,6 +1293,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +        case RedirectResult::Installed:   handWrittenState[r] = "replaced"; break;
 +        case RedirectResult::NotWritable: handWrittenState[r] = "left alone (its code could not be made writable)"; break;
 +        case RedirectResult::Busy:        handWrittenState[r] = "left alone (a thread was entering it)"; break;
++        case RedirectResult::NotStopped:  handWrittenState[r] = "left alone (a thread could not be stopped)"; break;
 +      }
 +    }
 +
@@ -1283,6 +1312,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +        " left alone because a translated routine they call directly is left alone (rva):", paired));
 +    if (!busy.empty())
 +      Logger::info(str::format("MxO fast math: left alone because a thread was entering them (rva):", busy));
++    if (notStopped)
++      Logger::warn(str::format("MxO fast math: ", notStopped, " left alone because a thread of the game could not be stopped while they were written"));
 +    if (notWritable)
 +      Logger::warn(str::format("MxO fast math: ", notWritable, " left alone because their code could not be made writable"));
 +
@@ -1338,18 +1369,24 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +  void CheckMxoFastMathFpu() {
 +    // 24-bit precision (bits 8-9) and rounding to nearest (bits 10-11): all four bits clear
 +    static constexpr uint16_t PrecisionAndRoundingMask = 0x0f00;
++    // SSE as the translations expect it: every exception masked, rounding to nearest, no flushing
++    // of tiny values to zero. The low six bits are flags and do not matter.
++    static constexpr uint32_t MxcsrControlMask = 0xffc0;
++    static constexpr uint32_t MxcsrDefault     = 0x1f80;
 +
 +    if (!s_x87Thread || ::GetCurrentThreadId() != s_x87Thread)
 +      return;
 +
 +    uint16_t control = 0;
++    uint32_t mxcsr = 0;
 +    __asm__ __volatile__("fnstcw %0" : "=m" (*&control));
++    __asm__ __volatile__("stmxcsr %0" : "=m" (*&mxcsr));
 +
-+    const bool usable = !(control & PrecisionAndRoundingMask);
++    const bool usable = !(control & PrecisionAndRoundingMask) && (mxcsr & MxcsrControlMask) == MxcsrDefault;
 +
 +    if (usable != (MxoX_tid != 0)) {
 +      MxoX_tid = usable ? s_x87Thread : 0;
-+      Logger::warn(str::format("MxO fast math: FPU control word ", std::hex, control,
++      Logger::warn(str::format("MxO fast math: FPU control word ", std::hex, control, ", MXCSR ", mxcsr,
 +        usable ? ", translated routines back on" : ", translated routines off"));
 +    }
 +  }
@@ -1561,7 +1598,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_mxo_lights.h b/src/d3d9/d3d9_mxo_lights.h
 --- a/src/d3d9/d3d9_mxo_lights.h	2026-11-19 00:00:00
 +++ b/src/d3d9/d3d9_mxo_lights.h	2026-11-19 00:00:00
-@@ -0,0 +1,177 @@
+@@ -0,0 +1,182 @@
 +#pragma once
 +
 +#include <cstddef>
@@ -1600,6 +1637,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +const float    MxoLightMargin       = 1.01f;      // a light this close to reaching the box is left to the routine
 +const size_t   MxoMaxKeptLights     = 256;        // with more lights in reach than this the routine gets the whole list
++const uint32_t MxoLightEntryCount   = 8;          // the routine fills at most this many entries
 +
 +// The list the routine is handed: pointers to the lights
 +struct MxoLightList {
@@ -1699,11 +1737,15 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +// the routine: the DLL and the tests both call it.
 +static inline uint32_t MxoRunLightLoop(MxoLightLoop loop, uint32_t clientBase, const uint8_t* object,
 +    const MxoLightList* lights, void* entries, uint32_t first, MxoLightCount* count) {
-+  const uint8_t* kept[MxoMaxKeptLights];
-+  const size_t keptCount = MxoLightsInReach(object, lights, kept, clientBase);
-+
 +  count->seen = lights->end > lights->begin ? uint32_t(lights->end - lights->begin) : 0u;
 +  count->kept = count->seen;
++
++  // with no light or no free entry the routine may read nothing, so the filter reads nothing either
++  if (count->seen == 0 || first >= MxoLightEntryCount)
++    return loop(object, lights, entries, first);
++
++  const uint8_t* kept[MxoMaxKeptLights];
++  const size_t keptCount = MxoLightsInReach(object, lights, kept, clientBase);
 +
 +  if (keptCount > MxoMaxKeptLights)
 +    return loop(object, lights, entries, first);
@@ -2045,7 +2087,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_swapchain.cpp b/src/d3d9/d3d9_swapchain.cpp
 --- a/src/d3d9/d3d9_swapchain.cpp	2026-11-19 00:00:00
 +++ b/src/d3d9/d3d9_swapchain.cpp	2026-11-19 00:00:00
-@@ -1,4 +1,15 @@
+@@ -1,4 +1,16 @@
 +#include <cstdio>
 +#include <windows.h>
 +#include <tlhelp32.h>
@@ -2053,6 +2095,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +#include <unordered_map>
 +#include <algorithm>
 +#include <atomic>
++#include <new>
 +#include <string>
 +#include <cstring>
  #include "d3d9_swapchain.h"
@@ -2061,7 +2104,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
  #include "d3d9_surface.h"
  #include "d3d9_monitor.h"
  
-@@ -156,6 +167,23 @@
+@@ -156,6 +168,23 @@
          }
        }
      }
@@ -2085,7 +2128,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      else if (message == WM_SIZE)
      {
        D3DDEVICE_CREATION_PARAMETERS create_parms;
-@@ -184,6 +212,659 @@
+@@ -184,6 +213,683 @@
    };
  
  
@@ -2157,14 +2200,22 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +    HMODULE module = nullptr;
 +    char path[MAX_PATH] = "";
 +    if (::GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-+          reinterpret_cast<LPCSTR>(uintptr_t(address)), &module) && ::GetModuleFileNameA(module, path, MAX_PATH)) {
++          reinterpret_cast<LPCSTR>(uintptr_t(address)), &module) && ::GetModuleFileNameA(module, path, MAX_PATH) - 1u < MAX_PATH - 1u) {
 +      const char* name = std::strrchr(path, '\\');
 +      return str::format(name ? name + 1 : path, "+", std::hex, address - uint32_t(uintptr_t(module)));
 +    }
 +    return str::format("?", std::hex, address);
 +  }
 +
++  // A diagnostics thread runs this DLL's code until the game ends: unloading the DLL under it would crash
++  static void PinDiagnosticsModule() {
++    HMODULE self = nullptr;
++    ::GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN,
++      reinterpret_cast<LPCSTR>(&PinDiagnosticsModule), &self);
++  }
++
 +  static DWORD WINAPI StallThreadProc(void*) {
++    PinDiagnosticsModule();
 +    HANDLE thread = ::OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT, FALSE, s_presentThreadId);
 +    if (!thread)
 +      return 0;
@@ -2210,14 +2261,12 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +      auto name = [] (HWND w) -> std::string {
 +        if (!w)
 +          return "none";
-+        char cls[64] = "", title[64] = "";
++        // the class only: a title can be private, and asking for it waits on the window's thread
++        char cls[64] = "";
 +        ::GetClassNameA(w, cls, sizeof(cls));
-+        ::GetWindowTextA(w, title, sizeof(title));
 +        DWORD pid = 0;
 +        ::GetWindowThreadProcessId(w, &pid);
-+        if (pid != ::GetCurrentProcessId())
-+          return str::format(cls, " (other program)");
-+        return str::format(cls, " \"", title, "\" (game)");
++        return str::format(cls, pid == ::GetCurrentProcessId() ? " (game)" : " (other program)");
 +      };
 +      GUITHREADINFO gui = { };
 +      gui.cbSize = sizeof(gui);
@@ -2255,7 +2304,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +                continue;
 +              if (HANDLE other = ::OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT, FALSE, entry.th32ThreadID)) {
 +                Sample os;
-+                if (takeSample(other, os))
++                if (others.size() < MaxStallSamples && takeSample(other, os))
 +                  others.push_back({ entry.th32ThreadID, os });
 +                ::CloseHandle(other);
 +              }
@@ -2328,11 +2377,12 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +    if (::GetFileAttributesA(path.c_str()) == INVALID_FILE_ATTRIBUTES)
 +      return false;
 +
-+    ::DeleteFileA(path.c_str());
-+    return true;
++    // one that cannot be deleted would ask again twice a second
++    return ::DeleteFileA(path.c_str()) != FALSE;
 +  }
 +
 +  static DWORD WINAPI SamplerThreadProc(void*) {
++    PinDiagnosticsModule();
 +    static constexpr uint32_t MaxSamples       = 60000;   // per write to the file
 +    static constexpr uint32_t MaxThreads       = 64;
 +    static constexpr DWORD    IntervalMs       = 5;
@@ -2340,6 +2390,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +    static constexpr DWORD    ScanIntervalMs   = 2000;    // for new threads and modules
 +    static constexpr DWORD    WriteIntervalMs  = 10000;
 +    static constexpr uint32_t StackWords       = 192;     // stack words searched for return addresses
++    static constexpr long     MaxFileBytes     = 1l << 30; // samples.bin stops growing here
 +
 +    static SampleRecord samples[MaxSamples];
 +    struct Thread { DWORD tid; HANDLE handle; };
@@ -2489,6 +2540,13 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +      lastWrite = now;
 +
 +      if (FILE* file = std::fopen(samplesPath.c_str(), "ab")) {
++        std::fseek(file, 0, SEEK_END);
++        if (std::ftell(file) >= MaxFileBytes) {
++          std::fclose(file);
++          Logger::warn(str::format("MxO: samples.bin has reached ", MaxFileBytes >> 20, " MB, the profiler stops"));
++          return 0;
++        }
++
 +        const env::ThreadNameEntry* names = nullptr;
 +        const uint32_t nameCount = env::getThreadNames(&names);
 +        static constexpr uint32_t FileMagic = 0x34504d53u;   // "SMP4", the format profile2.py expects
@@ -2710,7 +2768,16 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +    infoHeader.biBitCount  = 8 * BmpBytesPerPixel;
 +    infoHeader.biSizeImage = size;
 +
-+    std::vector<uint8_t> out(headerSize + size, 0);
++    std::vector<uint8_t> out;
++
++    try {
++      out.resize(headerSize + size, 0);
++    } catch (const std::bad_alloc&) {   // a large window in a 32-bit game
++      dst->UnlockRect();
++      Logger::warn(str::format("SHOT not saved: no memory for ", w, "x", h));
++      return;
++    }
++
 +    std::memcpy(out.data(), &fileHeader, sizeof(fileHeader));
 +    std::memcpy(out.data() + sizeof(fileHeader), &infoHeader, sizeof(infoHeader));
 +
@@ -2745,7 +2812,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
    D3D9SwapChainEx::D3D9SwapChainEx(
            D3D9DeviceEx*          pDevice,
            D3DPRESENT_PARAMETERS* pPresentParams,
-@@ -255,6 +936,12 @@
+@@ -255,6 +961,12 @@
            HWND     hDestWindowOverride,
      const RGNDATA* pDirtyRegion,
            DWORD    dwFlags) {
@@ -2758,7 +2825,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      D3D9DeviceLock lock = m_parent->LockDevice();
  
      uint32_t presentInterval = m_presentParams.PresentationInterval;
-@@ -852,11 +1539,101 @@
+@@ -852,11 +1564,101 @@
          {  int32_t(m_dstRect.left),                    int32_t(m_dstRect.top)                    },
          { uint32_t(m_dstRect.right - m_dstRect.left), uint32_t(m_dstRect.bottom - m_dstRect.top) } };
  

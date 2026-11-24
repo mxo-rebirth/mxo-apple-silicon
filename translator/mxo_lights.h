@@ -36,6 +36,7 @@ const uint64_t MxoPartReachHash     = 0xdabfbd814307a612ull;
 
 const float    MxoLightMargin       = 1.01f;      // a light this close to reaching the box is left to the routine
 const size_t   MxoMaxKeptLights     = 256;        // with more lights in reach than this the routine gets the whole list
+const uint32_t MxoLightEntryCount   = 8;          // the routine fills at most this many entries
 
 // The list the routine is handed: pointers to the lights
 struct MxoLightList {
@@ -135,11 +136,15 @@ static inline size_t MxoLightsInReach(const uint8_t* object, const MxoLightList*
 // the routine: the DLL and the tests both call it.
 static inline uint32_t MxoRunLightLoop(MxoLightLoop loop, uint32_t clientBase, const uint8_t* object,
     const MxoLightList* lights, void* entries, uint32_t first, MxoLightCount* count) {
-  const uint8_t* kept[MxoMaxKeptLights];
-  const size_t keptCount = MxoLightsInReach(object, lights, kept, clientBase);
-
   count->seen = lights->end > lights->begin ? uint32_t(lights->end - lights->begin) : 0u;
   count->kept = count->seen;
+
+  // with no light or no free entry the routine may read nothing, so the filter reads nothing either
+  if (count->seen == 0 || first >= MxoLightEntryCount)
+    return loop(object, lights, entries, first);
+
+  const uint8_t* kept[MxoMaxKeptLights];
+  const size_t keptCount = MxoLightsInReach(object, lights, kept, clientBase);
 
   if (keptCount > MxoMaxKeptLights)
     return loop(object, lights, entries, first);

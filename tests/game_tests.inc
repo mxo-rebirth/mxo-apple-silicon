@@ -33,7 +33,7 @@ static const uint32_t ShapedLights = 32;           // light objects the shaping 
 static const size_t   ShapedLightSize = 96, ShapedPartSize = 128;   // room for each of them and for its part
 static const size_t   LightsBlock = 4, PartsBlock = 7;   // the arena blocks they start in
 static const size_t   LightEntrySize = 0x54;       // what the loop writes for a light it takes
-static const uint32_t LightEntries = 8;            // the loop stops at this many
+static const uint32_t LightEntries = MxoLightEntryCount;   // the loop stops at this many
 static const uint32_t QuietNan = 0x7fc00000;
 
 static jmp_buf g_crashJmp;
