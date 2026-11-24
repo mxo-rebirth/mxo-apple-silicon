@@ -186,8 +186,8 @@ The DLL from this repository works with Revived. See [building.md](building.md).
 
 The MxOEmu project's client needs no installer: its launcher is `C:\Games\MxO\launcher.exe`,
 which comes with the game files from <https://mxoemu.info>. Start it with the bottle's Run
-Command, or let `scripts/setup.sh game` make a shortcut for it. On the test machine it ran in
-one short session, with the same fixes and the same speed-up as Rejacked.
+Command, or let `scripts/setup.sh game` make a shortcut for it. On the test machine it ran
+with the same fixes and the same speed-up as Rejacked.
 
 ## A note on safety
 

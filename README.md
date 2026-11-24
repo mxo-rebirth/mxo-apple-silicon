@@ -1,26 +1,31 @@
 # The Matrix Online on Apple Silicon Macs
 
-Makes The Matrix Online run fast in CrossOver on Apple Silicon Macs. It is for any project that
-uses the 2009 client. It was tested with MxO Rejacked and MxO Revived, and in one short session
-with the MxOEmu launcher.
+> [!WARNING]
+> Experimental. Recommended for advanced users.
 
-On the test machine (M4, fullscreen 3440×1440, maximum detail) the game went from about 15 fps
-with a shortened draw distance to 55–89 fps at full draw distance.
+Makes The Matrix Online run fast in CrossOver on Apple Silicon Macs. It supports MxO Rejacked,
+MxO Revived and MxOEmu.
+
+On the test machine (M4, 3440×1440, maximum detail) the game went from about 15 fps to 55–89 fps.
 
 ![The game in a window on a Mac desktop, the frame-rate counter at the top left showing 63 fps](docs/screenshot.png)
 
-MxO Revived in the world at 63 fps, with the map and the video options open, in a window on a
-3440×1440 screen.
+MxO Revived at 63 fps, in a window on a 3440×1440 screen.
 
 ## What you need
 
-- An Apple Silicon Mac with macOS 26 or newer and [CrossOver](https://www.codeweavers.com/crossover)
-  (tested with macOS 27 and CrossOver 26.3). The setup checks all three first.
-- [Homebrew](https://brew.sh), for the build tools.
-- The game itself, version 7.6005 (about 6 GB). The setup can download it from the MxOEmu
-  project, or take your own copy.
+- An Apple Silicon Mac with macOS 26 or newer
+- [CrossOver](https://www.codeweavers.com/crossover)
+- [Homebrew](https://brew.sh)
+
+Tested on one Mac (M4) with macOS 27 and CrossOver 26.3. The setup can download the game itself.
 
 ## Set up
+
+The command below downloads this repository and runs a script from it on your Mac. The script
+changes files in the CrossOver bottle you choose and keeps a copy of every file it replaces.
+Read [install.sh](install.sh) and [scripts/setup.sh](scripts/setup.sh) first if you want to
+know what they do. You run it at your own risk.
 
 Close the game and its launcher and paste this into Terminal:
 
@@ -28,52 +33,46 @@ Close the game and its launcher and paste this into Terminal:
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/mxo-rebirth/mxo-apple-silicon/main/install.sh)"
 ```
 
-It downloads this repository to `~/mxo-apple-silicon` and runs its setup. Running it again
-updates the download. By hand, the same is: download this repository and run `scripts/setup.sh`
-in it.
+It clones this repository to `~/mxo-apple-silicon` and runs `scripts/setup.sh` there. Run it
+again to update.
+
+Everything can also be done by hand, without the script:
+[docs/crossover.md](docs/crossover.md) sets up the bottle and the game, and
+[docs/building.md](docs/building.md#build) builds and installs the speed-up.
 
 ![The setup in a Terminal window: its opening words, the frame of the server stats site, the system check, its advice on a separate account and a new bottle being made](docs/setup.png)
 
-The setup checks the Mac, asks its few questions first (which bottle, which servers, a
-frame-rate limit, add-ons, the build tools, maximum detail, the logo movies) and then works
-through these steps by itself:
+The setup asks a few questions and then does the rest:
 
 | Step | What it does |
 |---|---|
-| Game | Only when the bottle has no game yet. Creates the bottle if there is none. Gets the game itself: downloaded from the [MxOEmu project](https://mxoemu.info), or from a folder, an archive or a direct `https` link you give. Offers CrossOver's icon for the MxOEmu launcher, which comes with that project's game files. Downloads the Rejacked launcher and the Revived installer from the projects' own sites and checks them against the checksums published there. The Rejacked launcher installs without its window. Revived's installer opens for you to click through, Microsoft's .NET 10 runtime first. Tells the Rejacked launcher where the game is. |
-| Start fixes | Installs what the game needs to start at all: the game's own shader compiler, Microsoft's DirectMusic and DirectSound, the music sound bank, and a larger memory limit for the game. |
-| Build | Builds the speed-up (`d3d9.dll`) on your Mac from your own copy of the game. Takes a few minutes. Installs the build tools with Homebrew first if they are missing and you agree. |
-| Install | Installs it for every MxO game it found in the bottle, and lets the games share their pipeline caches so they stutter less. Everything else in the bottle keeps CrossOver's normal graphics. On request it also speeds up the routines that game add-ons hook. An add-on such as Revived's interface scaling can then stop working. |
-| Detail | On request: every graphics option at its maximum (draw distance, shadows, wet streets, weather, traffic, anti-aliasing, screen filters), the resolution of the main display and 16x anisotropic filtering. It replaces the detail settings a game has, so the answer defaults to no once a game has settings. Later: `scripts/setup.sh detail`. |
-| Intro | On request: the game starts without its logo movies. Later: `scripts/setup.sh intro`. |
-| Icons | Has CrossOver read the bottle's shortcuts again, so the launchers get their icons, and makes the Rejacked launcher's shortcut when the bottle has none. Later: `scripts/setup.sh icons`. |
-| Music | Revived only: keeps the game's music on. Revived's starter switches it off otherwise. In a bottle the setup has been through before, music that is off stays off. To switch it on: `scripts/setup.sh music`. |
-| Launcher video | Revived only: switches off the video behind the launcher's window, which keeps a processor core busy. |
+| Game | Gets the game and the launchers, if the bottle has none |
+| Start fixes | What the game needs to start |
+| Build | Builds the speed-up from your copy of the game |
+| Install | Installs it for every MxO game in the bottle |
+| Detail | On request: maximum graphics |
+| Intro | On request: no logo movies |
+| Icons | Launcher icons in CrossOver |
+| Revived | Music on, launcher video off |
 
-The first run downloads about 420 MB (Microsoft's DirectX packages, CodeWeavers' CrossOver
-source code and a compiler) and uses about 1.1 GB of disk space in the `build` folder. The game
-step adds the game (a 1.3 GB download, about 6 GB unpacked) and under 100 MB for the launchers
-and the runtime.
+The first run downloads about 420 MB and uses about 1.1 GB of disk space. The game adds a 1.3 GB
+download, about 6 GB unpacked. Every step is described in [docs/building.md](docs/building.md).
 
-Then start the game from its launcher as usual. If the Rejacked launcher still asks for the game
-folder, choose `C:\Games\MxO` in its settings.
+Then start the game from its launcher as usual.
 
 ## Tips
 
-- **Ctrl+Shift+F** in the game shows or hides the frame-rate counter. It starts hidden.
-- **Fan noise:** the setup offers to limit the frame rate to 90 fps. Without a limit the game
-  reaches up to 200 fps in light scenes, which only makes heat. For another limit run
-  `~/mxo-apple-silicon/scripts/setup.sh --fps 120 install`. `--fps 0` removes it. A later run of
-  the setup offers the limit the bottle has.
-- **Another launcher later:** `~/mxo-apple-silicon/scripts/setup.sh game` offers what the
-  bottle does not have yet: the Rejacked launcher, Revived, the icon for the MxOEmu launcher.
-- **Another project's client:** if its game executable is not `matrix.exe` or `mxorev.exe`, add
-  its name to the end of the command: `--exe name.exe`.
+- **Ctrl+Shift+F** in the game shows or hides the frame-rate counter.
+- **Change something later:** run the same command again. It updates itself and asks its
+  questions again, with what the bottle has as the defaults.
+- **Another launcher later:** the same command with `game` at the end.
+- **Fan noise:** the setup offers a limit of 90 fps. For another one, put `--fps 120 install` at
+  the end of the command.
 - **Rejacked:** untick "Use the new glow shader for 'Screen Filter: Over-Bright' (BETA)" in the
-  launcher. It halves the frame rate at high resolutions.
-- **Who is online:** <https://whoisjackedin.com> shows how busy the MxO servers are.
-- **Close memory-hungry apps** before playing. When the Mac is short of memory, the game can
-  stutter.
+  launcher. It halves the frame rate at high resolutions. If the launcher asks for the game
+  folder, choose `C:\Games\MxO`.
+- **Stutter:** close memory-hungry apps before playing.
+- **Who is online:** <https://whoisjackedin.com>
 
 ## Undo
 
@@ -86,48 +85,33 @@ a `.setup-backup` suffix.
 
 ## Good to know
 
-- **Use it at your own risk.** We take no responsibility for any damage. See the
-  [licence](LICENSE).
-- **Keep the game apart from your files.** Programs in CrossOver can reach every file of the
-  macOS account they run in. Our advice: install and play under a separate, standard
-  (non-admin) user account on your computer, with your main account behind its own password. A
-  game client then cannot reach your everyday files and logins. The setup says so before it
-  starts. In a separate account, first run
-  `brew install mingw-w64 meson ninja glslang` in the account that has Homebrew.
-- **Experimental.** It has been played by one person on one Mac, in short sessions.
+- **Use it at your own risk.** See the [licence](LICENSE).
+- **Our advice, not a requirement: play under a separate macOS account.** Programs in CrossOver
+  can reach every file of the account they run in. If you do, install the build tools from the
+  account that has Homebrew first: `brew install mingw-w64 meson ninja glslang`
 - **Built on your Mac, from your game.** No game file is in this repository. Do not share the
-  built `d3d9.dll`: it contains code translated from your game files.
-- **It changes the game's code in memory** (math routines only, nothing network-related).
-  Check that your server allows it.
-- **Intel Macs and Windows PCs** gain nothing from the math part.
+  built `d3d9.dll`.
+- **It changes the game's math code in memory.** Check that your server allows it.
 
 ## More
 
-For players:
-
 | | |
 |---|---|
-| [docs/crossover.md](docs/crossover.md) | setting up the bottle and the game by hand |
-| [docs/building.md](docs/building.md) | building and installing by hand, switches, going back |
-
-For developers and the game teams:
-
-| | |
-|---|---|
+| [docs/crossover.md](docs/crossover.md) | setting up by hand |
+| [docs/building.md](docs/building.md) | every setup step, building by hand, switches |
 | [docs/how-it-works.md](docs/how-it-works.md) | why the game is slow on Apple Silicon and what the fix is |
-| [docs/client-notes.md](docs/client-notes.md) | reverse-engineering notes on the client |
+| [docs/client-notes.md](docs/client-notes.md) | notes on the client |
 | [docs/translator.md](docs/translator.md) | the x87 to SSE2 translator |
 | [docs/graphics.md](docs/graphics.md) | the graphics problems and their fixes |
-| [docs/measurements.md](docs/measurements.md) | method, results, open problems |
-| [docs/development.md](docs/development.md) | repository layout, diagnostics, profiling |
-| [tests/README.md](tests/README.md) | the tests that compare the translated math with the original |
+| [docs/measurements.md](docs/measurements.md) | method and results |
+| [docs/development.md](docs/development.md) | layout, diagnostics, profiling |
+| [tests/README.md](tests/README.md) | the tests |
 
 ## Licence
 
-zlib: [LICENSE](LICENSE). The patch in `dxvk/` is a modified part of
-[DXVK](https://github.com/doitsujin/dxvk), which has the same licence:
-[dxvk/LICENSE](dxvk/LICENSE). This repository contains no game files, and the screenshot shows
-the game.
+The code is zlib licensed, see [LICENSE](LICENSE). The patch in `dxvk/` is a modified part of
+[DXVK](https://github.com/doitsujin/dxvk) (zlib), see [dxvk/LICENSE](dxvk/LICENSE). This
+repository contains no game files, and the screenshot shows the game.
 
 The Matrix Online is a trademark of Warner Bros. Entertainment Inc. CrossOver is a trademark of
 CodeWeavers, Inc. This fan project is not affiliated with or endorsed by Warner Bros.,
