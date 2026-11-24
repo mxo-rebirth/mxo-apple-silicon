@@ -321,6 +321,15 @@ job_output() {   # where a failed job's output is: in the log behind a spinner, 
   if [ $FANCY = 1 ]; then echo "Its output is in $LOG"; else echo "Its output is above"; fi
 }
 
+find_brew() {   # Homebrew is not on every account's PATH
+  local brew
+  command -v brew >/dev/null && return 0
+  for brew in /opt/homebrew/bin/brew /usr/local/bin/brew; do
+    if [ -x "$brew" ]; then eval "$("$brew" shellenv)"; return 0; fi
+  done
+  return 1
+}
+
 temp_dir() {   # sets TMP
   TMP=$(mktemp -d) || die "could not make a temporary folder"
   LEFTOVERS+=("$TMP")
@@ -634,6 +643,23 @@ named() {   # named STEP: it was named on the command line
   done
   return 1
 }
+
+# What the setup itself runs on, checked before anything is downloaded or changed.
+find_brew || true
+# python3 does the file edits and reads the download pages. Without Apple's command line developer
+# tools, the python3 of macOS is a stand-in that only offers to install them.
+python3_there() {
+  local python
+  python=$(command -v python3) || return 1
+  [ "$python" != /usr/bin/python3 ] || xcode-select -p >/dev/null 2>&1
+}
+python3_there || die "Apple's command line developer tools are missing, and the setup needs them. Install Homebrew first, which brings them along (https://brew.sh), then run this again"
+# The speed-up is built with tools from Homebrew, unless a built DLL is given or there already.
+if [ -z "$DLL" ] && { [ ${#STEPS[@]} = 0 ] || named build; } && [ ! -f "$ROOT/build/d3d9.dll" ] \
+  && [ -n "$(missing_build_tools)" ] && ! command -v brew >/dev/null; then
+  die "Homebrew is missing, and the tools that build the speed-up come from it. Install it first (https://brew.sh), then run this again"
+fi
+if command -v brew >/dev/null; then ok "Homebrew"; else ok "developer tools"; fi
 
 # The CrossOver app shows a bottle's new icons only after it starts again. Its window, in this account
 # only: the programs in the bottles run on without it.
@@ -1275,15 +1301,6 @@ needs_build() {   # no DLL yet, or the sources or the game changed since it was 
   local dll="$ROOT/build/d3d9.dll"
   [ -f "$dll" ] || return 0
   [ -n "$(find "$ROOT/dxvk" "$ROOT/translator" "$ROOT/scripts/build.sh" "$(build_client)" -newer "$dll" 2>/dev/null | head -1)" ]
-}
-
-find_brew() {   # Homebrew is not on every account's PATH
-  local brew
-  command -v brew >/dev/null && return 0
-  for brew in /opt/homebrew/bin/brew /usr/local/bin/brew; do
-    if [ -x "$brew" ]; then eval "$("$brew" shellenv)"; return 0; fi
-  done
-  return 1
 }
 
 TOOLS=""   # ready, install or missing, once looked at

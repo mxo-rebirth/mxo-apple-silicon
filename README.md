@@ -24,7 +24,8 @@ MxO Revived at 63 fps, in a window on a 3440×1440 screen.
 
 - An Apple Silicon Mac with macOS 26 or newer
 - [CrossOver](https://www.codeweavers.com/crossover)
-- [Homebrew](https://brew.sh)
+- [Homebrew](https://brew.sh). Its installer also brings Apple's command line developer tools,
+  which the setup needs
 
 Tested on one Mac (M4) with macOS 27 and CrossOver 26.3. The setup can download the game itself.
 

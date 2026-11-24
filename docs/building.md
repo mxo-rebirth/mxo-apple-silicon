@@ -11,7 +11,8 @@ see [crossover.md](crossover.md) first.
 
 ## The setup
 
-`scripts/setup.sh` checks the Mac and offers to quit CrossOver if it is open (it shows new icons
+`scripts/setup.sh` checks the Mac (Apple Silicon, macOS, CrossOver, Apple's command line
+developer tools and Homebrew) and offers to quit CrossOver if it is open (it shows new icons
 only after it starts again). In a bottle without a game the game step comes first. Then the
 setup asks its questions and runs the other steps in this order.
 [quick-start.md](quick-start.md) is the short way through it. The setup stops if a game is
