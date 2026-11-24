@@ -6,6 +6,13 @@
 Makes The Matrix Online run fast in CrossOver on Apple Silicon Macs. It supports MxO Rejacked,
 MxO Revived and MxOEmu.
 
+It is the result of reverse engineering: taking the 2009 game apart without its source code.
+The game does its math with an old kind of processor instruction, which Apple's chips can only
+imitate slowly. This project translates 535 of the game's math routines into the modern kind
+and swaps them in when the game starts. The results stay the same. It also fixes fifteen
+graphics problems between the game and the Mac's graphics chip.
+[How it works](docs/how-it-works.md)
+
 On the test machine (M4) the game went from about 15 fps, with the game cutting its draw distance,
 to 55–89 fps at full draw distance and maximum detail, fullscreen at 3440×1440.
 
@@ -56,8 +63,8 @@ The setup asks a few questions and then does the rest:
 | Install | Installs it for every MxO game in the bottle |
 | Detail | On request: maximum graphics |
 | Intro | On request: no logo movies |
+| Revived | Music on. On request: launcher video off |
 | Icons | Launcher icons in CrossOver |
-| Revived | Music on, launcher video off |
 
 The first run downloads about 420 MB and uses about 1.1 GB of disk space, Homebrew's build
 tools not counted. The game adds a 1.3 GB
@@ -70,7 +77,8 @@ Then start the game from its launcher as usual.
 - **Ctrl+Shift+F** in the game shows or hides the frame-rate counter.
 - **Change something later:** run the same command again. It updates itself and asks its
   questions again, with what the bottle has as the defaults.
-- **Another launcher later:** the same command with `game` at the end.
+- **Another launcher later:** the same command with `game` at the end. If it adds a game,
+  run the plain command once more afterwards: that sets the new game up.
 - **Fan noise:** the setup offers a limit of 90 fps. For another one, put `--fps 120 install` at
   the end of the command.
 - **Rejacked:** untick "Use the new glow shader for 'Screen Filter: Over-Bright' (BETA)" in the

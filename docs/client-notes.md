@@ -228,7 +228,7 @@ Counts are per frame, in the world at full draw distance, 3440×1440.
 | Draw calls | 3,600–4,000 on average, 4,000–6,000 in heavy frames |
 | Dynamic vertex buffers | about 40 locks without `D3DLOCK_DISCARD` or `D3DLOCK_NOOVERWRITE` |
 | Managed textures | uploaded right before first use: about 12 while the world streams in |
-| Render passes | about 19, of which about 11 because the game switches render targets |
+| Render passes | 60 to 100 in the frame log of the current build. A count before fix 11 gave about 19, about 11 of them because the game switches render targets ([graphics.md](graphics.md#what-a-frame-looks-like-now)) |
 | Map | about 830 triangle fans through `DrawPrimitiveUP` |
 | Shaders | 288 shader modules compiled by DXVK across both games |
 | Login screen | fullscreen 800×600 with a display mode switch, then the configured resolution |

@@ -84,7 +84,7 @@ scripts/check.sh    # shell syntax under bash 3.2, shellcheck, ruff, the helpers
 - The README is for players and stays short. What developers and the game teams need is in `docs/`.
 - What was not tested is said so, next to the claim
 - No logo or title art of the game or the films, and no character names, in the repo or in what the setup prints
-- People's names and accounts never appear. The repository's own address is the one exception: the installer and the README need it.
+- People's names and accounts never appear. Addresses are the exception: the repository's own, which the installer and the README need, and the links to the projects this builds on.
 
 ## Commits
 

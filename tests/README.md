@@ -50,7 +50,9 @@ time per folder.
 
 ## What a good result looks like
 
-**Synthetic part:** zero differences with ordinary input. With extreme input (huge, tiny,
+**Synthetic part:** zero differences with ordinary input. Integer results are compared bit for
+bit. (The game part cannot tell an integer from a float in memory, so there two values that both
+have the bits of a NaN count as equal, small negative integers among them.) With extreme input (huge, tiny,
 infinite, NaN) the default translation may differ where a value leaves the range of a `float`
 ([why](../docs/translator.md#rounding)). Those counts must not change between versions. Then
 `left out ... wrongly` for the light filter must be 0.

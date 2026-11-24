@@ -111,7 +111,9 @@ example:
 - FPU stacks deeper than six
 - routines that take arguments on the FPU stack
 - routines that other code jumps into the middle of
-- a jump, call or return with a prefix in front of it
+- a jump, call, return or x87 instruction with a prefix in front of it
+- a read of the status word after a sine, cosine or tangent, which set a status bit of their own
+- code that reads or changes the SSE control register, or uses MMX or SSE already
 
 ## The routine list
 
@@ -138,6 +140,11 @@ Four routines are replaced by code written for them:
 | `0x46510`, quaternion to rotation matrix | hand-written SSE in the DLL |
 | `0x6A92D8`, `_ftol2` | written out by `xlat.py`: SSE2 in the 32-bit range, the original otherwise |
 | `msvcr71!sqrt` (import slot `0x8682AC`) | `MxoSqrtSSE` in the DLL, below |
+
+The `_ftol2` replacement reads the value as a double. A value that takes more than 53 bits and
+lies just below a whole number converts to that number, where the original gives the one below.
+Only a function result, such as a cosine, converted without any arithmetic in between can be such
+a value: the game's arithmetic runs at 24 bits. Not seen in the tests, which feed it doubles.
 
 The two matrix routines are not on the routine list. The DLL recognises them by position, length
 and hash (`MxoXCodeHash`) and installs them with the translated routines. A game add-on that names
@@ -194,8 +201,10 @@ When the game creates its Direct3D device, the DLL:
 3. pins itself in memory, so that nothing can unload it while `client.dll` jumps into it
 4. pauses all other threads, writes a 5-byte jump at the start of each remaining routine, and
    resumes them. A routine that a thread is just entering is left out.
-5. checks on every frame that the FPU control word is still what the translation assumes (24-bit
-   precision, round to nearest), and switches the translated routines off while it is not
+5. checks, at once and then on every frame, that the FPU control word and the SSE control
+   register (MXCSR) are what the translation assumes (24-bit precision, round to nearest,
+   exceptions masked, no flushing to zero), and switches the translated routines off while they
+   are not
 
 The log names every routine it left alone and why: its code in memory differs, an add-on uses
 it, a routine it calls was left alone, a thread was entering it, or its code could not be made
@@ -234,7 +243,7 @@ and as translation on the same input and compare everything it wrote, bit for bi
 | Current translation of the 535 routines, against that one | same assembly apart from label names, same bytes once assembled |
 | `_ftol2` replacement | 400,000 values over the whole range, identical |
 | Light filter against a plain reading of the light loop's decision, made-up lights | 200,000 lights, 150,282 left out, none wrongly |
-| Light loop `0x48FA40`, plausible lists of up to 456 lights, ordinary values, translation alone and behind the filter | 20,000 calls, all identical both ways. The filter left a light out in 17,934 |
+| Light loop `0x48FA40`, plausible lists of up to 456 lights, ordinary values, translation alone and behind the filter | 20,000 calls, all identical both ways. The filter left a light out in 16,093 |
 | The same with huge, tiny and NaN values among them | 33 of 20,000 calls differ, the same 33 with and without the filter: values that leave the `float` range |
 | `sqrt` replacement against Wine's, under seven FPU control words | 7 million cases, no differences |
 | `roundsd` against Wine's `floor` and `ceil` | no differences |
@@ -272,6 +281,6 @@ Environment variables for `xlat.py`, for finding a fault by switching one part o
 | `XLAT_NO_FUSE` | compares always rebuild the status word |
 | `XLAT_NO_INLINE` | `floor` and `ceil` stay calls |
 | `XLAT_NO_XR` | no `xmm0` return entries |
-| `XLAT_NO_COMISS` | floats are widened to double before a compare |
+| `XLAT_NO_COMISS` | floats are widened to double before a compare. Compares that set the processor flags themselves (`fcomi` and its relatives) are not changed by it |
 
 The DLL's own switches are in [building.md](building.md#switches).

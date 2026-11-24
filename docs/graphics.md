@@ -113,7 +113,9 @@ A triangle fan is a shape of triangles that all share one corner. Metal has no f
 turns each fan draw into a small compute job first, which interrupts drawing. The game draws its
 map as about 830 fans per frame: 10 fps with the map open.
 
-**Fix:** fans are drawn as indexed triangle lists from a prepared index buffer.
+**Fix:** fans are drawn as indexed triangle lists from a prepared index buffer. That covers the
+fans drawn without an index buffer (`DrawPrimitive` and `DrawPrimitiveUP`), which are the ones
+the game draws. A fan with its own index buffer still goes to MoltenVK as a fan.
 
 ### 11. Work sent to the GPU mid-frame
 
@@ -160,10 +162,11 @@ instructions.
 About 3,600 draw calls, 40 buffer locks handled by copying and, while the world streams in, a
 dozen texture uploads. None of them interrupts drawing.
 
-Drawing is still split into passes: about 19 per frame at the last count, taken before fix 11.
-About 11 come from the game switching render targets, the rest from clears, one copy between
-targets and mid-frame submissions. Each return to the main target reads back its colour and depth
-images.
+Drawing is still split into passes. A count taken before fix 11 gave about 19 per frame: about
+11 from the game switching render targets, the rest from clears, one copy between targets and
+mid-frame submissions. The frame log of the current build shows 60 to 100 per frame in the
+world. Why the two counts differ is not known. Each return to the main target reads back its
+colour and depth images.
 
 A new combination of shader and render state makes this DXVK version build a pipeline (the GPU's
 compiled form of it) on the spot, a short hitch. Pipelines are cached on disk, and

@@ -107,6 +107,7 @@ What is left in "Wine and system code":
 | Rejacked launcher, "new glow shader for Screen Filter: Over-Bright (BETA)" (it rewrites `rezmap.ltb`) | halves the frame rate (18–29 fps instead of 36–52) |
 | Wet-street reflections while it rains, which Revived switches on ([settings](client-notes.md#settings)) | Revived: 45–55 fps down to about 30 |
 | Revived's `mxrdisp` interface scaling | about 40% of the GPU |
+| `DXVK_MXO_RESPECT_ADDONS` at its default, with Revived's add-on files next to the game | about 10 fps less than with `0`. Seen by the player comparing two bottles, not taken from a frame log |
 | Anti-aliasing | a few fps |
 | The green tint | nothing measurable |
 

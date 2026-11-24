@@ -130,7 +130,7 @@ endings.
   Keep the launcher set to windowed (`Windowed = 1` in its block) and do not switch to
   fullscreen in the game's video options. With the DLL from this repository, fullscreen works.
 - **Skip the logo movies.** They show black. Add this line to `useropts.cfg`, above the
-  launcher's block (the setup's `intro` step does the same):
+  launcher's block (the setup's `intro` step sets the same line):
 
   ```
   EnableSplash = 0

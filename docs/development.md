@@ -38,15 +38,16 @@ ignores. Nothing derived from `client.dll` belongs in a commit.
 
 ## Diagnostics
 
-The DLL looks for these files in `C:\Games\dxvk` (`drive_c/Games/dxvk` in the bottle) when the
-game starts. Each is off unless its file exists.
+The DLL looks for these files in `C:\Games\dxvk` (`drive_c/Games/dxvk` in the bottle). The flag
+files are read when the game starts. The two request files are looked for twice a second while
+it runs, and each is deleted when it is acted on. Each is off unless its file exists.
 
 | File | Effect |
 |---|---|
 | `debug.flag` | empty file. Extra log lines, listed below |
 | `shot.req` | with `debug.flag`: saves the next frame to `shot.bmp`. Needs a back buffer with 8 bits per colour (`X8R8G8B8` or `A8R8G8B8`) |
 | `drawlog.req` | with `debug.flag`: one `DRAW` line per draw call of the next frame (shaders, textures, render target, blending) |
-| `sample-light.flag` | empty file. A sampling profiler records where the game's main thread and DXVK's own threads are, every 20 ms, and appends to `samples.bin` every 10 s. It also writes `modules.txt`, the loaded modules with their addresses. Wins over `sample.flag` |
+| `sample-light.flag` | empty file. A sampling profiler records where the game's main thread and DXVK's own threads are, every 20 ms, and appends to `samples.bin` every 10 s, until that file has 1 GB. It also writes `modules.txt`, the loaded modules with their addresses. Wins over `sample.flag` |
 | `sample.flag` | empty file. The same profiler for every thread, every 5 ms. It pauses every thread each time, which makes the game's memory writes much slower than they really are, so do not judge frame rates with it. It keeps at most 60,000 samples per 10 s and logs one line when more are lost |
 | `x87max.txt` | a number N: install only the first N translated routines (0 = none), to find a misbehaving routine by halving. The two hand-written matrix routines count after the translated ones |
 
@@ -55,8 +56,8 @@ With `debug.flag` the log gets:
 - every 5 s: the frame rate, the render throttle, DXVK's per-frame statistics, the game's calls
   per frame, memory activity, and which DXVK routine interrupted render passes how often
 - a `SPIKE` line for every frame of 40 ms or more: pipelines built, waits, uploads, new memory
-- a `STALL` line while a frame is more than 200 ms late: where the game's main thread is, as
-  `module+offset` call chains. One stall is sampled for 30 s at most.
+- a `STALL` line after a frame that was more than 200 ms late: where the game's main thread was
+  meanwhile, as `module+offset` call chains. One stall is sampled for 30 s at most.
 - a `LIGHTS` line while the light filter is at work: projector lights looked at per frame,
   lights passed on to the game, and the longest list
 
