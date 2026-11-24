@@ -618,7 +618,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_mxo_fastmath.cpp b/src/d3d9/d3d9_mxo_fastmath.cpp
 --- a/src/d3d9/d3d9_mxo_fastmath.cpp	2026-11-19 00:00:00
 +++ b/src/d3d9/d3d9_mxo_fastmath.cpp	2026-11-19 00:00:00
-@@ -0,0 +1,773 @@
+@@ -0,0 +1,787 @@
 +#include <windows.h>
 +#include <tlhelp32.h>
 +
@@ -731,7 +731,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +
 +  // Writes the entry jumps with all other threads suspended, and skips a routine a thread is entering.
-+  // When a thread cannot be stopped or its position not read, nothing is written. A thread started
++  // When a running thread cannot be stopped or its position not read, nothing is written. A thread started
 +  // after the list of threads was taken is not stopped: the device is made before the game starts
 +  // its worker threads.
 +  static std::vector<RedirectResult> InstallRedirects(uint8_t* base, const std::vector<Redirect>& redirects) {
@@ -754,7 +754,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +        if (entry.th32OwnerProcessID != ::GetCurrentProcessId() || entry.th32ThreadID == ::GetCurrentThreadId())
 +          continue;
 +
-+        if (HANDLE thread = ::OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT, FALSE, entry.th32ThreadID))
++        if (HANDLE thread = ::OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | SYNCHRONIZE, FALSE, entry.th32ThreadID))
 +          threads.push_back(thread);
 +        else if (::GetLastError() != ERROR_INVALID_PARAMETER)   // that one: the thread has ended
 +          allStopped = false;
@@ -769,7 +769,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +    // ---- no allocation, logging or locking from here ...
 +    for (size_t t = 0; t < threads.size(); t++) {
 +      if (::SuspendThread(threads[t]) == DWORD(-1)) {
-+        allStopped = false;
++        if (::WaitForSingleObject(threads[t], 0) != WAIT_OBJECT_0)   // signalled: the thread has ended since
++          allStopped = false;
 +        continue;
 +      }
 +
@@ -809,7 +810,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +      results[i] = RedirectResult::Installed;
 +    }
 +
-+    // a thread that could not be suspended here may be one the game itself keeps suspended
++    // only what was stopped here is started again
 +    for (size_t t = 0; t < threads.size(); t++) {
 +      if (suspended[t])
 +        ::ResumeThread(threads[t]);
@@ -1324,31 +1325,44 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +    Logger::info(str::format("MxO fast math: ", handWritten));
 +
-+    if (translated) {
++    if (s_x87Thread) {   // set once the translated code could be used
 +      Logger::info(str::format("MxO fast math: ", installed, " of ", total, " translated x87 routines installed (",
 +        matching, " match this client.dll)"));
 +      Logger::info(str::format("MxO fast math: light filter ", lightFilter));
 +    }
++
++    // not only from the first frame on: the game calls these routines before it draws
++    CheckMxoFastMathFpu();
 +  }
 +
 +
 +  float GetMxoRenderThrottle() {
 +    // The client keeps its render throttle (1 = full draw distance, down to 0.25) in an object a
-+    // global points to. Trusted only if the routine at client+0x28e0 stores to it where expected.
-+    static constexpr uint32_t ThrottleObjectRva   = 0x9f84e8;   // the global
-+    static constexpr uint8_t  ThrottleFieldOffset = 0x14;       // the throttle inside the object
-+    static constexpr uint32_t ThrottleStoreRva    = 0x2900;     // the store inside the routine
++    // global points to. Trusted only if the routine at client+0x28e0 stores to it where expected:
++    // the store is the known code, by its hash, and the address in it is the global's.
++    static constexpr uint32_t ThrottleObjectRva      = 0x9f84e8;   // the global
++    static constexpr uint8_t  ThrottleFieldOffset    = 0x14;       // the throttle inside the object. The hash covers it
++    static constexpr uint32_t ThrottleStoreRva       = 0x2900;     // the store inside the routine
++    static constexpr uint32_t ThrottleStoreSize      = 9;          // it loads the object and writes the field
++    static constexpr uint32_t ThrottleStoreAddressAt = 2;          // where it names the global
++    static constexpr uint64_t ThrottleStoreHash      = 0xb7258c7ae11ecf31ull;
 +
 +    static const uint8_t* s_client = [] () -> const uint8_t* {
 +      auto base = reinterpret_cast<const uint8_t*>(::GetModuleHandleA("client.dll"));
++      const uint32_t imageSize = GetModuleImageSize(base);
 +
-+      if (!IsInImage(GetModuleImageSize(base), ThrottleObjectRva, sizeof(uint32_t)))
++      if (!IsInImage(imageSize, ThrottleObjectRva, sizeof(uint32_t)) || !IsInImage(imageSize, ThrottleStoreRva, ThrottleStoreSize))
 +        return nullptr;
 +
 +      const uint32_t global = uint32_t(uintptr_t(base)) + ThrottleObjectRva;
-+      uint64_t hash = 0xcbf29ce484222325ull;   // FNV-1a of the store's code around its address, which has to name the global
-+      for (uint32_t i : { 0u, 1u, 6u, 7u, 8u }) hash = (hash ^ base[ThrottleStoreRva + i]) * 0x100000001b3ull;
-+      return hash != 0xb7258c7ae11ecf31ull || std::memcmp(base + ThrottleStoreRva + 2, &global, sizeof(global)) ? nullptr : base;
++      const uint32_t addressAt[] = { ThrottleStoreAddressAt };
++      uint32_t named = 0;
++      std::memcpy(&named, base + ThrottleStoreRva + ThrottleStoreAddressAt, sizeof(named));
++
++      if (named != global || MxoXCodeHash(base + ThrottleStoreRva, ThrottleStoreSize, addressAt, 1) != ThrottleStoreHash)
++        return nullptr;
++
++      return base;
 +    }();
 +
 +    if (!s_client)
@@ -1740,7 +1754,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +  count->seen = lights->end > lights->begin ? uint32_t(lights->end - lights->begin) : 0u;
 +  count->kept = count->seen;
 +
-+  // with no light or no free entry the routine may read nothing, so the filter reads nothing either
++  // with no light or no free entry the routine may read no light and no box, so the filter reads none either
 +  if (count->seen == 0 || first >= MxoLightEntryCount)
 +    return loop(object, lights, entries, first);
 +
@@ -1830,7 +1844,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +  uint32_t callee;
 +};
 +
-+// FNV-1a over [code, code + size), the hash xlat.py prints for a routine. The four bytes at each
++// FNV-1a over [code, code + size), the hash xlat.py --write-list writes for a routine. The four bytes at each
 +// offset in skips hold an address and are left out, so the hash stands for the routine wherever
 +// its image is loaded, and no copy of its code has to be carried along.
 +static inline uint64_t MxoXCodeHash(const uint8_t* code, uint32_t size, const uint32_t* skips, uint32_t skipCount) {
@@ -2128,7 +2142,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      else if (message == WM_SIZE)
      {
        D3DDEVICE_CREATION_PARAMETERS create_parms;
-@@ -184,6 +213,683 @@
+@@ -184,6 +213,694 @@
    };
  
  
@@ -2150,6 +2164,11 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +  }
 +
 +  static DWORD s_presentThreadId = 0;
++
++  // The stall recorder and the profiler each stop other threads to look at them. They leave each
++  // other alone: two threads that stop one another at the same moment would both stay stopped.
++  static std::atomic<DWORD> s_stallThreadId   = { 0 };
++  static std::atomic<DWORD> s_samplerThreadId = { 0 };
 +
 +  // The DXVK_HUD overlay starts hidden, Ctrl+Shift+F toggles it. The keys are read ten
 +  // times a second, not per frame: each read is a call into Wine's input handling.
@@ -2216,6 +2235,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +  static DWORD WINAPI StallThreadProc(void*) {
 +    PinDiagnosticsModule();
++    s_stallThreadId = ::GetCurrentThreadId();
 +    HANDLE thread = ::OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT, FALSE, s_presentThreadId);
 +    if (!thread)
 +      return 0;
@@ -2300,7 +2320,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +            entry.dwSize = sizeof(entry);
 +            for (BOOL more = ::Thread32First(snapshot, &entry); more; more = ::Thread32Next(snapshot, &entry)) {
 +              if (entry.th32OwnerProcessID != ::GetCurrentProcessId() || entry.th32ThreadID == ::GetCurrentThreadId()
-+               || entry.th32ThreadID == s_presentThreadId)
++               || entry.th32ThreadID == s_presentThreadId || entry.th32ThreadID == s_samplerThreadId)
 +                continue;
 +              if (HANDLE other = ::OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT, FALSE, entry.th32ThreadID)) {
 +                Sample os;
@@ -2383,6 +2403,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +  static DWORD WINAPI SamplerThreadProc(void*) {
 +    PinDiagnosticsModule();
++    s_samplerThreadId = ::GetCurrentThreadId();
 +    static constexpr uint32_t MaxSamples       = 60000;   // per write to the file
 +    static constexpr uint32_t MaxThreads       = 64;
 +    static constexpr DWORD    IntervalMs       = 5;
@@ -2489,6 +2510,9 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +      const uint32_t lightNameCount = light ? env::getThreadNames(&lightNames) : 0;
 +
 +      for (uint32_t i = 0; i < threadCount && count < MaxSamples; i++) {
++        if (threads[i].tid == s_stallThreadId)
++          continue;
++
 +        if (light && threads[i].tid != s_presentThreadId) {
 +          bool dxvkThread = false;
 +          for (uint32_t k = 0; k < lightNameCount && !dxvkThread; k++)
@@ -2541,7 +2565,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +      if (FILE* file = std::fopen(samplesPath.c_str(), "ab")) {
 +        std::fseek(file, 0, SEEK_END);
-+        if (std::ftell(file) >= MaxFileBytes) {
++        const long size = std::ftell(file);
++        if (size < 0 || size >= MaxFileBytes) {   // negative: larger than a long can say
 +          std::fclose(file);
 +          Logger::warn(str::format("MxO: samples.bin has reached ", MaxFileBytes >> 20, " MB, the profiler stops"));
 +          return 0;
@@ -2681,7 +2706,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +      for (uint32_t i = 0; i < uint32_t(DxvkDebugCounter::Count); i++) {
 +        const uint32_t n = DxvkDebugCounters::s_value[i].exchange(0);
 +        if (n)
-+          calls += str::format(" ", DxvkDebugCounterNames[i], " ", n * 10 / frames, "/10");
++          calls += str::format(" ", DxvkDebugCounterNames[i], " ", uint64_t(n) * 10 / frames, "/10");
 +      }
 +
 +      HMODULE self = nullptr;
@@ -2692,7 +2717,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +      for (uint32_t i = 0; i < DxvkSpillStats::Max; i++) {
 +        const uint32_t n = DxvkSpillStats::s_count[i].exchange(0);
 +        if (n)
-+          spills += str::format(" +", std::hex, DxvkSpillStats::s_caller[i].load() - uintptr_t(self), std::dec, ":", n * 10 / frames, "/10");
++          spills += str::format(" +", std::hex, DxvkSpillStats::s_caller[i].load() - uintptr_t(self), std::dec, ":", uint64_t(n) * 10 / frames, "/10");
 +      }
 +
 +      Logger::info(str::format("FRAME calls per frame:", calls, "; render pass breaks by caller:", spills));
@@ -2812,7 +2837,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
    D3D9SwapChainEx::D3D9SwapChainEx(
            D3D9DeviceEx*          pDevice,
            D3DPRESENT_PARAMETERS* pPresentParams,
-@@ -255,6 +961,12 @@
+@@ -255,6 +972,12 @@
            HWND     hDestWindowOverride,
      const RGNDATA* pDirtyRegion,
            DWORD    dwFlags) {
@@ -2825,7 +2850,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      D3D9DeviceLock lock = m_parent->LockDevice();
  
      uint32_t presentInterval = m_presentParams.PresentationInterval;
-@@ -852,11 +1564,101 @@
+@@ -852,11 +1575,101 @@
          {  int32_t(m_dstRect.left),                    int32_t(m_dstRect.top)                    },
          { uint32_t(m_dstRect.right - m_dstRect.left), uint32_t(m_dstRect.bottom - m_dstRect.top) } };
  

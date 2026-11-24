@@ -139,7 +139,7 @@ static inline uint32_t MxoRunLightLoop(MxoLightLoop loop, uint32_t clientBase, c
   count->seen = lights->end > lights->begin ? uint32_t(lights->end - lights->begin) : 0u;
   count->kept = count->seen;
 
-  // with no light or no free entry the routine may read nothing, so the filter reads nothing either
+  // with no light or no free entry the routine may read no light and no box, so the filter reads none either
   if (count->seen == 0 || first >= MxoLightEntryCount)
     return loop(object, lights, entries, first);
 

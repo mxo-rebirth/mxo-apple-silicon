@@ -43,7 +43,7 @@ struct MxoXDirectCall {
   uint32_t callee;
 };
 
-// FNV-1a over [code, code + size), the hash xlat.py prints for a routine. The four bytes at each
+// FNV-1a over [code, code + size), the hash xlat.py --write-list writes for a routine. The four bytes at each
 // offset in skips hold an address and are left out, so the hash stands for the routine wherever
 // its image is loaded, and no copy of its code has to be carried along.
 static inline uint64_t MxoXCodeHash(const uint8_t* code, uint32_t size, const uint32_t* skips, uint32_t skipCount) {
