@@ -12,18 +12,19 @@
 
 ## How to measure
 
-- **Pin the render throttle or read it.** The client cuts draw distance to hold 30 fps
+- **Pin the render throttle, or read it.** The client lowers the draw distance to hold 30 fps
   ([client-notes.md](client-notes.md#the-render-throttle)), so a frame rate means little without
-  the draw distance that went with it. `Client_RenderThrottle_Override = 1` holds full detail.
-- **Frame log.** With `debug.flag` the DLL logs frame rate, throttle factor and draw calls every
-  five seconds ([development.md](development.md)).
-- **`scripts/fps-summary.py`** averages the windows of that log with more than 2,500 draw calls
-  per frame, which leaves out login and loading screens. All "in the world" figures from v26 on
-  come from it.
+  its draw distance. `Client_RenderThrottle_Override = 1` holds full detail.
+- **Frame log.** With `debug.flag` the DLL logs the frame rate, the throttle factor and the draw
+  calls every five seconds ([development.md](development.md)). A draw call is one request to the
+  GPU to draw something.
+- **`scripts/fps-summary.py`** averages the five-second windows of that log with more than 2,500
+  draw calls per frame, which leaves out login and loading screens. Every "in the world" figure
+  since the single-precision fix comes from it.
 - **Compare frame time per draw call, not frame rate.** Scenes differ between sessions.
-- **The full profiler distorts.** It pauses every thread every 5 ms, which made memory writes in
-  the game look extremely slow and sent us after a problem that existed only while profiling.
-  The light mode samples the main thread every 20 ms and distorts far less.
+- **The full profiler distorts.** It pauses every thread every 5 ms, which makes the game's
+  memory writes look far slower than they are. The light mode samples only the main thread and
+  DXVK's own threads, every 20 ms, and distorts far less.
 
 ## Result
 
@@ -35,50 +36,49 @@ Rejacked, in the world:
 | Stock DXVK fixed, original math, windowed 1280×720 | 8.5 fps | full (pinned) |
 | Current build, fullscreen 3440×1440 | 55–89 fps, 74 on average | full |
 
-Loading area, windowed 800×600: 8–18 fps on stock CrossOver, 85–89 fps with the DLL.
+- Loading area, windowed 800×600: 8–18 fps on stock CrossOver, 85–89 fps with the DLL.
+- Stock CrossOver has no fullscreen number: fullscreen shows a black screen there.
+- The first translated build reached 23–29 fps where the original math gave 8.5 fps, but the
+  game drew an 800×600 view while the external monitor was being reconfigured. The two do not
+  compare.
 
-We have no fullscreen number for stock CrossOver: fullscreen shows a black screen there.
-
-Revived was last measured with v26: 42–65 fps, 58 on average. Before the fixes it ran at 1–4 fps
+Revived, last measured after the single-precision fix: 42–65 fps, 58 on average. Before the fixes it ran at 1–4 fps
 in the world on DXVK.
 
-## By build
+## What each fix gave
 
-Fullscreen 3440×1440, throttle on automatic, sessions of one to two minutes:
+Each row adds one fix to the ones above it. Fullscreen 3440×1440, sessions of one to two
+minutes.
 
-| Build | Change | In the world |
-|---|---|---|
-| first builds | translated math | 17–25 fps at 60–90% draw distance |
-| | buffer lock fix, 12 routines the first build lacked | 22–25 fps at 70–80% |
-| | texture upload fix | about 23 fps at 100% |
-| v8 | vertex shader constants, faster rounding | 44–64 fps. No stall entering the world (was 50 s at 3–8 fps) |
-| v11 | freed memory kept | Revived 46–53 fps (was 1–4) |
-| v24 | triangle fans, mid-frame submits | Revived 60–66 fps. Map 10 to 30 fps. GPU about 45% idle |
+While the GPU was the limit (busy 93–100% of the time), with the draw distance on automatic:
 
-From v8 to v24 the GPU was the limit (busy 93–100% of the time). Since v24 the main thread is.
+| Fix | In the world |
+|---|---|
+| translated math | 17–25 fps at 60–90% draw distance |
+| buffer lock fix, 12 more routines translated | 22–25 fps at 70–80% |
+| texture upload fix | about 23 fps at 100% |
+| vertex shader constants, faster rounding | 44–64 fps. No stall entering the world (was 50 s at 3–8 fps) |
+| freed memory kept | Revived 46–53 fps (was 1–4) |
+| triangle fans, no mid-frame submits | Revived 60–66 fps. Map 10 to 30 fps. GPU about 45% idle |
 
-Rejacked from v26 on, from `scripts/fps-summary.py`:
+From here the game's main thread is the limit. Rejacked, read with `scripts/fps-summary.py`:
 
-| Build | Change | In the world | Draw calls per frame | Frame time per 1,000 draw calls |
-|---|---|---|---|---|
-| v26 | single precision in 527 routines | 42–74 fps, 59 on average | 3,600 | 4.7 ms |
-| v28 | map grid lookup translated, llvm-mingw build | 48–88 fps, 63 on average | 4,000 | 4.0 ms |
-| v30 | `sqrt` replacement | 54–82 fps, 69 on average | 3,700 | 3.9 ms |
-| v33 | compare branches, `floor` and `ceil` in place, float returns in `xmm0` | 60–87 fps, 73 on average | 3,600 | 3.8 ms |
-| v36 | floats compared as floats | 55–89 fps, 74 on average | 3,600 | 3.8 ms |
+| Fix | In the world | Draw calls per frame | Frame time per 1,000 draw calls |
+|---|---|---|---|
+| single precision in 527 routines | 42–74 fps, 59 on average | 3,600 | 4.7 ms |
+| map grid lookup translated, llvm-mingw compiler | 48–88 fps, 63 on average | 4,000 | 4.0 ms |
+| `sqrt` replacement | 54–82 fps, 69 on average | 3,700 | 3.9 ms |
+| compare branches, `floor` and `ceil` in place, float returns in `xmm0` | 60–87 fps, 73 on average | 3,600 | 3.8 ms |
+| floats compared as floats | 55–89 fps, 74 on average | 3,600 | 3.8 ms |
 
-Opening the map costs about 5 fps since v27. It was 15–20: one routine, `0x47DDB0`, took 18% of
-the main thread with the map open.
-
-A caveat on the early numbers: the 8.5 fps figure has a counterpart of 23–29 fps for the first
-translated build, but that was taken while the external monitor was being reconfigured and the
-game drew an 800×600 view, so the pair is not a fair comparison.
+Opening the map cost 15–20 fps before the map grid lookup was translated: that one routine,
+`0x47DDB0`, took 18% of the main thread with the map open. Now it costs about 5 fps.
 
 ## Where the main thread's time goes
 
-Rejacked, in the world:
+Rejacked, in the world. The "Now" column was sampled every 20 ms:
 
-| | Before any fix | v36 |
+| | Before any fix | Now |
 |---|---|---|
 | x87 math in `client.dll` | 80–90% | |
 | Translated and hand-written math | | about 39% |
@@ -86,15 +86,17 @@ Rejacked, in the world:
 | Wine and system code | | 16–21% |
 | Direct3D 9 layer | 1–2% | about 6% |
 
-Steps on the way: the math share fell from 46.5% to 40.7% between v30 and v33, and the DLL's
-share from 12% to 6% with the compiler switch in v28.
+Steps on the way:
+
+- The math share fell from 46.5% to 40.7% with the compare branches, `floor` and `ceil` in place and float returns in `xmm0`.
+- The DLL's share fell from 12% to 6% with the switch to the llvm-mingw compiler.
 
 What is left in "Wine and system code":
 
 | Cost | Share | Why it stays |
 |---|---|---|
-| `PeekMessage`, once per frame | 2–6% | Wine's macOS event handling. Not reachable from the DLL |
-| Copy of vertex shader constants | 2.7% | a third of the updates are redundant, but only 9% of the uploads could be skipped: about 0.25% to gain |
+| `PeekMessage`, once per frame | 2–6% | the cost is Wine's macOS event handling, which the DLL cannot reach |
+| Copy of vertex shader constants, about 5.8 MB per frame | 2.7% | a third of the updates are redundant, but only 9% of the uploads could be skipped: about 0.25% to gain |
 | `r3d9.dll` | 2.7% | the client's own Direct3D wrapper |
 | DirectSound 3D-buffer setters | 2.3% | |
 
@@ -102,22 +104,23 @@ What is left in "Wine and system code":
 
 | Setting | Effect at 3440×1440 |
 |---|---|
-| Rejacked launcher, "new glow shader for Screen Filter: Over-Bright (BETA)" | halves the frame rate (18–29 fps instead of 36–52) |
-| Wet-street reflections in rain (Revived) | 45–55 fps down to about 30 |
+| Rejacked launcher, "new glow shader for Screen Filter: Over-Bright (BETA)" (it rewrites `rezmap.ltb`) | halves the frame rate (18–29 fps instead of 36–52) |
+| Wet-street reflections while it rains, which Revived switches on ([settings](client-notes.md#settings)) | Revived: 45–55 fps down to about 30 |
+| Revived's `mxrdisp` interface scaling | about 40% of the GPU |
 | Anti-aliasing | a few fps |
 | The green tint | nothing measurable |
 
 ## In a crowd
 
-Among more than 100 characters with the MxOEmu launcher, maximum detail, 3440×1440. Every row
-is the steady part of one session of one to three minutes, read from the frame log. The frame
-log and the light profiler ran in all of them, so the frame rates are lower than in play and
-only compare with each other. The light loop's share comes from the profile of the same
-session ([client-notes.md](client-notes.md#in-a-crowd) says what the loop is).
+Among more than 100 characters with the MxOEmu launcher, maximum detail, 3440×1440. Each crowd
+row is the steady part of one session of one to three minutes, read from the frame log. The
+frame log and the light profiler ran in all crowd sessions, so these frame rates are lower than
+in play and compare only with each other. The light loop's share is from the same session's
+profile ([what the loop is](client-notes.md#in-a-crowd)).
 
 | | Draw calls per frame | Frame rate | Light loop's share of the main thread |
 |---|---|---|---|
-| The usual scene (v36, no profiler) | 3,600 | 74 fps | |
+| The usual scene (no profiler) | 3,600 | 74 fps | |
 | Crowd by day, character shadows on | 9,300 | 48 fps | 0% |
 | Crowd by day, character shadows off | 7,750 | 54 fps | 0% |
 | The same crowd minutes later, the light loop running, shadows on | 9,650 | 33 fps | 27% |
@@ -127,24 +130,27 @@ session ([client-notes.md](client-notes.md#in-a-crowd) says what the loop is).
 | Seven minutes with the filter, the 67 windows before the lights came on | 8,370 | 45.7 fps | 0% |
 | The same session, the 15 windows with the lights on | 8,470 | 46.2 fps | 0%, the filter 1 to 2% |
 
-In the session of 42 fps the one five-second window with more draw calls than the row before
-it (10,500) ran at 38 fps. The last two rows are one session through the change, in one place:
-with the filter the lights coming on no longer shows in the frame rate. Not measured: the same
-place with and without the filter in one session, and any of this without the profiler.
+- In the 42 fps session, the one five-second window with more draw calls than the row before it
+  (10,500) ran at 38 fps.
+- The last two rows are one session in one place, before and after the lights came on. With the
+  filter, the lights coming on no longer shows in the frame rate.
+- Not measured: the same place with and without the filter in one session, and any of this
+  without the profiler.
 
 ## Open problems
 
-- **Single slow frames.** Mostly frames with 4,000–6,000 draw calls, a few pauses of some
+- **Single slow frames.** Mostly frames with 4,000–6,000 draw calls. Also a few pauses of some
   hundred milliseconds while signing in or loading, and one 0.6-second pause in the world with
   no graphics activity at all, so from the game itself.
 - **Pipeline builds.** A new combination of shader and render state costs one hitch of about
-  0.2 seconds, once. It is cached on disk afterwards.
+  0.2 seconds, once. After that it is cached on disk.
 - **Revived with music** was slow in several early sessions and fast in others, with the same
-  files and settings. The memory-pressure stalls ([graphics.md](graphics.md), problem 5) fit
-  that pattern, and with memory kept locked Rejacked's stalls disappeared. Revived with music
-  has not been measured since.
-- **Revived's sign-in takes 4–5 seconds of typing** with the processor idle. The pace is set by
-  its launcher.
+  files and settings. The stalls when the Mac is short of memory
+  ([graphics.md, problem 5](graphics.md#5-one-second-stalls-when-the-mac-is-short-of-memory))
+  fit that pattern, and keeping memory locked made Rejacked's stalls disappear. Revived with
+  music has not been measured since.
+- **Revived's sign-in takes 4–5 seconds of typing** with the processor idle. Its launcher sets
+  the pace.
 - **The 800×600 login screen** sometimes comes up without a display mode switch. The picture is
   scaled to fit. Mouse coordinates in that state are unverified.
 - **One unexplained freeze** at the loading screen with an early build. It has not recurred.

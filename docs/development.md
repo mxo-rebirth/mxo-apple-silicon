@@ -1,7 +1,7 @@
 # Development
 
-Diagnostics built into the DLL, profiling, adding routines to the translation, the Direct3D 9
-benchmark and regenerating the patch. Building and installing are in [building.md](building.md).
+The DLL's diagnostics, profiling, adding routines to the translation, the Direct3D 9 benchmark and
+regenerating the patch. Building and installing are in [building.md](building.md).
 
 ## Layout
 
@@ -24,7 +24,7 @@ benchmark and regenerating the patch. Building and installing are in [building.m
 | `scripts/setup-helpers.py` | the setup's file edits and page readings, one subcommand each |
 | `scripts/build-tools.sh` | the programs the build needs and their Homebrew packages, read by `build.sh` and `setup.sh` |
 | `tests/setup/` | tests of `setup-helpers.py` on temporary files |
-| `install.sh` | the one command of the README: clones the repository with git, or brings its clone up to date, and runs `scripts/setup.sh` |
+| `install.sh` | the README's one command: clones or updates the repository with git and runs `scripts/setup.sh` |
 | `scripts/merge-pipeline-caches.py` | merges DXVK pipeline caches |
 | `scripts/fps-summary.py` | frame rate in the world from the DLL's frame log |
 | `scripts/check.sh` | the checks that need neither the game nor CrossOver: shell syntax, linters, the tests of the setup's helpers, writing rules |
@@ -33,24 +33,35 @@ benchmark and regenerating the patch. Building and installing are in [building.m
 | `.shellcheckrc`, `ruff.toml` | the linters' settings |
 | `.github/` | the workflow that runs `scripts/check.sh` on GitHub, and the pull request template |
 
-Everything generated from the game's files lands in `build/` or carries an ignored name
-(`.gitignore`). Nothing derived from `client.dll` belongs in a commit.
+Everything generated from the game's files lands in `build/` or has a name that `.gitignore`
+ignores. Nothing derived from `client.dll` belongs in a commit.
 
 ## Diagnostics
 
-Files in `C:\Games\dxvk` (`drive_c/Games/dxvk` in the bottle), read when the game starts. All
-are off unless the file exists.
+The DLL looks for these files in `C:\Games\dxvk` (`drive_c/Games/dxvk` in the bottle) when the
+game starts. Each is off unless its file exists.
 
 | File | Effect |
 |---|---|
-| `debug.flag` | empty file. Every 5 s the log gets the frame rate, the render throttle, DXVK's per-frame statistics, the game's calls per frame, memory activity and which DXVK routine interrupted render passes how often. Every frame slower than 40 ms gets a `SPIKE` line saying what happened in it (pipelines built, waits, uploads, new memory). While a frame is more than 200 ms late, a `STALL` line records where the game's main thread is, as `module+offset` call chains. One stall is sampled for 30 seconds at most. The log takes at most 400 `SPIKE` and 300 `STALL` lines and says so when either ends. With the light filter at work, a `LIGHTS` line says how many projector lights it looked at per frame, how many it passed on to the game and how long the longest list was. |
+| `debug.flag` | empty file. Extra log lines, listed below |
 | `shot.req` | with `debug.flag`: saves the next frame to `shot.bmp`. Needs a back buffer with 8 bits per colour (`X8R8G8B8` or `A8R8G8B8`) |
-| `drawlog.req` | with `debug.flag`: writes one `DRAW` line per draw call of the next frame (shaders, textures, render target, blending) |
-| `sample-light.flag` | empty file. A sampling profiler records where the game's main thread and DXVK's own threads are, every 20 ms, and appends to `samples.bin` every 10 s. It also writes `modules.txt`, the list of loaded modules with their addresses. If `sample.flag` exists too, this one wins. |
-| `sample.flag` | empty file. The same profiler for every thread, every 5 ms. It pauses every thread each time, which makes memory writes in the game much slower than they really are. Do not judge frame rates with it. It holds at most 60,000 samples per 10 s and logs one line when more are lost. |
-| `x87max.txt` | a number N: install only the first N translated routines (0 = none). For finding a misbehaving routine by halving. The two hand-written matrix routines count after the translated ones. |
+| `drawlog.req` | with `debug.flag`: one `DRAW` line per draw call of the next frame (shaders, textures, render target, blending) |
+| `sample-light.flag` | empty file. A sampling profiler records where the game's main thread and DXVK's own threads are, every 20 ms, and appends to `samples.bin` every 10 s. It also writes `modules.txt`, the loaded modules with their addresses. Wins over `sample.flag` |
+| `sample.flag` | empty file. The same profiler for every thread, every 5 ms. It pauses every thread each time, which makes the game's memory writes much slower than they really are, so do not judge frame rates with it. It keeps at most 60,000 samples per 10 s and logs one line when more are lost |
+| `x87max.txt` | a number N: install only the first N translated routines (0 = none), to find a misbehaving routine by halving. The two hand-written matrix routines count after the translated ones |
 
-The log is `matrix_d3d9.log` (or `mxorev_d3d9.log`) in the same folder.
+With `debug.flag` the log gets:
+
+- every 5 s: the frame rate, the render throttle, DXVK's per-frame statistics, the game's calls
+  per frame, memory activity, and which DXVK routine interrupted render passes how often
+- a `SPIKE` line for every frame of 40 ms or more: pipelines built, waits, uploads, new memory
+- a `STALL` line while a frame is more than 200 ms late: where the game's main thread is, as
+  `module+offset` call chains. One stall is sampled for 30 s at most.
+- a `LIGHTS` line while the light filter is at work: projector lights looked at per frame,
+  lights passed on to the game, and the longest list
+
+The log holds at most 400 `SPIKE` and 300 `STALL` lines and says when either limit is reached.
+It is `matrix_d3d9.log` (or `mxorev_d3d9.log`) in the same folder.
 
 ```sh
 scripts/fps-summary.py "$BOTTLE/drive_c/Games/dxvk/matrix_d3d9.log"
@@ -64,7 +75,7 @@ Wine's own tracing (`--cx-log`) slows the game to a crawl. Use it only briefly.
 ## Profiling and adding routines
 
 1. Create `C:\Games\dxvk\sample-light.flag`, play for a few minutes, quit.
-2. Build once so that `build/client.map` and the unstripped DLL exist, then:
+2. Build once, so that `build/client.map` and the unstripped DLL exist. Then:
 
    ```sh
    python3 -I translator/profile2.py "$BOTTLE/drive_c/Games/dxvk/samples.bin" build/client.map \
@@ -73,11 +84,11 @@ Wine's own tracing (`--cx-log`) slows the game to a crawl. Use it only briefly.
    ```
 
    It prints, per thread, where the time went (game code, translated routines, graphics layer,
-   Vulkan, waits and their callers) and writes `samples.bin.hot`: the game routines containing
-   x87 code that the presenting thread was sampled in, by sample count. Only that thread
-   counts, because the translations run on no other. `THREADS=N` sets how many threads are
-   reported (default 6) and `TOP=N` how many game routines per thread (default 12). The map has
-   to be the one the current `discover.py` writes, which every build does.
+   Vulkan, waits and their callers). It writes `samples.bin.hot`: the game routines with x87 code
+   that the presenting thread was sampled in, by sample count. Only that thread counts, because
+   the translations run on no other. `THREADS=N` (default 6) and `TOP=N` (default 12) set how many
+   threads and how many game routines per thread are shown. The map must come from the current
+   `discover.py`, which every build runs.
 3. Add those routines to the list and let the translator fill in length and hash:
 
    ```sh
@@ -88,22 +99,21 @@ Wine's own tracing (`--cx-log`) slows the game to a crawl. Use it only briefly.
    Routines the translator refuses are left out of the written list.
 4. Run the tests on the new routines ([tests/README.md](../tests/README.md)) before building.
 
-Keep the list cumulative. A routine that is already replaced no longer shows up in a profile of
-`client.dll`, so a list rebuilt from a fresh profile loses the hottest ones.
+Keep the list cumulative. A routine that is already replaced no longer shows up in a profile, so
+a list rebuilt from a fresh profile loses the hottest ones.
 
-Routines reached only through pointers do not appear as call targets in `client.map`. Find them
-by walking a sampled address back to the function prologue.
+Routines reached only through pointers are not call targets in `client.map`. Find them by walking
+a sampled address back to the function prologue.
 
-For a different build of `client.dll`, the addresses in the list will not match and nothing is
-translated. The hashes guard against translating the wrong code. Start from a profile, and find
-the float-to-integer helper for the `ftol` line: it is the routine all float-to-int casts call
-with the value on the FPU stack.
+For another build of `client.dll` the addresses in the list do not match, and the hashes stop
+anything from being translated. Start from a profile, and find the float-to-integer helper for the
+`ftol` line: it is the routine that every float-to-int cast calls with the value on the FPU stack.
 
 ## The benchmark
 
 `bench/d3d9bench.rs` is a single-file Direct3D 9 test program (no standard library, 32-bit
-Windows). It was used to reproduce the buffer-lock and texture-upload stalls outside the game.
-It needs Rust 1.82 or newer.
+Windows) for reproducing buffer-lock and texture-upload stalls outside the game. It needs Rust
+1.82 or newer.
 
 ```sh
 rustup target add i686-pc-windows-msvc
@@ -111,6 +121,8 @@ rustc --edition 2021 --target i686-pc-windows-msvc -C opt-level=2 -C panic=abort
     -C linker=rust-lld -C link-arg=/ENTRY:mainCRTStartup -C link-arg=/SUBSYSTEM:WINDOWS \
     -C link-arg=/NODEFAULTLIB -o d3d9bench.exe bench/d3d9bench.rs
 ```
+
+Run it in a bottle with the DLL override set for `d3d9bench.exe`:
 
 ```
 d3d9bench.exe [vp] [width] [height] [draws] [seconds] [texture] [flags] [mode]
@@ -155,8 +167,6 @@ line that says whether the world and the UI reached the back buffer.
 
 5 is not used: it is what Wine reports when a program crashes.
 
-Run it in a bottle with the DLL override set for `d3d9bench.exe`.
-
 ## Regenerating the patch
 
 `dxvk/dxvk-d3d9-mxo.patch` is a plain `diff -ruN` between the DXVK tree in CodeWeavers' source
@@ -167,9 +177,11 @@ diff -ruN --exclude=build.w32 --exclude='*.orig' --exclude='*.rej' --exclude='*.
     --exclude=d3d9_mxo_x87.inc --exclude='*.inc.tests' --exclude=.DS_Store a b > dxvk/dxvk-d3d9-mxo.patch
 ```
 
-`d3d9_mxo_x87.inc` is the translated game code and must stay out. Give the `---`/`+++` header
-lines a fixed timestamp so the patch does not change from run to run, then check that it
-applies to a fresh copy of `a` and reproduces `b`.
+`d3d9_mxo_x87.inc` is the translated game code and must stay out. Then:
+
+1. Give the `---` and `+++` header lines a fixed timestamp, so the patch does not change from run
+   to run.
+2. Check that it applies to a fresh copy of `a` and gives `b`.
 
 The DLL is compiled with llvm-mingw. `MXO_COMPILER=gcc scripts/build.sh ...` uses Homebrew's GCC
 instead ([graphics.md](graphics.md), problem 15).

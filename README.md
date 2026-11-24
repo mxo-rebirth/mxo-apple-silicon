@@ -6,7 +6,8 @@
 Makes The Matrix Online run fast in CrossOver on Apple Silicon Macs. It supports MxO Rejacked,
 MxO Revived and MxOEmu.
 
-On the test machine (M4, 3440×1440, maximum detail) the game went from about 15 fps to 55–89 fps.
+On the test machine (M4) the game went from about 15 fps, with the game cutting its draw distance,
+to 55–89 fps at full draw distance and maximum detail, fullscreen at 3440×1440.
 
 ![The game in a window on a Mac desktop, the frame-rate counter at the top left showing 63 fps](docs/screenshot.png)
 
@@ -36,6 +37,9 @@ Close the game and its launcher and paste this into Terminal:
 It clones this repository to `~/mxo-apple-silicon` and runs `scripts/setup.sh` there. Run it
 again to update.
 
+Step by step, from a Mac without CrossOver to the game:
+[docs/quick-start.md](docs/quick-start.md).
+
 Everything can also be done by hand, without the script:
 [docs/crossover.md](docs/crossover.md) sets up the bottle and the game, and
 [docs/building.md](docs/building.md#build) builds and installs the speed-up.
@@ -55,7 +59,8 @@ The setup asks a few questions and then does the rest:
 | Icons | Launcher icons in CrossOver |
 | Revived | Music on, launcher video off |
 
-The first run downloads about 420 MB and uses about 1.1 GB of disk space. The game adds a 1.3 GB
+The first run downloads about 420 MB and uses about 1.1 GB of disk space, Homebrew's build
+tools not counted. The game adds a 1.3 GB
 download, about 6 GB unpacked. Every step is described in [docs/building.md](docs/building.md).
 
 Then start the game from its launcher as usual.
@@ -77,11 +82,12 @@ Then start the game from its launcher as usual.
 ## Undo
 
 ```sh
-~/mxo-apple-silicon/scripts/setup.sh uninstall
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/mxo-rebirth/mxo-apple-silicon/main/install.sh)" uninstall
 ```
 
-The game goes back to CrossOver's normal graphics. Every file the setup replaced was kept with
-a `.setup-backup` suffix.
+The game goes back to CrossOver's normal graphics. What stays is listed in
+[docs/building.md](docs/building.md#the-setup). Every file the setup replaced was kept with a
+`.setup-backup` suffix.
 
 ## Good to know
 
@@ -91,12 +97,14 @@ a `.setup-backup` suffix.
   account that has Homebrew first: `brew install mingw-w64 meson ninja glslang`
 - **Built on your Mac, from your game.** No game file is in this repository. Do not share the
   built `d3d9.dll`.
-- **It changes the game's math code in memory.** Check that your server allows it.
+- **It replaces some of the game's math code in memory** with faster code that gives the same
+  results. Check that your server allows that.
 
 ## More
 
 | | |
 |---|---|
+| [docs/quick-start.md](docs/quick-start.md) | step by step, without the details |
 | [docs/crossover.md](docs/crossover.md) | setting up by hand |
 | [docs/building.md](docs/building.md) | every setup step, building by hand, switches |
 | [docs/how-it-works.md](docs/how-it-works.md) | why the game is slow on Apple Silicon and what the fix is |

@@ -1,11 +1,11 @@
 # The client: reverse-engineering notes
 
-What we learned about the game client while making it fast. Three sources: the files themselves
+How the game client works, as far as it matters for speed. Sources: the files themselves
 (headers, imports, disassembly), sampling profiles of the running game, and the frame log of the
-DLL in this repository. Anything we concluded without observing it directly is marked "assumed".
+DLL in this repository. A conclusion that was not observed directly is marked "assumed".
 
-Addresses are RVAs in `client.dll` unless a module is named. Add the image base `0x62000000` for
-the address in a disassembler.
+Addresses are RVAs (offsets from the start of `client.dll` in memory) unless a module is named.
+Add the image base `0x62000000` to get the address a disassembler shows.
 
 ## The files
 
@@ -19,9 +19,9 @@ the address in a disassembler.
 | Game executable | `matrix.exe` | `mxorev.exe` |
 
 The timestamp is later than the game's shutdown in 2009, so something rewrote the header after
-the original build. We assume that happened when the import table was edited (see below).
+the original build. Assumed: that happened when the import table was edited ([Imports](#imports)).
 
-Sections, identical in both files:
+Sections, the same in both files:
 
 | Section | RVA | Size |
 |---|---|---|
@@ -35,12 +35,12 @@ Sections, identical in both files:
 Revived's file has three more: `.mxrtip` (`0xBB4000`, `0x30000`), `.mxrtv` (`0xBE4000`, `0x4000`)
 and `.mxrrsi` (`0xBE8000`, `0x4000`).
 
-`matrix.exe` is a 32-bit program without the "large address aware" flag (2 GB of address space)
-and without the NX-compatible flag. Both matter under Wine. See [graphics.md](graphics.md).
+`matrix.exe` is a 32-bit program with neither the "large address aware" flag (so it gets 2 GB of
+address space) nor the NX-compatible flag. Both matter under Wine ([graphics.md](graphics.md)).
 
 ### Rejacked against Revived
 
-The two `client.dll` files are the same build. Compared byte for byte:
+The two `client.dll` files are the same build. Where they differ:
 
 | Section | Difference |
 |---|---|
@@ -64,12 +64,12 @@ The 11 code changes in Revived's file:
 | `0x706800` | 25 bytes of padding replaced by code |
 | `0x813DEA` | one constant argument changed from 1 to 0 |
 
-Of the 535 routines in `translator/routines.list`, 534 are byte-identical in both files. The
+534 of the 535 routines in `translator/routines.list` are byte-identical in both files. The
 exception is `0x1736F0`, because of the jump at `0x174758`.
 
 ### Imports
 
-The import table is the same in both files:
+Both files have the same import table:
 
 | DLL | Functions | Notes |
 |---|---|---|
@@ -86,20 +86,20 @@ The import table is the same in both files:
 | `ole32.dll` | 4 | |
 | `version.dll` | 3 | |
 | `dllmediaplayer.dll` | 2 | `CreateMediaPlayer`, `GetMediaPlayerLastError` |
-| `r3d9.dll` | 1 | `RajkoD3DCreate9` |
+| `r3d9.dll` | 1 | a Direct3D 9 wrapper, below |
 | `dllwebbrowser.dll` | 1 | `CreateBrowser` |
 | `dinput8.dll` | 1 | `DirectInput8Create` |
 | `winmm.dll` | 1 | `timeGetTime` |
 | `rpcrt4.dll`, `shell32.dll` | 1 each | |
 
-Two of these are wrappers that sit between the client and a system DLL:
+Two of these are wrappers between the client and a system DLL:
 
-- **`mxowrap.dll`** exports the 16 functions that normally come from `dbghelp.dll`. It is loaded
-  with the client, before any game code runs. We assume it is what changes client code in
-  memory in Rejacked (see [Routines something else has changed](#routines-something-else-has-changed)).
+- **`mxowrap.dll`** exports the 16 functions that normally come from `dbghelp.dll`. It loads with
+  the client, before any game code runs. Assumed: it is what changes client code in memory in
+  Rejacked ([Routines something else has changed](#routines-something-else-has-changed)).
 - **`r3d9.dll`**: `client.dll` does not import `d3d9.dll`. It gets its Direct3D 9 object from
-  `RajkoD3DCreate9` in `r3d9.dll`, and every Direct3D call then passes through that wrapper. In
-  Rejacked it took 2.7% of the main thread.
+  `r3d9.dll`, so every Direct3D call passes through that wrapper. Its cost is in
+  [measurements.md](measurements.md#where-the-main-threads-time-goes).
 
 Math imports from `msvcr71.dll`, by import-table slot:
 
@@ -115,25 +115,28 @@ Math imports from `msvcr71.dll`, by import-table slot:
 | `0x8682E8` | `pow` | | `0x868548` | `sin` |
 | `0x8682FC` | `ceil` | | | |
 
-The DLL replaces the `sqrt` slot and the translator computes `floor` and `ceil` in place
+The DLL replaces the `sqrt` slot, and the translator computes `floor` and `ceil` in place
 ([translator.md](translator.md)).
 
 ## Floating point
 
+x87 is the old floating-point unit of x86 processors. It computes on a stack of registers, the
+FPU stack.
+
 - **All floating point is x87.** Visual C++ .NET 2003 generates x87 code unless told otherwise.
   Vector, matrix, culling, animation and 3D-sound math all run on the FPU stack.
-- **The main thread runs at 24-bit precision, round to nearest.** Direct3D 9 sets that when the
-  device is created, and the client does not ask it to preserve the FPU state. Other threads
-  keep a different precision. The translation relies on this: it is installed for the thread
-  that owns the device only.
-- **Casts go through `_ftol2`** at `0x6A92D8`, the compiler's float-to-integer helper, linked
+- **The main thread runs at 24-bit precision, round to nearest.** Direct3D 9 sets this when the
+  device is created, because the client does not ask it to keep the FPU state. Other threads
+  use a different precision. The translated routines rely on this: they run only on the thread
+  that owns the device, and other threads run the original code.
+- **Float-to-integer casts go through `_ftol2`** at `0x6A92D8`, the compiler's helper, linked
   into `client.dll` and called from 697 places.
-- **Cost under Rosetta 2:** about 25 ns per x87 instruction, the same in 24-, 53- and 64-bit
-  precision mode. A routine with 21 x87 instructions takes 540 ns. `msvcr71!sqrt` (x87 `fsqrt` in
+- **Cost under Rosetta 2:** about 25 ns per x87 instruction, the same at 24-, 53- and 64-bit
+  precision. A routine with 21 x87 instructions takes 540 ns. `msvcr71!sqrt` (x87 `fsqrt` in
   Wine) takes about 514 ns per call.
-- **Share of the main thread** before any fix, standing in the world: `client.dll` 82–86%, almost
-  all of it x87 routines. The top 25 routines were about 60% of the time. It takes several
-  hundred to cover 90%.
+- **Share of the main thread before any fix**, standing in the world: `client.dll` 82–86%, almost
+  all of it x87 routines. The top 25 routines took about 60% of the time. Covering 90% takes
+  several hundred.
 
 ## Routines we identified
 
@@ -145,22 +148,21 @@ The DLL replaces the `sqrt` slot and the translator computes `floor` and `ceil` 
 | `0x45E10` | 4×4 matrix multiply | hand-written SSE |
 | `0x46510` | quaternion to rotation matrix | hand-written SSE |
 | `0x183250` | rotate a vector by a quaternion | translated |
-| `0x48A360`, `0x48A470`, `0x48A590` | bounding box against planes (culling) | translated. `0x48A470` is the most expensive translated routine |
+| `0x48A360`, `0x48A470`, `0x48A590` | bounding box against planes (culling) | translated. `0x48A470` takes the most time of all translated routines |
 | `0x2F9900`–`0x2FF400` | about a dozen routines that look like skeletal animation | translated |
-| `0x47DDB0` | world position to map grid cell, calls `_ftol2` | translated, was 18% of the main thread with the map open |
+| `0x47DDB0` | world position to map grid cell, calls `_ftol2` | translated ([its cost](measurements.md#what-each-fix-gave)) |
 | `0x4859D0` | comparator handed to a sort | translated, about 1% |
-| `0x393E10`, `0x48FA40` | which projector lights reach an object: `0x48FA40` walks the lights and writes an entry with position and colour for each one in range, `0x393E10` is the distance from a point to a box. Called three times from `0x49DA40`, each time only while the setting `WR_Projector_Light_Chars` is on | translated |
-| `0x29283D` | calls the DirectSound 3D-buffer setters | not touched, 2.3% of the main thread inside `dsound` |
+| `0x393E10`, `0x48FA40` | which projector lights reach an object. `0x48FA40` walks the lights and writes an entry with position and colour for each one in range. `0x393E10` is the distance from a point to a box. Called three times from `0x49DA40`, each time only while the setting `WR_Projector_Light_Chars` is on ([In a crowd](#in-a-crowd)) | translated |
+| `0x29283D` | calls the DirectSound 3D-buffer setters | not touched |
 | `0xDE70`, `0xDEB0`, `0xDEF0`, `0x66EBF0`, `0x66ED40` | double-precision helpers | translated |
 | `0x7670`, `0x7690` | thin wrappers around C runtime math imports | not translated |
 | `0x6A92D8` | `_ftol2` | SSE, written out by `xlat.py` |
 
-After `0x48A470`, the translated routines with the most time are `0x49DA40` and `0x4DCE10`. We
-have not worked out what they do.
+After `0x48A470`, the translated routines with the most time are `0x49DA40` and `0x4DCE10`.
+Beyond the light calls of `0x49DA40`, what they do is not known.
 
-Seven routines in the list are reached only through pointers, so no direct call leads to them.
-They were found by walking sampled addresses back to a function prologue: `0x4859D0`, `0x4A5600`,
-`0x45F780`, `0x4D0D90`, `0x65F960`, `0x2F2730`, `0x3C9A30`.
+Seven routines in the list are reached only through pointers, never by a direct call:
+`0x4859D0`, `0x4A5600`, `0x45F780`, `0x4D0D90`, `0x65F960`, `0x2F2730`, `0x3C9A30`.
 
 Left out of the list on purpose:
 
@@ -170,27 +172,28 @@ Left out of the list on purpose:
 | `0x14580` | cannot be run in the tests (0.6% of the main thread) |
 | `0x4E8F30`, `0x4D7640`, `0x3AF700` and ten smaller ones | translate, but never run to completion on random input, so they are unverified |
 
-`0x2FE4D0` and `0x2FE670` are in the list and differ from the original in the test with
-ordinary input. Both interpolate in a table of keys whose floats start two bytes into a word, so
-the test's values reach them as arbitrary bit patterns, and an intermediate product exceeds the
-range of a `float` (the fast rounding trade-off in [translator.md](translator.md)). On well-formed
-tables both match the original, 20,000 calls each.
+`0x2FE4D0` and `0x2FE670` are in the list although they differ from the original in the test
+with ordinary input. Both interpolate in a table of keys whose floats start two bytes into a
+word. The test's values reach them as arbitrary bit patterns, and an intermediate product exceeds
+the range of a `float` (the fast rounding trade-off in [translator.md](translator.md)). On
+well-formed tables both match the original over 20,000 calls each.
 
 ### Routines something else has changed
 
-The DLL installs a replacement only where the code in memory is byte for byte what the
-replacement was generated from. These fail that check:
+The DLL installs a replacement only where the code in memory is exactly the code the replacement
+was made from. These fail that check:
 
 | RVA | Rejacked | Revived |
 |---|---|---|
 | `0x1736F0` | changed in memory before the device is created (the file is unchanged) | the file itself differs (jump at `0x174758`) |
 | `0x1B5890` | unchanged, replaced | changed in memory before the device is created |
 
-With the MxOEmu launcher the picture is Rejacked's: `0x1736F0` fails the check, nothing else.
+With the MxOEmu launcher it is as with Rejacked: only `0x1736F0` fails the check.
 
 ## The render throttle
 
-The client has an automatic limiter. Its settings and built-in defaults:
+The client lowers its draw distance by itself when the frame rate is low. Its settings and
+built-in defaults:
 
 | Setting | Default |
 |---|---|
@@ -201,14 +204,16 @@ The client has an automatic limiter. Its settings and built-in defaults:
 | `Client_RenderThrottle_FramesForChange` | 15 |
 | `Client_RenderThrottle_Override` | 0 (automatic) |
 
-The routine at `0x28E0` keeps a factor between 0.25 and 1. When the frame rate stays below
-30 × factor for 15 frames, the factor drops by 0.05. When it stays 30% above that, it rises. The
-factor scales the draw distances, and the scaled values are what the client writes back to
-`options.cfg` on exit (`dl_*_prefetchradius`, `wr_*dist`, `*camerafarz`). A non-zero
-`Client_RenderThrottle_Override` holds the factor at that value.
+The routine at `0x28E0` keeps a factor between 0.25 and 1:
 
-So a slow machine does not get much slower, it draws less. Our first measurements read "14–16
-fps before, 17–19 after a big improvement" because the throttle spent every gain on draw
+- When the frame rate stays below 30 × factor for 15 frames, the factor drops by 0.05.
+- When it stays 30% above that, the factor rises.
+- The factor scales the draw distances. On exit the client writes the scaled values back to
+  `options.cfg` (`dl_*_prefetchradius`, `wr_*dist`, `*camerafarz`).
+- A non-zero `Client_RenderThrottle_Override` holds the factor at that value.
+
+So a slow machine draws less instead of getting much slower. Early measurements read 14–16 fps
+before a big improvement and 17–19 fps after, because the throttle spent the gain on draw
 distance. With `Client_RenderThrottle_Override = 1` the same scene ran at 8.5 fps before the
 math fix.
 
@@ -228,80 +233,60 @@ Counts are per frame, in the world at full draw distance, 3440×1440.
 | Shaders | 288 shader modules compiled by DXVK across both games |
 | Login screen | fullscreen 800×600 with a display mode switch, then the configured resolution |
 
-Options that cost frame rate at 3440×1440:
-
-| Option | Cost |
-|---|---|
-| Rejacked launcher, "new glow shader for Screen Filter: Over-Bright (BETA)" (it rewrites `rezmap.ltb`) | halves the frame rate |
-| Wet-street reflections while it rains (`WR_Reflect_EnvMap_Enable`, which Revived switches on in its `autoexec.cfg`, and `wr_wetext_enable`) | Revived dropped from 45–55 to about 30 fps |
-| Revived's `mxrdisp` interface scaling | about 40% of the GPU |
-| Anti-aliasing | a few fps |
-| The green tint | nothing measurable |
+What some options cost in frame rate: [measurements.md](measurements.md#settings-that-change-the-numbers).
 
 ## The main thread
 
-One thread runs game logic, issues every Direct3D call and pumps window messages. With all
-fixes it is the limit: the GPU is idle a third to half of the time.
-
-Where it spends its time now (Rejacked, in the world, sampled every 20 ms):
-
-| Share | What |
-|---|---|
-| about 39% | translated and hand-written math |
-| about 34% | the client's integer code |
-| 16–21% | Wine and system code |
-| about 6% | this DLL (Direct3D 9 on Vulkan) |
-
-Inside "Wine and system code": `PeekMessage` 2–6% (one call per frame, the cost is Wine's macOS
-event handling), the copy of vertex shader constants 2.7% (about 5.8 MB per frame), `r3d9.dll`
-2.7%, DirectSound 2.3%.
+One thread runs the game logic, makes every Direct3D call and handles window messages. With all
+fixes it is the limit: the GPU is idle a third to half of the time. Where its time goes:
+[measurements.md](measurements.md#where-the-main-threads-time-goes).
 
 ### In a crowd
 
 The numbers are in [measurements.md](measurements.md#in-a-crowd). What they come from:
 
-- **Draw calls.** One frame of 9,012 draw calls: 5,377 into the picture, 1,989 into 77 shadow
-  pictures of 512×512, about 26 each and one per character, and 1,620 into one 256×256 picture
-  at the start of the frame (not identified). The shadow pictures alternate with the main one,
-  which makes 200 to 340 render passes per frame against 60 to 100 elsewhere. Without character
-  shadows (`ModelShadow_Enable` and `ModelShadow_Proj_Enable` at 0) the frame rate was 12 to 13%
-  higher both times. The GPU was 25 to 66% idle in these sessions, so the main thread stayed
-  the limit.
-- **The light loop.** `0x49DA40` calls `0x48FA40` for each object, and that walks every
-  projector light: `0x48FA40` itself, the distance routine `0x393E10`, `0xE130`, and through the
-  light's table of functions `0x4B3FE0`, which jumps to `0x4A98C0` (it returns one stored value),
-  twice per light. It ran in the two later sessions and not in the two before, minutes apart
-  in the same place: the guess is that the projector lights are lit at night only. It cost the
-  step from 54 to 37 fps. The light filter ([translator.md](translator.md#hand-written-replacements))
-  is the answer to it. The list had 255 to 635 lights in the one session that counted them, and
-  the loop is asked 40,000 to 160,000 times per frame whether a light reaches an object. With
-  the filter 80 to 180 of those reach it.
-- **`WR_Projector_Light_Chars`** gates the three calls of the loop. Two sessions with `0` and
-  `1` in `useropts.cfg` were taken by day, when the loop did not run either way, so whether that
+- **Draw calls.** One frame had 9,012 draw calls: 5,377 for the picture, 1,989 for 77 shadow
+  pictures of 512×512 (about 26 each, one per character), and 1,620 for one 256×256 picture at
+  the start of the frame (not identified). The game switches between the shadow pictures and the
+  main one, which makes 200 to 340 render passes per frame against 60 to 100 elsewhere. Without
+  character shadows (`ModelShadow_Enable` and `ModelShadow_Proj_Enable` at 0) the frame rate was
+  12 to 13% higher both times. The GPU was 25 to 66% idle in these sessions, so the main thread
+  stayed the limit.
+- **The light loop.** For each object, `0x49DA40` calls `0x48FA40`, which walks every projector
+  light. Per light that runs `0x48FA40` itself, the distance routine `0x393E10`, `0xE130`, and
+  twice `0x4B3FE0`, reached through the light's table of functions. `0x4B3FE0` jumps to
+  `0x4A98C0`, which only returns one stored value. The loop ran in two sessions and not in the
+  two before, minutes apart in the same place. Assumed: the projector lights are on only at
+  night. It cost the step from 54 to 37 fps. The light filter
+  ([translator.md](translator.md#hand-written-replacements)) is the fix. In the one session that
+  counted them, the list had 255 to 635 lights, and the loop asked 40,000 to 160,000 times per
+  frame whether a light reaches an object. With the filter 80 to 180 of those reach it.
+- **`WR_Projector_Light_Chars`** gates the three calls of the loop. The two sessions with `0` and
+  `1` in `useropts.cfg` were taken by day, when the loop did not run either way. Whether that
   line reaches the game is not known.
 
 ## Launchers and add-ons
 
 **Rejacked**
 
-- The launcher starts `matrix.exe` from `%TEMP%\MatrixOnline.0`, not from the game folder. A DLL
-  placed next to the game is therefore not found. Overrides have to go into the system folder.
-- Settings live in `%APPDATA%\The Matrix Online\`. `options.cfg` is written by the game.
-  `useropts.cfg` holds a block the launcher rewrites on every PLAY. Where both set a value,
-  `options.cfg` wins. Both use Windows line endings.
+- The launcher starts `matrix.exe` from `%TEMP%\MatrixOnline.0`, not from the game folder, so a
+  DLL placed next to the game is not found. Overrides have to go into the system folder.
+- Settings live in `%APPDATA%\The Matrix Online\`. The game writes `options.cfg`. `useropts.cfg`
+  holds a block the launcher rewrites on every PLAY. Where both set a value, `options.cfg` wins.
+  Both use Windows line endings.
 
 **MxOEmu**
 
 - Its launcher is the game's own `launcher.exe` (5,267,456 bytes), changed to load `mxowrap.dll`
   (452,096 bytes), a file that project builds. Both are in its full client and in its
-  launcher-only archive, and neither comes with a shortcut.
+  launcher-only archive. Neither comes with a shortcut.
 - The game runs as `matrix.exe` here too, with `mxowrap.dll` loaded, so the same overrides
-  apply. Seen in one session of about a minute in the world, among more than 100 characters:
-  535 of 536 routines installed, `0x1736F0` left alone as with Rejacked.
+  apply. One session of about a minute in the world, among more than 100 characters: 535 of 536
+  routines installed, `0x1736F0` left alone as with Rejacked.
 - The main thread in that session: 37% translated math, 32% the client's integer code, 17% Wine
-  and system code, 7% this DLL, 6% waiting. That is Rejacked's picture
-  ([the main thread](#the-main-thread)).
-- Not tested: whether it gets along with Rejacked in one game folder. Rejacked's launcher writes
+  and system code, 7% this DLL, 6% waiting. That is the same picture as Rejacked
+  ([measurements.md](measurements.md#where-the-main-threads-time-goes)).
+- Not tested: whether it works alongside Rejacked in one game folder. Rejacked's launcher writes
   its servers into `useropts.cfg` on every PLAY.
 
 **Revived**
@@ -313,9 +298,9 @@ The numbers are in [measurements.md](measurements.md#in-a-crowd). What they come
 - **Music guard**: the starter checks the music system before the game starts. The check fails
   on Wine's DirectSound even where music works with Microsoft's. It then writes `music = off` to
   `MxORevived-audio.txt` and starts the game without music.
-- **Sign-in**: the launcher writes the account and password into the game's own login console
-  through `ReadProcessMemory`/`WriteProcessMemory`, driven by a timer, at about four characters
-  a second. Both processes are mostly idle while it runs.
+- **Sign-in**: the launcher types the account and password into the game's own login console
+  with `ReadProcessMemory`/`WriteProcessMemory`, driven by a timer, at about four characters a
+  second. Both processes are mostly idle meanwhile.
 - **Background video** in the launcher (`BackgroundVideo` in `launcher-settings.json`) takes more
   than one processor core.
 - Wine's own DirectMusic freezes Revived at start. Microsoft's works.
@@ -330,4 +315,4 @@ The numbers are in [measurements.md](measurements.md#in-a-crowd). What they come
 | `Windowed` | launcher block in `useropts.cfg` | windowed or fullscreen |
 | `MusicSystemEnable` | `options.cfg` | music |
 | `wr_wetext_enable` | `options.cfg` | wet streets |
-| `WR_Reflect_EnvMap_Enable` | Revived's `autoexec.cfg` | wet-street reflections |
+| `WR_Reflect_EnvMap_Enable` | Revived's `autoexec.cfg`, which switches it on | wet-street reflections while it rains |

@@ -2,133 +2,111 @@
 
 Everything here was done on macOS 27 with CrossOver 26.3 and an Apple Silicon Mac. The steps
 install a custom `d3d9.dll` into one CrossOver bottle and enable it for the game executable
-only. No game file is changed.
+only. No program or data file of the game is changed on disk: its code is replaced in memory.
+The setup's detail, intro, music and video steps edit the game's settings files, and keep a
+`.setup-backup` copy of each.
 
-The sections after the quick setup assume the game already starts in CrossOver. If it does
-not yet, see [crossover.md](crossover.md) first.
+The sections after the setup assume the game already starts in CrossOver. If it does not yet,
+see [crossover.md](crossover.md) first.
 
-## Quick setup
+## The setup
 
-`scripts/setup.sh` checks the Mac (Apple Silicon, macOS 26 or newer, CrossOver), asks its
-questions (which bottle, which servers, a frame-rate limit, add-ons, the build tools, maximum
-detail, the logo movies) and then does everything below, in order. In a bottle it has been
-through before, the frame-rate limit and the add-on answer the bottle has are the defaults. It
-stops before its questions while a game is running.
+`scripts/setup.sh` checks the Mac, asks its questions and then runs these steps in order.
+[quick-start.md](quick-start.md) is the short way through it. It stops while a game is running.
 
-1. **game**, when the bottle has no game ([crossover.md](crossover.md), section 1):
-   - creates the bottle if there is none
-   - puts the client in `C:\Games\MxO`, downloaded from the link on the MxOEmu project's page
-     or taken from a folder, an archive (zip, 7z, tar) or a direct `https` link. It is unpacked
-     outside drive C and moved in whole.
-   - offers a shortcut to the MxOEmu project's launcher when the game folder holds it
-     (`launcher.exe` with that project's `mxowrap.dll` next to it), made with CrossOver's
-     `cxmklnk` under the name `MxOEmu Launcher`. Not tested: the shortcut has not been made in
-     a real bottle yet.
-   - downloads the Rejacked launcher and the Revived installer from the projects' download
-     pages and checks each against the SHA-256 printed on its page
-   - runs the Rejacked installer, which is made with NSIS, with `/S`: no pages, its defaults,
-     and no launcher started at the end. The setup says beforehand not to start the launcher
-     should a window open after all. If the launcher is not there afterwards, the installer
-     opens with its window. Not tested: `/S` has not run in a real bottle yet.
-   - starts Revived's installer for you to click through
-   - before Revived's, does the same with Microsoft's .NET 10 Desktop Runtime, checked against
-     Microsoft's release list
-   - writes the game folder into the Rejacked launcher's settings (`install_dir` under
-     `HKCU\Software\Rejacked\Rejacked Launcher\game`). Not confirmed: whether the launcher
-     picks that folder up.
-2. **bottle**: what the game needs to start ([crossover.md](crossover.md), section 2): the game's own shader
-   compiler, Microsoft's DirectMusic and DirectSound from the February 2010 DirectX package and
-   the sound bank from the April 2006 one (both downloaded from Microsoft via the Internet
-   Archive and checked against the checksums `winetricks` uses), and the large address space.
-3. **build**: `scripts/build.sh` with the bottle's own `client.dll`, after `brew install` of the
-   missing build tools if you agreed. With `--dll FILE` nothing is built and that file is
-   installed.
-4. **install**: the DLL for every game executable it found (`matrix.exe`, and `mxorev.exe` if
-   Revived is installed), with the bottle settings it needs. On request also
-   `DXVK_MXO_RESPECT_ADDONS=0`, which replaces the routines that add-on files next to the game
-   point into.
-5. **detail**, on request: writes the values of the highest Video Options settings into each
-   game's `options.cfg`, with `Client_RenderThrottle_Override = 1` (the draw distance stops
-   shrinking at low frame rates) and the main display's size as `ScreenWidth` and `ScreenHeight`
-   (in points, or in pixels when the bottle has `RetinaMode` on), and `d3d9.samplerAnisotropy = 16`
-   into `C:\Games\dxvk\dxvk.conf`, which `DXVK_CONFIG_FILE` then names.
+1. **game**, in a bottle without a game: makes the bottle, puts the client in `C:\Games\MxO`
+   (from the MxOEmu project's page, a folder, an archive or an `https` link) and installs the
+   launchers you choose. Each installer is checked against the checksum its publisher gives.
+   Rejacked's runs without its window. Revived's and Microsoft's .NET 10 runtime need your
+   clicks. An MxOEmu launcher that came with the game gets a shortcut on request.
+2. **bottle**: what the game needs to start ([crossover.md](crossover.md), section 2): the
+   game's shader compiler, Microsoft's DirectMusic and DirectSound, and the large address
+   space. The two DirectX packages come from Microsoft via the Internet Archive and are checked
+   against the checksums `winetricks` uses.
+3. **build**: `scripts/build.sh` with the bottle's `client.dll`, after `brew install` of the
+   missing build tools if you agreed.
+4. **install**: the DLL for every game executable found (`matrix.exe`, `mxorev.exe`), with the
+   bottle settings it needs. On request also `DXVK_MXO_RESPECT_ADDONS=0` ([Switches](#switches)).
+5. **detail**, on request: the highest Video Options values and the main display's size in
+   each game's `options.cfg`, `Client_RenderThrottle_Override = 1`, and 16× anisotropic
+   filtering in `C:\Games\dxvk\dxvk.conf`.
 6. **intro**, on request: `EnableSplash = 0` in each game's `useropts.cfg`.
-7. **icons**, when the Rejacked launcher, Revived or the MxOEmu launcher's shortcut is in the
-   bottle: `cxmenu --sync`, which has CrossOver read the bottle's shortcuts again, then a line
-   for each launcher that says whether CrossOver's list (`cxmenu.conf`) has its shortcut. A
-   missing one is made with CrossOver's `cxmklnk` for the Rejacked launcher only. Revived's
-   setup makes its own, and the MxOEmu launcher's is made by the game step, which asks first.
-   It runs by itself in a whole run and after the game step.
-8. **music**: Revived only, sets its starter's music guard to `music = on` and the music setting
-   in its `options.cfg` and `useropts.cfg` back to 1. A whole run in a bottle that already has
-   the speed-up leaves a guard that says `music = off` alone: the setup wrote `on` there before,
-   so `off` is the player's. `scripts/setup.sh music` switches it on.
-9. **video**: Revived only, sets `BackgroundVideo` to `false` in its `launcher-settings.json`.
+7. **icons**: has CrossOver read the bottle's shortcuts again (`cxmenu --sync`), says for each
+   launcher whether it is listed, and makes a missing shortcut for the Rejacked launcher.
+8. **music**, Revived only: `music = on` in its starter's music guard, and the music setting in
+   its `options.cfg` and `useropts.cfg` back to 1. A later run of every step leaves
+   `music = off` alone.
+9. **video**, Revived only: `"BackgroundVideo": false` in its `launcher-settings.json`.
+
+Not tried in a real bottle yet: the Rejacked installer without its window, the MxOEmu
+launcher's shortcut, and whether the Rejacked launcher takes the game folder the setup writes
+into its settings.
 
 ```sh
-scripts/setup.sh                          # everything; asks its questions first
-scripts/setup.sh --bottle MatrixOnline game   # only the launchers and the game; makes the bottle if needed
-scripts/setup.sh --bottle MatrixOnline install
-scripts/setup.sh --bottle MatrixOnline uninstall
-scripts/setup.sh --exe otherclient.exe    # another project's executable name
-scripts/setup.sh --dll /path/to/d3d9.dll  # install a DLL that is built already
-scripts/setup.sh --yes                    # no questions, in the first bottle that has a game
+scripts/setup.sh                              # every step, after its questions
+scripts/setup.sh --bottle MatrixOnline game   # the named steps only, in the named bottle
+scripts/setup.sh --exe otherclient.exe        # another project's executable name
+scripts/setup.sh --dll /path/to/d3d9.dll      # install a DLL that is built already
+scripts/setup.sh --yes                        # no questions: every default, without the game step
 ```
 
-`--yes` gives every question its default and leaves the game step out, since Revived's
-installer needs clicks. `--yes game` skips the game itself and says so: a 1.3 GB download is not started
-unasked.
+`--yes game` installs the launchers and does not download the game.
 
-The install step also merges the pipeline caches of the games in the bottle
-(`scripts/merge-pipeline-caches.py`): Rejacked and Revived run the same engine, but DXVK keeps one
-cache per executable, so each would otherwise hitch while building pipelines the other already
-has. Run it again after playing both, with the games closed:
+The install step merges the pipeline caches of the games in the bottle, so one game does not
+hitch on pipelines the other has built. To merge again after playing both, with the games
+closed:
 
 ```sh
 scripts/merge-pipeline-caches.py "$BOTTLE/drive_c/Games/dxvk"/*.dxvk-cache
 ```
 
-It finds game folders by their `client.dll`, keeps a `.setup-backup` copy of every file it
-replaces, and never reads launcher logins or passwords. A file in the bottle is written next to
-the old one and renamed, so a failure leaves the old file whole. `uninstall` puts the game
-executables back on Wine's Direct3D 9 and takes the speed-up's variables out of the bottle's
-settings, `MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS` included. It leaves DirectMusic, the shader
-compiler and `WINE_LARGE_ADDRESS_AWARE` in place, since the game needs them to start.
+The setup keeps a `.setup-backup` copy of every file it replaces. Registry values and
+CrossOver's list of shortcuts get none. It never looks for, prints or sends launcher logins or
+passwords.
+
+`uninstall` puts the games back on Wine's Direct3D 9 and takes the speed-up's variables out of
+the bottle's settings. It leaves:
+
+- what the game needs to start: DirectMusic, the sound bank, the shader compiler and
+  `WINE_LARGE_ADDRESS_AWARE`
+- the settings the detail, intro, music and video steps changed, with their `.setup-backup`
+  copies next to them
+- `C:\Games\dxvk` with the log and the pipeline caches
+- outside the bottle: `~/mxo-apple-silicon`, `~/Library/Caches/mxo-apple-silicon` and the
+  Homebrew packages
+
+Deleting the bottle in CrossOver removes everything inside it.
 
 ## Build
 
-Tools (Homebrew): `brew install mingw-w64 meson ninja glslang`. `scripts/build-tools.sh` holds
-the list, for the build and for the setup.
+The setup does this for you. By hand:
 
 ```sh
+brew install mingw-w64 meson ninja glslang
 scripts/build.sh "/path/to/your/client.dll"
 ```
 
-The DLL is compiled with [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) 20261104, which the
-script downloads once into `build/toolchain` (about 125 MB) and checks against a fixed SHA-256.
-Homebrew's 32-bit GCC handles C++ exceptions with setjmp/longjmp, and the bookkeeping that needs on
-nearly every function call cost about 5% of the game's main thread. Homebrew's mingw-w64 is still
-needed for `objdump`, which the translator uses. `MXO_COMPILER=gcc scripts/build.sh ...` builds with
-GCC as before.
+`client.dll` is the one in your game folder. After five to ten minutes the result is
+`build/d3d9.dll`. The script
 
-`client.dll` is the one in your game folder. The script
+1. downloads the compiler ([llvm-mingw](https://github.com/mstorsjo/llvm-mingw) 20261104,
+   about 125 MB) and CodeWeavers' source for CrossOver 26.3.0 (about 140 MB), once, and checks
+   each against a fixed SHA-256,
+2. applies `dxvk/dxvk-d3d9-mxo.patch` to the DXVK in that source,
+3. translates the game's math routines named in `translator/routines.list`, each one only if
+   its code in your `client.dll` matches the hash in the list,
+4. builds the DLL.
 
-1. downloads CodeWeavers' source for CrossOver 26.3.0 once, about 140 MB, and checks it
-   against a fixed SHA-256 (or takes a tarball you already have as the second argument, or
-   another version from `CROSSOVER_VERSION`, both unchecked),
-2. applies `dxvk/dxvk-d3d9-mxo.patch` to the DXVK in it,
-3. maps the functions of your `client.dll` and translates the routines named in
-   `translator/routines.list` (each one only if its code matches the hash in the list),
-4. builds `build/d3d9.dll`.
+`build/translate.log` says what was translated and what was skipped. With the 7.6005 client
+all 535 routines translate. The same DLL serves every launcher: each routine is checked again
+when the game starts, and one that does not match is left alone.
 
-It takes five to ten minutes. `build/translate.log` says what was translated and what was
-skipped and why. With the `client.dll` this was developed on, all 535 routines translate.
-One DLL serves both games: Revived's `client.dll` has the same code at the same addresses for
-all but one of them, and each routine is checked again when the game starts.
-
-The translator rounds with two instructions by default ([translator.md](translator.md#rounding)).
-For the slower form that also matches the FPU outside the range of a `float`, add `--exact-range`
-to the `xlat.py` line in `scripts/build.sh`.
+| To | Do this |
+|---|---|
+| use a CrossOver source archive you already have | give it as the second argument (not checked) |
+| build against another CrossOver version | set `CROSSOVER_VERSION` (not checked) |
+| compile with Homebrew's GCC | set `MXO_COMPILER=gcc`. Its exception handling cost about 5% of the game's main thread |
+| round exactly as the FPU does outside the range of a `float` | add `--exact-range` to the `xlat.py` line in `scripts/build.sh`. It is slower ([translator.md](translator.md#rounding)) |
 
 ## Install into a bottle
 
@@ -171,13 +149,20 @@ called `MatrixOnline`. Close the game and its launcher first.
    "DXVK_STATE_CACHE_PATH" = "C:/Games/dxvk"
    ```
 
-   The first two are required. Without the first, DXVK froze in most runs. Without the second,
-   the game ran out of its 2 GB of address space and crashed after about a minute in the world.
-   The test machine also has `"WINEMSYNC" = "1"`, and `"DXVK_HUD" = "fps,frametimes,gpuload"`
-   provides a frame-rate overlay (hidden until Ctrl+Shift+F). `"DXVK_FRAME_RATE" = "90"` limits
-   the frame rate: without a limit the game reaches up to 200 fps in light scenes, which only
-   makes heat and fan noise. `"DXVK_MXO_RESPECT_ADDONS" = "0"` also replaces the routines that
-   add-on files next to the game point into. A player saw about 10 fps less without it.
+   | Line | What it is for |
+   |---|---|
+   | `MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS` | required: without it DXVK froze in most runs |
+   | `WINE_LARGE_ADDRESS_AWARE` | required: without it the game ran out of its 2 GB of address space and crashed after about a minute in the world |
+   | `DXVK_LOG_PATH`, `DXVK_STATE_CACHE_PATH` | where the log and the pipeline caches go |
+
+   Optional lines:
+
+   | Line | What it does |
+   |---|---|
+   | `"DXVK_FRAME_RATE" = "90"` | limits the frame rate. Without a limit the game reaches up to 200 fps in light scenes, which only makes heat and fan noise |
+   | `"DXVK_HUD" = "fps,frametimes,gpuload"` | the frame-rate overlay, hidden until Ctrl+Shift+F |
+   | `"DXVK_MXO_RESPECT_ADDONS" = "0"` | also replaces the routines that add-on files next to the game point into. A player saw about 10 fps less without it |
+   | `"WINEMSYNC" = "1"` | set on the test machine |
 
 4. Leave the bottle's Graphics setting in CrossOver on **Auto**, not DXVK.
 

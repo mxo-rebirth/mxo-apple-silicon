@@ -1,18 +1,20 @@
 # Tests
 
-Two differential tests, both in one small Windows program that runs under Wine. Each calls a
-routine as original x87 code and as its SSE2 translation on the same random input and compares
-everything the routine wrote, bit for bit. Any NaN counts as equal to any other NaN. An infinity
-equals only itself.
+The tests check that the faster code gives the same results as the game's own code. One small
+Windows program, run under Wine, calls each routine twice on the same random input: once as the
+original x87 code and once as its SSE2 translation. It then compares everything the two wrote,
+bit for bit. Any NaN counts as equal to any other NaN.
 
-| Part | Compares |
+| Part | What it tests |
 |---|---|
-| synthetic | hand-written x87 routines in `synth.s` for the instruction forms the translator handles, a jump out of a routine in its short and its long form, and the path other threads take through the stub back into the original. Three things need a PE image and are left to the game part: jump tables, the call to the float-to-integer helper, and the `floor` and `ceil` imports |
-| game | the translated routines of `client.dll` against the originals in your `client.dll`, plus the float-to-integer helper |
+| synthetic | small hand-written routines in `synth.s`, one for each kind of instruction the translator handles |
+| game | every translated routine of the game against the original in your `client.dll` |
+| sqrt | the replacement for the game's `sqrt` (`sqrt_test.cpp`) |
+| floor and ceil | the instruction that replaces the game's `floor` and `ceil` calls (`floor_test.cpp`) |
 
 ## Build
 
-From the repository root, after `scripts/build.sh` has run once (it leaves `build/client.map`):
+From the repository root, after `scripts/build.sh` has run once:
 
 ```sh
 cd tests
@@ -31,93 +33,48 @@ i686-w64-mingw32-g++ -O2 -msse2 -mfpmath=sse -static -fpermissive -w -DWITH_GAME
     -I ../translator -o xtest.exe harness.cpp synth.o
 ```
 
+Without `-DWITH_GAME` the program has only the synthetic part and needs no `out_game.inc`.
+
 ## Run
 
 Copy `xtest.exe` into the bottle and run it with CrossOver's `wine`:
 
 ```sh
-wine --bottle MatrixOnline -- 'C:\somewhere\xtest.exe' 200000          # synthetic part, 200000 cases per routine
+wine --bottle MatrixOnline -- 'C:\somewhere\xtest.exe' 200000 synth     # synthetic part, 200000 calls per routine
 MXO_CLIENT_DLL='C:\Games\MxO\client.dll' \
-wine --bottle MatrixOnline -- 'C:\somewhere\xtest.exe' 100 game        # game routines, 100 cases each
+wine --bottle MatrixOnline -- 'C:\somewhere\xtest.exe' 100 game        # game part, 100 calls per routine
 ```
 
-`xtest.exe <iterations> synth` runs only the synthetic part. Run one test program at a time per folder:
-the game part writes `fuzz.txt` in the current folder. Without `-DWITH_GAME` the program holds the
-synthetic part alone and needs no `out_game.inc`.
+The game part writes its results to `fuzz.txt` in the current folder, so run one test at a
+time per folder.
 
-The synthetic part runs three passes. With ordinary inputs and on the other-thread path it must report
-zero mismatches. The pass with huge, tiny, zero, infinite and NaN inputs reports zero only for a
-translation made with `--exact-range`. The default, faster form differs there where a value leaves the
-float range ([docs/translator.md](../docs/translator.md#rounding)), and its counts must not change from one translator version to the
-next. A translated caller reaches the translation of its callee directly, so such a difference in a
-callee shows in its callers too. After the passes it checks the light filter on made-up lights against a plain reading of what the
-game's light loop decides: `left out ... wrongly` must be 0. Then it prints the time per call of eight
-of the routines, as x87 code and as translation.
+## What a good result looks like
 
-With `MXO_PLAIN=1` the game part fills the scratch area with ordinary float values only (no integers,
-pointers, huge or tiny numbers). The translation keeps values in the float range, so on such input it
-must match the original exactly: any routine listed as different is a translation fault. Fewer routines
-run to completion that way, because many need pointers to work on. Two routines are the exception,
-`0x2FE4D0` and `0x2FE670`: they read a table of floats that starts two bytes into a word, so the ordinary
-values reach them as arbitrary bit patterns. `MXO_SHAPE=1` gives them a proper table, and on that they
-must match too.
+**Synthetic part:** zero differences with ordinary input. With extreme input (huge, tiny,
+infinite, NaN) the default translation may differ where a value leaves the range of a `float`
+([why](../docs/translator.md#rounding)). Those counts must not change between versions. Then
+`left out ... wrongly` for the light filter must be 0.
 
-With `MXO_SHAPE=1` some routines get plausible input instead of random memory, because random memory
-rarely gets far into them. So far that is the map routine at `0x47DDB0` (world position to map grid
-cell): a map object with sane bounds, grid size and cell size, and positions mostly inside the map. The
-`reached=` count in `fuzz.txt` says how many calls got all the way to the result. The sort comparator at
-`0x4859D0` gets two elements with boxes and a direction in the image's globals. Those globals are put back
-to what the image holds before the next routine runs. The three routines that look a value up in a table
-of keys (`0x2FE4D0`, `0x2FE560`, `0x2FE670`) get a table with rising times, a time that mostly lies between
-two keys and a weight from 0 to 1. For them `reached=` counts the calls with a time between two keys.
+**Game part:** it feeds each routine random memory, so many routines crash (in both versions,
+which is not counted). What matters is the list of routines whose results differ. On random
+input a few always do, because of the input, not the translation:
 
-The light loop at `0x48FA40` gets an object with a box and a list of lights around it: inside the box,
-far away, and as far from one side as their reach goes. Most lists have up to 48 lights, one in eight
-has 257 to 456 as a street at night does, and some of those name only lights inside the box, where the
-filter has to step aside. Without `MXO_PLAIN=1` a light can also have a position that is not a number.
-The loop is tested the way the DLL installs it, through `MxoRunLightLoop` of `translator/mxo_lights.h`,
-so the original is compared with filter and translation together. `reached=` counts the calls in which the filter left a light out. Each call also
-runs the translation alone, and `lights-detail.txt` in the current folder says for how many calls either
-differs from the original and lists the lights of the first four such calls. A run of the whole game
-part starts that file afresh, a `child` run adds to it. `MXO_LIGHT_FILTER=0` leaves the filter out. On random memory the routine crashes at once, so this shaping is its only test.
+- the double-precision helpers `0xDE70`, `0xDEB0`, `0xDEF0`, `0x66EBF0`, `0x66ED40`, when
+  random bits make extreme doubles
+- when two NaNs meet, x87 and SSE2 keep a different one
+- leftover bits in `eax` that nothing reads
 
-The image is loaded without its imports. Originals that call msvcr71's `floor` or `ceil` would crash
-where their translations compute the result in place, so those two import slots get the real functions.
-The translator's table (`MxoX_crtslots`) says where they are.
+For a strict check, set both `MXO_PLAIN=1` and `MXO_SHAPE=1`: then any difference is a fault.
 
-The game part calls each routine blind: random floats, a few small integers and pointers into a
-scratch area, with no idea what the routine expects. Many routines crash on that (in both
-versions, which is caught and not counted) and some block. Each batch runs in its own process
-so one stuck routine does not stop the rest. Results go to `fuzz.txt` in the current folder.
-What matters is the list of routines where the two versions *differ*.
+**sqrt, floor and ceil:** zero differences.
 
-Of `eax` the low byte, `al`, is compared and counted for the routines where the translator can tell
-that the routine's own integer code sets it before every return. That is the byte a `bool` comes back
-in. The last column of `out_game.inc.tests` says which routines those are, and their line in `fuzz.txt`
-has `al=` with the number of differences (`al=-1` where `al` is not compared). Differences in the other
-three bytes are listed as `eax=` and summed up in the last line of the run, but not counted: after a
-status word read they hold other bits than the translation leaves there.
+## Switches
 
-On the reference `client.dll` the differences that remain all come from the garbage input:
+| Variable | Effect |
+|---|---|
+| `MXO_PLAIN=1` | ordinary float values only, no pointers or extreme numbers. Fewer routines get far, but those that do must match exactly. Two key-table routines (`0x2FE4D0`, `0x2FE670`) also need `MXO_SHAPE=1` for that |
+| `MXO_SHAPE=1` | realistic input for the routines that random memory cannot reach: the map lookup, the sort, the key tables and the light loop. `reached=` in `fuzz.txt` counts the calls that got through |
+| `MXO_LIGHT_FILTER=0` | test the light loop without the light filter |
 
-- the double-precision helpers at `0xDE70`, `0xDEB0`, `0xDEF0`, `0x66EBF0`, `0x66ED40` differ
-  when random bit patterns are read as doubles and happen to be denormal or larger than 2^900.
-  on ordinary values they are identical.
-- `eax` left over from `fnstsw ax` can differ in the bits that report the FPU stack pointer
-  when a callee that should have returned a float did not.
-- when two NaNs meet, x87 and SSE2 keep a different one.
-- a routine that returns a `bool` in `al` can leave a different `ah` (the status word is no longer put
-  into `ax` where nothing reads it), and a routine that returns a float leaves whatever `eax` held.
-
-## sqrt
-
-`sqrt_test.cpp` checks the replacement for the game's `MSVCR71!sqrt` import (`MxoSqrtSSE`) against
-Wine's own `sqrt`: random and edge-case inputs, values whose root lies exactly halfway between two
-floats, under seven FPU control words. It must report zero differences. It also prints the time per
-call of both (about 500 ns for Wine's x87 version under Rosetta, about 50 ns for the replacement).
-
-## floor and ceil
-
-`floor_test.cpp` checks that SSE4.1 `roundsd`, which the translator puts in place of calls to msvcr71's
-`floor` and `ceil`, gives the same bits as Wine's functions after the x87 round trip the original caller
-makes (NaNs, infinities, zeros, denormals and values around 2^52 included). It must report zero differences.
+The light loop is tested with filter and translation together, as the game runs them, and with
+the translation alone. `lights-detail.txt` lists the first calls that differ.

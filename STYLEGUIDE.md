@@ -30,7 +30,7 @@ The table of files is in [docs/development.md](docs/development.md#layout). A ne
 - A function is at most 80 lines and does not nest deeper than it needs to
 - Deleting uses `${name:?}`, so an empty variable can never widen what is removed
 - Programs are found by name with `ps -o comm=`. Their command lines are never read or printed.
-- The setup never reads passwords, launcher logins or credential stores, and keeps every file it replaces with a `.setup-backup` suffix
+- The setup never looks for, prints or sends passwords, launcher logins or credential stores, and keeps every file it replaces with a `.setup-backup` suffix. Registry values and CrossOver's shortcut list are the exceptions.
 - Colours, frames and animation appear only on a terminal. Piped, every message is a plain line that still makes sense alone.
 - Every question has a default, and `--yes` takes it. A default never replaces settings a player already has. Where the game comes from is the one question `--yes` skips: a 1.3 GB download is not started unasked.
 - A file in the bottle is written next to the old one and renamed, so it is there whole or not at all
@@ -57,7 +57,8 @@ The table of files is in [docs/development.md](docs/development.md#layout). A ne
 ## Checking Input
 
 - An installer is started only after its checksum matches the one its publisher prints
-- Links are read from the publishers' pages and must be `https`. A file name is checked against a pattern before use.
+- Installer links are read from the publishers' pages, every other download link is fixed in the scripts with its checksum. Every link and every redirect must be `https`. A file name is checked against a pattern before use.
+- An archive with a symbolic link is not used, and a temporary file is never written through a link
 - A page that no longer looks as expected stops that step with a message. The setup never falls back to a guess.
 - The game archive has no published checksum. The setup says where it comes from.
 
