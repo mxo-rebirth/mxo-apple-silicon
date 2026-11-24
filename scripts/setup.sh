@@ -625,6 +625,33 @@ ok "macOS $MACOS"
 [ -x "$WINE" ] || die "CrossOver not found in /Applications. Install it first: https://www.codeweavers.com/crossover"
 ok "CrossOver $(defaults read "${CX%/SharedSupport/*}/Info" CFBundleShortVersionString 2>/dev/null || true)"
 
+# The CrossOver app reads a bottle's icons and settings when it starts. Its window, in this account
+# only: the programs in the bottles run on without it.
+crossover_open() {
+  local programs
+  programs=$(ps -xo comm=) || return 1
+  case $'\n'"$programs"$'\n' in *$'\n'"${CX%/SharedSupport/*}/MacOS/CrossOver"$'\n'*) return 0 ;; esac
+  return 1
+}
+CROSSOVER_CLOSED=0
+if crossover_open; then
+  if ask "CrossOver is open. Quit it now? It shows new icons only after it starts again."; then
+    osascript -e 'tell application id "com.codeweavers.CrossOver" to quit' >/dev/null 2>&1 || true
+    for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+      crossover_open || break
+      sleep 0.5
+    done
+    if crossover_open; then
+      note "CrossOver is still open. Quit it with Cmd+Q and open it again when the setup is done"
+    else
+      ok "CrossOver closed"
+      CROSSOVER_CLOSED=1
+    fi
+  else
+    note "CrossOver stays open. Quit and open it again when the setup is done, to see new icons"
+  fi
+fi
+
 named() {   # named STEP: it was named on the command line
   local step
   for step in "${STEPS[@]+"${STEPS[@]}"}"; do
@@ -1668,6 +1695,7 @@ fi
 say "Done"
 if ! named uninstall; then
   ok "Start the game from its launcher."
+  if [ $CROSSOVER_CLOSED = 1 ]; then info "Open CrossOver again: it shows the launchers' icons."; fi
   if [ -n "$REVIVED" ] && [ ! -f "$REVIVED/launcher-settings.json" ]; then
     info "Revived's launcher plays a video that keeps a processor core busy. After its first start this switches it off: scripts/setup.sh video"
   fi

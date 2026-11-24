@@ -11,7 +11,8 @@ see [crossover.md](crossover.md) first.
 
 ## The setup
 
-`scripts/setup.sh` checks the Mac, asks its questions and then runs these steps in order.
+`scripts/setup.sh` checks the Mac, offers to quit CrossOver if it is open (it shows new icons
+only after it starts again), asks its questions and then runs these steps in order.
 [quick-start.md](quick-start.md) is the short way through it. It stops while a game is running.
 
 1. **game**, in a bottle without a game: makes the bottle, puts the client in `C:\Games\MxO`
