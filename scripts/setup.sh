@@ -903,6 +903,12 @@ client_dir() {   # the first game folder that is not Revived's own copy
 find_installs
 show_installs
 
+# A step named on the command line works on a game. Without this, a lone bottle made for something
+# else would be taken without a question and changed. Only the game step may start from nothing.
+if [ ${#STEPS[@]} -gt 0 ] && ! named game && [ ${#INSTALLS[@]} = 0 ]; then
+  die "no game in the bottle $BOTTLE (no folder with client.dll), so nothing was changed. Name the game's bottle with --bottle NAME, or get the game first: scripts/setup.sh game"
+fi
+
 # The install step leaves DXVK_LOG_PATH. The player chose that bottle's settings, so they are the defaults.
 SPEEDUP_BEFORE=0
 if [ -n "$(bottle_env DXVK_LOG_PATH)" ]; then SPEEDUP_BEFORE=1; fi
