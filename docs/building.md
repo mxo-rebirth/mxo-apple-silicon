@@ -36,9 +36,15 @@ running.
    bottle settings it needs. Unless you answer `n`, also `DXVK_MXO_RESPECT_ADDONS=0`
    ([Switches](#switches)): faster, but an add-on such as Revived's interface scaling may stop
    working.
-5. **detail**, on request: the highest Video Options values and the main display's size in
-   each game's `options.cfg`, `Client_RenderThrottle_Override = 1`, and 16× anisotropic
-   filtering in `C:\Games\dxvk\dxvk.conf`.
+5. **detail**, on request: graphics settings and the main display's size in each game's
+   `options.cfg`, and 16× anisotropic filtering in `C:\Games\dxvk\dxvk.conf`. There are two
+   sets, and the setup offers the one for the Mac it runs on first:
+   - maximum, for an M3, M4 or newer: the highest Video Options values, with
+     `Client_RenderThrottle_Override = 1`
+   - lighter, for an M1 or M2: the same with the draw distance held at 70%
+     (`Client_RenderThrottle_Override = 0.7`), no character shadows, no wet streets and no
+     anti-aliasing. It is a first version: its parts were measured on the M4 only
+     ([measurements.md](measurements.md#settings-that-change-the-numbers)).
 6. **intro**, on request: `EnableSplash = 0` in each game's `useropts.cfg`.
 7. **music**, Revived only: `music = on` in its starter's music guard, and the music setting in
    its `options.cfg` and `useropts.cfg` back to 1. A later run of every step leaves
@@ -230,6 +236,7 @@ The game's own setting, in `options.cfg`:
 |---|---|
 | `Client_RenderThrottle_Override = 0` | automatic: draw distance shrinks below 30 fps and grows again above |
 | `Client_RenderThrottle_Override = 1` | always full draw distance. Use this when measuring |
+| `Client_RenderThrottle_Override = 0.7` | draw distance held at 70%. Any value between 0.25 and 1 holds that share |
 
 ## Going back
 

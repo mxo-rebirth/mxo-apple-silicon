@@ -26,8 +26,8 @@
 #   build      build d3d9.dll from this bottle's client.dll. Asks before it installs missing
 #              build tools, which only an administrator account can (docs/building.md)
 #   install    install that d3d9.dll for the game executables, with the bottle settings it needs
-#   detail     every graphics option at its maximum, the main display's resolution and 16x
-#              anisotropic filtering
+#   detail     graphics settings: a lighter set for an M1 or M2, or every option at its maximum.
+#              Also the main display's resolution and 16x anisotropic filtering
 #   intro      the game starts without its logo movies
 #   icons      CrossOver's icons for the launchers: CrossOver reads the bottle's shortcuts again,
 #              and the Rejacked launcher's shortcut is made when the bottle has none
@@ -1515,6 +1515,57 @@ audio_max_voices = 64
 audio_high_quality = 1
 "
 
+# The lighter set: the maximum, then these. For the M1 and M2, whose processors run the game's main
+# thread slower. What they are worth on the M4 is in docs/measurements.md. On an M1 they are untried.
+# A Client_RenderThrottle_Override between 0 and 1 holds the draw distance at that share.
+LIGHT_DETAIL="
+Client_RenderThrottle_Override = 0.7
+ModelShadow_Enable = 0
+ModelShadow_Proj_Enable = 0
+WR_WetExt_Enable = 0
+AntiAlias_Level = 0
+"
+
+chip_generation() {   # 1 for an M1, 4 for an M4 Max, nothing when the name gives no number
+  local name
+  name=$(sysctl -n machdep.cpu.brand_string 2>/dev/null) || return 0
+  case "$name" in
+    *"Apple M"[0-9]*) name=${name#*Apple M}; printf '%s' "${name%%[!0-9]*}" ;;
+  esac
+}
+
+DETAIL=""   # light, max or keep, once chosen
+# Enter takes the set for this Mac in a game that has no settings yet. Where a game has some, Enter
+# leaves them, and --yes does the same.
+choose_detail() {   # choose_detail [named]: named when the detail step was asked for by name
+  [ -z "$DETAIL" ] || return 0
+  local recommended=max fresh=yes f where=""
+  case "$(chip_generation)" in 1|2) recommended=light ;; esac
+  while IFS= read -r f; do
+    [ ! -f "$f" ] || fresh=no
+  done < <(options_files)
+  screen_size
+  [ -z "$SCREEN_W" ] || where=", at this display's resolution (${SCREEN_W}x$SCREEN_H)"
+  if [ $YES = 1 ]; then
+    if [ $fresh = yes ] || [ "${1:-}" = named ]; then DETAIL=$recommended; else DETAIL=keep; fi
+    return 0
+  fi
+  info "Graphics settings$where. They replace the detail settings a game has now."
+  CHOICE_START=2
+  if [ $fresh = yes ] || [ "${1:-}" = named ]; then
+    CHOICE_START=1
+    [ $recommended = max ] || CHOICE_START=0
+  fi
+  choose "Lighter, for an M1 or M2: shorter draw distance, no character shadows, no wet streets, no anti-aliasing" \
+    "Maximum, for an M3, M4 or newer: every option at its highest" \
+    "Leave the settings as they are"
+  case $CHOICE in
+    0) DETAIL=light; ok "graphics: the lighter settings" ;;
+    1) DETAIL=max; ok "graphics: everything at maximum" ;;
+    *) DETAIL=keep; ok "graphics: left as they are" ;;
+  esac
+}
+
 set_options() {   # set_options FILE "KEY = VALUE lines": changes those keys (any case), adds the missing ones
   mkdir -p "$(dirname "$1")" || die "could not make the folder of $1"
   backup_once "$1"
@@ -1547,10 +1598,16 @@ screen_size() {   # SCREEN_W and SCREEN_H: the main display as the bottle sees i
 }
 
 step_detail() {
-  say "Detail: everything at maximum"
+  say "Detail: graphics settings"
   need_game
   need_game_closed "It writes its options when it closes"
-  local f values=$MAX_DETAIL
+  choose_detail named
+  if [ $DETAIL = keep ]; then note "nothing changed"; return 0; fi
+  local f values=$MAX_DETAIL what="every graphics option at its maximum"
+  if [ $DETAIL = light ]; then
+    values="$values$LIGHT_DETAIL"
+    what="the lighter graphics settings"
+  fi
   screen_size
   if [ -n "$SCREEN_W" ]; then   # options.cfg wins over the size in a launcher's block of useropts.cfg
     values="$values
@@ -1559,9 +1616,13 @@ ScreenHeight = $SCREEN_H"
   fi
   while IFS= read -r f; do
     set_options "$f" "$values"
-    ok "$(win_path "$f"): every graphics option at its maximum"
+    ok "$(win_path "$f"): $what"
   done < <(options_files)
-  info "Draw distance, shadows, wet streets, weather, grass, traffic, anti-aliasing and both screen filters."
+  if [ $DETAIL = light ]; then
+    info "Draw distance held at 70%, no character shadows, no wet streets, no anti-aliasing. Everything else at its highest."
+  else
+    info "Draw distance, shadows, wet streets, weather, grass, traffic, anti-aliasing and both screen filters."
+  fi
   if [ -n "$SCREEN_W" ]; then
     ok "resolution ${SCREEN_W}x$SCREEN_H, the main display's"
   else
@@ -1737,21 +1798,7 @@ if [ ${#STEPS[@]} = 0 ]; then
   choose_fps
   choose_addons
   if [ -z "$DLL" ] && needs_build; then choose_tools; fi
-  # Maximum detail replaces a game's settings: once it has some, the default is no and --yes keeps them.
-  screen_size
-  q="Set every graphics option to its maximum"
-  [ -z "$SCREEN_W" ] || q="$q, at this display's resolution (${SCREEN_W}x$SCREEN_H)"
-  q="$q?"
-  fresh=yes
-  while IFS= read -r f; do
-    [ ! -f "$f" ] || fresh=no
-  done < <(options_files)
-  MAX_OUT=0
-  if [ $fresh = yes ]; then
-    if ask "$q"; then MAX_OUT=1; fi
-  elif ask "$q It replaces the detail settings the games have now." no; then
-    MAX_OUT=1
-  fi
+  choose_detail
   NO_INTRO=0
   if ! intro_off && ask "Skip the logo movies when the game starts?"; then NO_INTRO=1; fi
   VIDEO_OFF=0   # before its first start the launcher has no settings file to change
@@ -1770,7 +1817,7 @@ if [ ${#STEPS[@]} = 0 ]; then
     fi
   fi
   step_install
-  if [ $MAX_OUT = 1 ]; then step_detail; fi
+  if [ $DETAIL != keep ]; then step_detail; fi
   if [ $NO_INTRO = 1 ]; then step_intro; fi
   if [ -n "$REVIVED" ]; then keep_or_fix_music; fi
   if [ $VIDEO_OFF = 1 ]; then step_video; fi

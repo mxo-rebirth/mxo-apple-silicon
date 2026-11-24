@@ -20,7 +20,7 @@ From a Mac without CrossOver to the game, without the details. Those are in
 
 4. **Answer its questions.** Return takes the default each time: a new bottle called
    `MatrixOnline`, the game (a 1.3 GB download), the launchers of all three servers, a limit of
-   90 fps, maximum graphics and the fastest setting for add-ons. Answer `n` to a launcher you
+   90 fps, the graphics settings for your Mac and the fastest setting for add-ons. Answer `n` to a launcher you
    do not want.
 5. **Revived only: click through the two installers that open,** Microsoft's .NET and then
    Revived's. When Revived's asks where The Matrix Online is installed, choose `C:\Games\MxO`.

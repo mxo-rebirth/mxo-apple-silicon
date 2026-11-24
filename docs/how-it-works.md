@@ -55,7 +55,8 @@ open problems: [measurements.md](measurements.md).
 
 ## Limits
 
-- Not tested: long sessions, interiors, other districts, any other Mac.
+- Not tested: long sessions, interiors, other districts. Besides the M4 it has run on one M1,
+  without measurements yet ([measurements.md](measurements.md)).
 - The translated math gives up the x87 unit's wider exponent range for speed. Results match
   for every value a `float` can hold. `xlat.py --exact-range` keeps the full range, at a cost.
 - The DLL changes `client.dll` in memory. That is also what cheats do. See the questions below.

@@ -157,4 +157,7 @@ profile ([what the loop is](client-notes.md#in-a-crowd)).
 - **One unexplained freeze** at the loading screen with an early build. It has not recurred.
 - **Thirteen routines** translate but cannot be verified by the tests, so they stay original
   ([client-notes.md](client-notes.md#routines-we-identified)).
-- **Not tested:** long sessions, interiors, other districts, any other Mac.
+- **Not tested:** long sessions, interiors, other districts.
+- **One other Mac, an M1:** the maximum settings ran at about 40 fps there, read from the
+  frame-rate counter by the player. No frame log yet. The setup's lighter settings are meant for
+  it and have not been measured.
