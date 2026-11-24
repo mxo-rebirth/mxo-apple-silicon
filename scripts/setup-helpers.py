@@ -214,21 +214,25 @@ def video_off(path):
 
 # --- the publishers' pages ---
 
+BLOCK_START = re.compile(r'<(script|style)\b', re.I)
+BLOCK_END = {'script': re.compile('</script', re.I), 'style': re.compile('</style', re.I)}
+
+
 def without_scripts(page):
-    """The page without its script and style blocks, in one pass: a regular expression takes time
-    that grows with the square of the page on unclosed blocks."""
-    lower, kept, at = page.lower(), [], 0
-    opening = re.compile(r'<(script|style)\b')
+    """The page without its script and style blocks, in one pass: one regular expression for a whole
+    block takes time that grows with the square of the page on unclosed blocks. An unclosed block
+    takes the rest of the page with it."""
+    kept, at = [], 0
     while True:
-        found = opening.search(lower, at)
+        found = BLOCK_START.search(page, at)
         if not found:
             kept.append(page[at:])
             break
         kept.append(page[at:found.start()])
-        end = lower.find('</' + found.group(1), found.end())
-        if end < 0:
+        end = BLOCK_END[found.group(1).lower()].search(page, found.end())
+        if not end:
             break
-        at = end
+        at = end.start()
     return ' '.join(kept)
 
 

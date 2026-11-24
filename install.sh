@@ -9,7 +9,7 @@
 #
 # Left as they are: the copy of the repository this is started from, a checkout it did not make and a
 # clone with changed files. Without git, and over an earlier download without git, the main branch is
-# downloaded as an archive instead.
+# downloaded as an archive instead. A folder that holds other files is refused.
 #
 # Arguments after the command go to scripts/setup.sh, for example:  ... install.sh)" --exe name.exe
 #

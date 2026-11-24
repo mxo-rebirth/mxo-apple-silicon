@@ -262,6 +262,10 @@ class Pages(WithFolder):
             helpers.page_link(page, 'https://example.org/', r'launcher-[0-9.]+-win64\.exe')
         self.assertIn(self.CHECKSUM.lower(), out.getvalue())
 
+    def test_a_letter_whose_small_form_is_longer_moves_nothing(self):
+        self.assertEqual(helpers.without_scripts('\u0130\u0130 a <SCRIPT>x</script> b <style>y</STYLE> c'),
+                         '\u0130\u0130 a  </script> b  </STYLE> c')
+
     def test_the_newest_desktop_runtime(self):
         wanted = {'name': 'windowsdesktop-runtime-win-x64.exe', 'url': 'https://example.org/new.exe', 'hash': 'EF' * 64}
         releases = {'releases': [

@@ -57,7 +57,7 @@ TESTED_MACOS=27          # the only version this was tried on
 
 # folders on the bottle's drive C, and what counts as the game there
 CLIENT_FOLDER=Games/MxO       # where the game step puts the game
-DXVK_FOLDER=Games/dxvk        # the DLL's log, pipeline caches and settings file
+DXVK_FOLDER=Games/dxvk        # the DLL's log, pipeline caches and settings file. The DLL looks for its flag files there
 CLIENT_VERSION=7.6005
 CLIENT_ARCHIVE_SIZE="1.3 GB"  # the full client as the projects offer it
 CLIENT_MIN_KB=5000            # a client.dll is larger than this
@@ -143,6 +143,7 @@ WRAPPED=()
 ROW_INK=""   # a row's text colour, which a note sets for its own row
 ROW_LINES=1  # terminal lines the last row took
 CHOICE=0
+CHOICE_START=0   # the item a menu starts on, which Enter takes. Back to the first after each menu
 ANSWER=""
 JOB=""        # the background job a spinner waits for
 LEFTOVERS=()  # temporary folders, removed however the setup ends
@@ -516,11 +517,11 @@ fetch_file() {   # fetch_file URL OUT TITLE [resume]: with a progress bar, retur
   return $rc
 }
 
-choose_by_number() {   # the menu as plain lines. Enter takes the first item
+choose_by_number() {   # the menu as plain lines. Enter takes the item the menu starts on
   local n=$# i key
   for ((i = 1; i <= n; i++)); do printf '  %d) %s\n' "$i" "${!i}"; done
   while :; do
-    read -r -p "   Number [1]: " key || [ -n "$key" ] || die "no answer"   # a last line without its newline is an answer too
+    read -r -p "   Number [$((CHOICE + 1))]: " key || [ -n "$key" ] || die "no answer"   # a last line without its newline is an answer too
     case "$key" in
       '') return 0 ;;
       *[!0-9]*) ;;
@@ -529,16 +530,17 @@ choose_by_number() {   # the menu as plain lines. Enter takes the first item
   done
 }
 
-choose() {   # choose ITEM…: sets CHOICE to the picked item's index
+choose() {   # choose ITEM…: sets CHOICE to the picked item's index. Starts on item CHOICE_START
   local n=$# i key rest lines
   local items=("$@")
-  CHOICE=0
+  CHOICE=$CHOICE_START
+  CHOICE_START=0
   if [ $FANCY = 0 ]; then choose_by_number "$@"; return 0; fi
   printf '\033[?25l'
   while :; do
     lines=0
     for ((i = 0; i < n; i++)); do
-      if [ $i = $CHOICE ]; then row "$M_PICK" "$ACC" "${items[i]}"; else row " " "" "${items[i]}"; fi
+      if [ $i = "$CHOICE" ]; then row "$M_PICK" "$ACC" "${items[i]}"; else row " " "" "${items[i]}"; fi
       lines=$((lines + ROW_LINES))
     done
     row " " "" "" "arrow keys, then Enter"
@@ -625,33 +627,6 @@ ok "macOS $MACOS"
 [ -x "$WINE" ] || die "CrossOver not found in /Applications. Install it first: https://www.codeweavers.com/crossover"
 ok "CrossOver $(defaults read "${CX%/SharedSupport/*}/Info" CFBundleShortVersionString 2>/dev/null || true)"
 
-# The CrossOver app reads a bottle's icons and settings when it starts. Its window, in this account
-# only: the programs in the bottles run on without it.
-crossover_open() {
-  local programs
-  programs=$(ps -xo comm=) || return 1
-  case $'\n'"$programs"$'\n' in *$'\n'"${CX%/SharedSupport/*}/MacOS/CrossOver"$'\n'*) return 0 ;; esac
-  return 1
-}
-CROSSOVER_CLOSED=0
-if crossover_open; then
-  if ask "CrossOver is open. Quit it now? It shows new icons only after it starts again."; then
-    osascript -e 'tell application id "com.codeweavers.CrossOver" to quit' >/dev/null 2>&1 || true
-    for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
-      crossover_open || break
-      sleep 0.5
-    done
-    if crossover_open; then
-      note "CrossOver is still open. Quit it with Cmd+Q and open it again when the setup is done"
-    else
-      ok "CrossOver closed"
-      CROSSOVER_CLOSED=1
-    fi
-  else
-    note "CrossOver stays open. Quit and open it again when the setup is done, to see new icons"
-  fi
-fi
-
 named() {   # named STEP: it was named on the command line
   local step
   for step in "${STEPS[@]+"${STEPS[@]}"}"; do
@@ -659,6 +634,39 @@ named() {   # named STEP: it was named on the command line
   done
   return 1
 }
+
+# The CrossOver app shows a bottle's new icons only after it starts again. Its window, in this account
+# only: the programs in the bottles run on without it.
+crossover_open() {
+  local programs
+  programs=$(ps -xo comm=) || return 1
+  case $'\n'"$programs"$'\n' in *$'\n'"${CX%/SharedSupport/*}/MacOS/CrossOver"$'\n'*) return 0 ;; esac
+  return 1
+}
+
+CROSSOVER_CLOSED=0
+quit_crossover() {   # asks first. With --yes it stays open: an app is not closed unasked
+  crossover_open || return 0
+  if [ $YES = 1 ] || ! ask "CrossOver is open. Quit it now? It shows new icons only after it starts again."; then
+    note "CrossOver stays open. Quit and open it again when the setup is done, to see new icons"
+    return 0
+  fi
+  # a dialog of CrossOver's own would keep the request waiting, so it is given five seconds
+  osascript -e 'with timeout of 5 seconds' -e 'tell application id "com.codeweavers.CrossOver" to quit' \
+    -e 'end timeout' >/dev/null 2>&1 || true
+  for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+    crossover_open || break
+    sleep 0.5
+  done
+  if crossover_open; then
+    note "CrossOver is still open. Quit it with Cmd+Q and open it again when the setup is done"
+  else
+    ok "CrossOver closed"
+    CROSSOVER_CLOSED=1
+  fi
+}
+# only where icons can change: a run of every step, the game step and the icons step
+if [ ${#STEPS[@]} = 0 ] || named game || named icons; then quit_crossover; fi
 
 # Said before anything is installed: in a full run and with the game step.
 if [ ${#STEPS[@]} = 0 ] || named game; then
@@ -741,11 +749,15 @@ pick_bottle() {
   elif [ ${#list[@]} = 1 ] && { ! wants_game || has_game "$BOTTLES/${list[0]}"; }; then
     BOTTLE=${list[0]}
   else
-    local items=("${list[@]}") new=0
+    local items=("${list[@]}") new=0 i
     if wants_game && [ ! -e "$BOTTLES/$NEW_BOTTLE" ]; then
       new=1
       items+=("a new bottle called $NEW_BOTTLE")
+      CHOICE_START=${#list[@]}   # Enter never puts the game into a bottle made for something else
     fi
+    for ((i = ${#list[@]} - 1; i >= 0; i--)); do   # a bottle that has the game comes before a new one
+      if has_game "$BOTTLES/${list[i]}"; then CHOICE_START=$i; fi
+    done
     choose "${items[@]}"
     if [ $new = 1 ] && [ "$CHOICE" = ${#list[@]} ]; then
       create_bottle "$NEW_BOTTLE"
@@ -1017,14 +1029,14 @@ download_client() {   # download_client LINK: into the cache, resuming an earlie
   [ $rc = 0 ] || die "download failed"
 }
 
-# stage_client FROM STAGING [DOWNLOAD]: copies a folder or unpacks an archive to STAGING, outside drive C.
-# One rename then puts the game in drive C whole or not at all. Sets STAGED_CLIENT to client.dll's folder.
 no_links() {   # a game has no symbolic links: one could make a later write land outside the bottle
   if [ -n "$(find "$1" -type l -print -quit 2>/dev/null)" ]; then
     die "the game files contain a link to somewhere else on the Mac, which a game never has. They were not used, to be safe"
   fi
 }
 
+# stage_client FROM STAGING [DOWNLOAD]: copies a folder or unpacks an archive to STAGING, outside drive C.
+# One rename then puts the game in drive C whole or not at all. Sets STAGED_CLIENT to client.dll's folder.
 stage_client() {
   local from=$1 staging=$2 download=${3:-} src
   rm -rf "${staging:?}" || die "could not clear $staging"
@@ -1633,6 +1645,8 @@ step_uninstall() {
 
 # --- run ----------------------------------------------------------------------------------------
 
+SETUP_OWED=0   # 1 when a named game step added a game that the other steps have not seen
+
 if [ ${#STEPS[@]} = 0 ]; then
   # Revived's installer needs clicks, so --yes leaves the game step out
   if [ $YES = 0 ] && [ ${#INSTALLS[@]} = 0 ]; then step_game; fi
@@ -1688,13 +1702,20 @@ if [ ${#STEPS[@]} = 0 ]; then
   if [ $VIDEO_OFF = 1 ]; then step_video; fi
   refresh_icons
 else
+  games_before=${#INSTALLS[@]}
   for step in "${STEPS[@]}"; do "step_$step"; done
   if named game && ! named icons; then refresh_icons; fi   # a launcher the game step installed has no icon yet
+  # a game the game step added has neither its start fixes nor the speed-up: those steps write them per program
+  if named game && ! named install && [ ${#INSTALLS[@]} -gt "$games_before" ]; then SETUP_OWED=1; fi
 fi
 
 say "Done"
-if ! named uninstall; then
+if [ $SETUP_OWED = 1 ]; then
+  note "Not ready to play yet. Run the setup once more, without a step: it gives the game added now its start fixes and the speed-up."
+elif ! named uninstall; then
   ok "Start the game from its launcher."
+fi
+if ! named uninstall; then
   if [ $CROSSOVER_CLOSED = 1 ]; then info "Open CrossOver again: it shows the launchers' icons."; fi
   if [ -n "$REVIVED" ] && [ ! -f "$REVIVED/launcher-settings.json" ]; then
     info "Revived's launcher plays a video that keeps a processor core busy. After its first start this switches it off: scripts/setup.sh video"
