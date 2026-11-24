@@ -24,7 +24,7 @@ benchmark and regenerating the patch. Building and installing are in [building.m
 | `scripts/setup-helpers.py` | the setup's file edits and page readings, one subcommand each |
 | `scripts/build-tools.sh` | the programs the build needs and their Homebrew packages, read by `build.sh` and `setup.sh` |
 | `tests/setup/` | tests of `setup-helpers.py` on temporary files |
-| `install.sh` | the one command of the README: downloads the repository and runs `scripts/setup.sh` |
+| `install.sh` | the one command of the README: clones the repository with git, or brings its clone up to date, and runs `scripts/setup.sh` |
 | `scripts/merge-pipeline-caches.py` | merges DXVK pipeline caches |
 | `scripts/fps-summary.py` | frame rate in the world from the DLL's frame log |
 | `scripts/check.sh` | the checks that need neither the game nor CrossOver: shell syntax, linters, the tests of the setup's helpers, writing rules |
