@@ -591,13 +591,14 @@ static int runGame(int iterations) {
     printf("... %d of %d\n", next, total);
   }
   FILE* in = fopen(FuzzFile, "r");
-  char line[512]; int tested = 0, exercised = 0, clean = 0, blocked = 0, alCompared = 0, eaxRoutines = 0; long runs = 0, eaxCases = 0;
+  char line[512]; int tested = 0, exercised = 0, clean = 0, blocked = 0, unmatched = 0, alCompared = 0, eaxRoutines = 0; long runs = 0, eaxCases = 0;
   while (in && fgets(line, sizeof(line), in)) {
     if (line[0] == '#') { printf("   %s", line); continue; }
     int idx, ran = 0, crashed = 0, crashdiff = 0, result = 0, data = 0, eax = 0, stack = 0, al = -1; long timeouts = 0; unsigned rva; char status[32] = "";
     if (sscanf(line, "%d %x %31s ran=%d crashed=%d crashdiff=%d timeouts=%ld result=%d data=%d eax=%d stack=%d al=%d", &idx, &rva, status, &ran, &crashed, &crashdiff, &timeouts, &result, &data, &eax, &stack, &al) < 3) continue;
     tested++; runs += ran; if (ran) exercised++;
     if (!strcmp(status, "BLOCKED") || !strcmp(status, "LOST")) blocked++;
+    if (!strcmp(status, "NOMATCH")) unmatched++;
     if (al >= 0) alCompared++;
     const int alDiffs = al > 0 ? al : 0;
     if (eax) { eaxRoutines++; eaxCases += eax; }
@@ -606,8 +607,12 @@ static int runGame(int iterations) {
     problems += result + data + stack + crashdiff + alDiffs;
   }
   if (in) fclose(in);
-  printf("game routines: %d tested, %d ran to completion at least once (%ld comparisons), %d of those identical in every run, %d blocked or lost\n",
-    tested, exercised, runs, clean, blocked);
+  printf("game routines: %d tested, %d ran to completion at least once (%ld comparisons), %d of those identical in every run, %d blocked or lost, %d not in this client.dll\n",
+    tested, exercised, runs, clean, blocked, unmatched);
+  if (tested > 0 && exercised == 0) {   // another build of the client, or children that all died: not a pass
+    printf("no routine ran. Is MXO_CLIENT_DLL the client.dll the translation was made from?\n");
+    problems++;
+  }
   printf("al was compared for %d routines. Differences in the rest of eax, reported above and not counted: %ld cases in %d routines\n",
     alCompared, eaxCases, eaxRoutines);
   return problems;
