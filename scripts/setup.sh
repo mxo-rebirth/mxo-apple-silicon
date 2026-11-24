@@ -29,10 +29,11 @@
 #   detail     graphics settings: a lighter set for an M1 or M2, or every option at its maximum.
 #              Also the main display's resolution and 16x anisotropic filtering
 #   intro      the game starts without its logo movies
+#   music      Revived only: keep its starter from switching the game's music off
+#   video      Revived only: switch off the rain animation (a video) behind its launcher's window,
+#              which costs frame rate while the game runs
 #   icons      CrossOver's icons for the launchers: CrossOver reads the bottle's shortcuts again,
 #              and the Rejacked launcher's shortcut is made when the bottle has none
-#   music      Revived only: keep its starter from switching the game's music off
-#   video      Revived only: switch off the video behind its launcher, which keeps a core busy
 #   uninstall  the game executables go back to Wine's Direct3D 9 (DirectMusic stays, the game needs it)
 #
 # The script never looks for, prints or sends passwords, launcher logins or credential stores, and
@@ -334,13 +335,18 @@ named() {   # named STEP: it was named on the command line
 python3_there() {
   local python
   python=$(command -v python3) || return 1
-  [ "$python" != /usr/bin/python3 ] || xcode-select -p >/dev/null 2>&1
+  [ "$python" = /usr/bin/python3 ] || return 0
+  # after a macOS upgrade the tools' folder can be there without its programs
+  xcode-select -p >/dev/null 2>&1 && python3 -I -c '' >/dev/null 2>&1
 }
 
-can_brew_install() {   # Homebrew's folders take changes from administrator accounts only
+# Homebrew installs only from the account that installed it, an administrator account: another
+# administrator can write its Cellar and still not its locks.
+can_brew_install() {
   local prefix
   prefix=$(brew --prefix 2>/dev/null) || return 1
-  if [ -e "$prefix/Cellar" ]; then [ -w "$prefix/Cellar" ]; else [ -w "$prefix" ]; fi
+  if [ -e "$prefix/Cellar" ]; then [ -w "$prefix/Cellar" ] || return 1; else [ -w "$prefix" ] || return 1; fi
+  [ ! -e "$prefix/var/homebrew/locks" ] || [ -w "$prefix/var/homebrew/locks" ]
 }
 
 find_brew() {   # Homebrew is not on every account's PATH
@@ -659,11 +665,13 @@ ok "macOS $MACOS"
 ok "CrossOver $(defaults read "${CX%/SharedSupport/*}/Info" CFBundleShortVersionString 2>/dev/null || true)"
 
 # Homebrew and the tools the speed-up is built with: checked here, before anything is downloaded or
-# changed. A run that builds nothing can do without them: with a built DLL, given or there already.
+# changed. BUILD_AHEAD is 1 when this run surely builds. With a DLL from an earlier build, a run of
+# every step builds again only if the sources or the game are newer: that shows once the bottle is
+# known, and is settled with the other questions, before any step.
 find_brew || true
 python3_there || die "Apple's command line developer tools are missing, and the setup needs them. Install Homebrew first, which brings them along (https://brew.sh), then run this again"
 BUILD_AHEAD=0
-if [ -z "$DLL" ] && { [ ${#STEPS[@]} = 0 ] || named build; } && [ ! -f "$ROOT/build/d3d9.dll" ]; then BUILD_AHEAD=1; fi
+if [ -z "$DLL" ] && { named build || { [ ${#STEPS[@]} = 0 ] && [ ! -f "$ROOT/build/d3d9.dll" ]; }; }; then BUILD_AHEAD=1; fi
 TOOLS_MISSING=$(missing_build_tools)
 if command -v brew >/dev/null; then
   ok "Homebrew"
@@ -675,11 +683,11 @@ fi
 if [ -z "$TOOLS_MISSING" ]; then
   ok "build tools (${BREW_PACKAGES[*]})"
 elif [ $BUILD_AHEAD = 0 ]; then
-  note "build tools: not all there. This run does not need them"
+  note "build tools: not all there. They are needed only if the speed-up has to be built"
 elif can_brew_install; then
   note "build tools: not installed yet (${BREW_PACKAGES[*]}). The setup asks before it installs them"
 else
-  die "the build tools are missing, and this account cannot install them: Homebrew installs from an administrator account only. Run this in one, then run the setup here again: $(brew_command)"
+  die "the build tools are missing, and this account cannot install them: Homebrew installs only from the account that installed it, an administrator account. Run this there, then run the setup here again: $(brew_command)"
 fi
 
 # The CrossOver app shows a bottle's new icons only after it starts again. Its window, in this account
@@ -726,8 +734,10 @@ quit_crossover() {   # asks first. With --yes it stays open: an app is not close
     note "CrossOver stays open. Quit and open it again when the setup is done, to see new icons"
     return 0
   fi
-  spin "Quitting CrossOver. If macOS asks whether the terminal may control it, allow that" ask_crossover_to_quit || true
-  if ! crossover_gone 5; then   # a window of its own or a refused request kept it open: ended directly then
+  info "If macOS asks whether the terminal may control CrossOver, either answer is fine."
+  spin "Quitting CrossOver" ask_crossover_to_quit || true
+  # a window of its own or a refused request can keep it open
+  if ! crossover_gone 5 && ask "CrossOver has not closed. End it now? Anything it is doing in another bottle is cut off."; then
     pid=$(crossover_pid)
     if [ -n "$pid" ]; then kill "$pid" 2>/dev/null || true; fi
   fi
@@ -738,9 +748,6 @@ quit_crossover() {   # asks first. With --yes it stays open: an app is not close
     note "CrossOver is still open. Quit it with Cmd+Q and open it again when the setup is done"
   fi
 }
-# only where icons can change: a run of every step, the game step and the icons step
-if [ ${#STEPS[@]} = 0 ] || named game || named icons; then quit_crossover; fi
-
 # Said before anything is installed: in a full run and with the game step.
 if [ ${#STEPS[@]} = 0 ] || named game; then
   say "Advice"
@@ -749,8 +756,8 @@ if [ ${#STEPS[@]} = 0 ] || named game; then
   case " $(id -Gn 2>/dev/null || true) " in
     *" admin "*)
       info "This account is an administrator account."
-      if [ -n "$TOOLS_MISSING" ]; then
-        info "A standard account cannot install the build tools. Install them from this account first: $(brew_command)"
+      if [ -n "$TOOLS_MISSING" ] && command -v brew >/dev/null; then
+        info "A standard account cannot install the build tools. For one, install them from the account that installed Homebrew first: $(brew_command)"
       fi ;;
     *) ok "This account is a standard account." ;;
   esac
@@ -794,14 +801,6 @@ create_bottle() {
   BOTTLE=$1
 }
 
-first_with_game() {   # first_with_game BOTTLE…: sets BOTTLE to the first that has a game
-  local name
-  for name in "$@"; do
-    if has_game "$BOTTLES/$name"; then BOTTLE=$name; return 0; fi
-  done
-  return 1
-}
-
 pick_bottle() {
   if [ -n "$BOTTLE" ]; then
     [ -f "$BOTTLES/$BOTTLE/cxbottle.conf" ] && return
@@ -819,29 +818,36 @@ pick_bottle() {
     create_bottle "$NEW_BOTTLE"
     return
   fi
-  if [ $YES = 1 ]; then   # no question: the first bottle with a game, or the first bottle for the game step
-    if first_with_game "${list[@]}"; then return; fi
-    wants_game || die "no bottle has a game in it. Name the bottle to work in: --bottle NAME"
-    BOTTLE=${list[0]}
-  elif [ ${#list[@]} = 1 ] && { ! wants_game || has_game "$BOTTLES/${list[0]}"; }; then
-    BOTTLE=${list[0]}
-  else
-    local items=("${list[@]}") new=0 i
-    if wants_game && [ ! -e "$BOTTLES/$NEW_BOTTLE" ]; then
-      new=1
-      items+=("a new bottle called $NEW_BOTTLE")
-      CHOICE_START=${#list[@]}   # Enter never puts the game into a bottle made for something else
-    fi
-    for ((i = ${#list[@]} - 1; i >= 0; i--)); do   # a bottle that has the game comes before a new one
-      if has_game "$BOTTLES/${list[i]}"; then CHOICE_START=$i; fi
-    done
-    choose "${items[@]}"
-    if [ $new = 1 ] && [ "$CHOICE" = ${#list[@]} ]; then
-      create_bottle "$NEW_BOTTLE"
-      return
-    fi
-    BOTTLE=${list[CHOICE]}
+  # What Enter and --yes take: a bottle that has the game, or else the bottle of this setup's own
+  # name, there or new. Never a bottle made for something else.
+  local items=("${list[@]}") new=0 i start=-1
+  if wants_game && [ ! -e "$BOTTLES/$NEW_BOTTLE" ]; then
+    new=1
+    items+=("a new bottle called $NEW_BOTTLE")
+    start=${#list[@]}
   fi
+  for ((i = ${#list[@]} - 1; i >= 0; i--)); do
+    if [ "${list[i]}" = "$NEW_BOTTLE" ] && [ "$start" -lt 0 ]; then start=$i; fi
+  done
+  for ((i = ${#list[@]} - 1; i >= 0; i--)); do
+    if has_game "$BOTTLES/${list[i]}"; then start=$i; fi
+  done
+  if [ $YES = 1 ]; then
+    if [ "$start" -lt 0 ] || { ! wants_game && ! has_game "$BOTTLES/${list[start]}"; }; then
+      die "no bottle has a game in it. Name the bottle to work in: --bottle NAME"
+    fi
+    CHOICE=$start
+  elif [ ${#list[@]} = 1 ] && { ! wants_game || has_game "$BOTTLES/${list[0]}"; }; then
+    CHOICE=0
+  else
+    [ "$start" -lt 0 ] || CHOICE_START=$start
+    choose "${items[@]}"
+  fi
+  if [ $new = 1 ] && [ "$CHOICE" = ${#list[@]} ]; then
+    create_bottle "$NEW_BOTTLE"
+    return
+  fi
+  BOTTLE=${list[CHOICE]}
 }
 
 say "Bottle"
@@ -980,15 +986,20 @@ client_dir() {   # the first game folder that is not Revived's own copy
 find_installs
 show_installs
 
-# A step named on the command line works on a game. Without this, a lone bottle made for something
-# else would be taken without a question and changed. Only the game step may start from nothing.
-if [ ${#STEPS[@]} -gt 0 ] && ! named game && [ ${#INSTALLS[@]} = 0 ]; then
-  die "no game in the bottle $BOTTLE (no folder with client.dll), so nothing was changed. Name the game's bottle with --bottle NAME, or get the game first: scripts/setup.sh game"
-fi
-
 # The install step leaves DXVK_LOG_PATH. The player chose that bottle's settings, so they are the defaults.
 SPEEDUP_BEFORE=0
 if [ -n "$(bottle_env DXVK_LOG_PATH)" ]; then SPEEDUP_BEFORE=1; fi
+
+# A step named on the command line works on a game. Without this, a lone bottle made for something
+# else would be taken without a question and changed. Only the game step may start from nothing,
+# and uninstall still has its work where the speed-up was installed and the game deleted since.
+if [ ${#STEPS[@]} -gt 0 ] && ! named game && [ ${#INSTALLS[@]} = 0 ] \
+  && ! { [ "${STEPS[*]}" = uninstall ] && [ $SPEEDUP_BEFORE = 1 ]; }; then
+  die "no game in the bottle $BOTTLE (no folder with client.dll), so nothing was changed. Name the game's bottle with --bottle NAME, or get the game first: scripts/setup.sh game"
+fi
+
+# only where icons can change: a run of every step, the game step and the icons step
+if [ ${#STEPS[@]} = 0 ] || named game || named icons; then quit_crossover; fi
 
 # --- steps --------------------------------------------------------------------------------------
 
@@ -1330,6 +1341,7 @@ put_sound_bank() {   # the instruments DirectMusic plays with
 step_bottle() {
   say "Start fixes"
   info "What the game needs to start at all."
+  need_game
   need_game_closed
   put_shader_compiler
   put_directmusic
@@ -1371,10 +1383,10 @@ step_build() {
   choose_tools
   if [ $TOOLS = install ]; then
     spin "Installing the build tools with Homebrew" brew install "${BREW_PACKAGES[@]}" \
-      || die "Homebrew could not install them. Run this in an administrator account, then run the setup again: $(brew_command)"
+      || die "Homebrew could not install them. $(job_output). To try by hand: $(brew_command)"
   fi
   if [ -n "$(missing_build_tools)" ]; then
-    die "the build tools are missing:$(missing_build_tools). They come from Homebrew (https://brew.sh). Run this in an administrator account: $(brew_command)"
+    die "the build tools are missing:$(missing_build_tools). Install them from the account that installed Homebrew, then run this again: $(brew_command)"
   fi
   client=$(build_client)
   spin "Building the speed-up from your copy of the game (5 to 10 minutes)" "$ROOT/scripts/build.sh" "$client" \
@@ -1430,6 +1442,7 @@ merge_caches() {   # each executable starts with the pipelines the others built
 
 step_install() {
   say "Speed-up: install"
+  need_game
   [ -n "$DLL" ] || DLL="$ROOT/build/d3d9.dll"
   [ -f "$DLL" ] || die "no $DLL. The build step makes it: scripts/setup.sh build"
   need_game_closed
@@ -1557,9 +1570,10 @@ choose_detail() {   # choose_detail [named]: named when the detail step was aske
     CHOICE_START=1
     [ $recommended = max ] || CHOICE_START=0
   fi
-  choose "Lighter, for an M1 or M2: shorter draw distance, no character shadows, no wet streets, no anti-aliasing" \
-    "Maximum, for an M3, M4 or newer: every option at its highest" \
-    "Leave the settings as they are"
+  local light="Lighter, for an M1 or M2: shorter draw distance, no character shadows, no wet streets, no anti-aliasing"
+  local max="Maximum, for an M3, M4 or newer: every option at its highest"
+  if [ $recommended = light ]; then light="$light. Recommended for this Mac"; else max="$max. Recommended for this Mac"; fi
+  choose "$light" "$max" "Leave the settings as they are"
   case $CHOICE in
     0) DETAIL=light; ok "graphics: the lighter settings" ;;
     1) DETAIL=max; ok "graphics: everything at maximum" ;;
@@ -1706,7 +1720,7 @@ step_video() {
   fi
   backup_once "$settings"
   edit "$(win_path "$settings")" video-off "$settings"
-  ok "the video behind the launcher's window is off"
+  ok "the rain animation behind the launcher's window is off"
 }
 
 # cxmenu.conf is CrossOver's list of the bottle's shortcuts. A launcher in it can still lack its icon after
@@ -1781,7 +1795,7 @@ step_uninstall() {
 
 # --- run ----------------------------------------------------------------------------------------
 
-SETUP_OWED=0   # 1 when a named game step added a game that the other steps have not seen
+SETUP_OWED=0   # 1 when a named game step added a game that the start fixes or the speed-up have not seen
 
 if [ ${#STEPS[@]} = 0 ]; then
   # Revived's installer needs clicks, so --yes leaves the game step out
@@ -1798,13 +1812,18 @@ if [ ${#STEPS[@]} = 0 ]; then
   if [ $YES = 0 ]; then say "Options"; fi
   choose_fps
   choose_addons
-  if [ -z "$DLL" ] && needs_build; then choose_tools; fi
+  if [ -z "$DLL" ] && needs_build; then
+    choose_tools
+    if [ $TOOLS = missing ]; then
+      die "the speed-up has to be built, and the build tools are missing. Nothing was changed. Install them from the account that installed Homebrew, then run this again: $(brew_command)"
+    fi
+  fi
   choose_detail
   NO_INTRO=0
   if ! intro_off && ask "Skip the logo movies when the game starts?"; then NO_INTRO=1; fi
   VIDEO_OFF=0   # before its first start the launcher has no settings file to change
   if [ -n "$REVIVED" ] && [ -f "$REVIVED/launcher-settings.json" ] \
-    && ask "Switch off the video behind Revived's launcher (it keeps a processor core busy)?"; then
+    && ask "Switch off the rain animation behind Revived's launcher window (it costs frame rate while you play)?"; then
     VIDEO_OFF=1
   fi
 
@@ -1828,13 +1847,17 @@ else
   for step in "${STEPS[@]}"; do "step_$step"; done
   if named game && ! named icons; then refresh_icons; fi   # a launcher the game step installed has no icon yet
   # a game the game step added has neither its start fixes nor the speed-up: those steps write them per program
-  if named game && ! named install && [ ${#INSTALLS[@]} -gt "$games_before" ]; then SETUP_OWED=1; fi
+  if named game && ! { named bottle && named install; } && [ ${#INSTALLS[@]} -gt "$games_before" ]; then SETUP_OWED=1; fi
 fi
 
 say "Done"
-if [ $SETUP_OWED = 1 ]; then
+if named uninstall; then
+  :
+elif [ ${#INSTALLS[@]} = 0 ]; then
+  note "No game in this bottle yet. Run the setup again once it is there."
+elif [ $SETUP_OWED = 1 ]; then
   note "Not ready to play yet. Run the setup once more, without a step: it gives the game added now its start fixes and the speed-up."
-elif ! named uninstall; then
+else
   ok "Start the game from its launcher."
 fi
 if ! named uninstall; then

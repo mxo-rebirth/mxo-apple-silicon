@@ -214,8 +214,8 @@ def video_off(path):
 
 # --- the publishers' pages ---
 
-BLOCK_START = re.compile(r'<(script|style)\b', re.I)
-BLOCK_END = {'script': re.compile('</script', re.I), 'style': re.compile('</style', re.I)}
+BLOCK_START = re.compile(r'<(script|style)\b', re.I | re.A)   # ASCII letters only, or "ſ" would pass for "s"
+BLOCK_END = {'script': re.compile('</script', re.I | re.A), 'style': re.compile('</style', re.I | re.A)}
 
 
 def without_scripts(page):

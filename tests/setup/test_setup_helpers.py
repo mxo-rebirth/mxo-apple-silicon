@@ -266,6 +266,9 @@ class Pages(WithFolder):
         self.assertEqual(helpers.without_scripts('\u0130\u0130 a <SCRIPT>x</script> b <style>y</STYLE> c'),
                          '\u0130\u0130 a  </script> b  </STYLE> c')
 
+    def test_only_plain_letters_spell_a_script_tag(self):
+        self.assertEqual(helpers.without_scripts('a <\u017fcript>x</\u017fcript> b'), 'a <\u017fcript>x</\u017fcript> b')
+
     def test_the_newest_desktop_runtime(self):
         wanted = {'name': 'windowsdesktop-runtime-win-x64.exe', 'url': 'https://example.org/new.exe', 'hash': 'EF' * 64}
         releases = {'releases': [
