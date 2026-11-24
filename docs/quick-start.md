@@ -4,7 +4,14 @@ From a Mac without CrossOver to the game, without the details. Those are in
 [crossover.md](crossover.md) and [building.md](building.md).
 
 1. **Install [CrossOver](https://www.codeweavers.com/crossover)** and open it once.
-2. **Install [Homebrew](https://brew.sh)** with the command on its page.
+2. **Install [Homebrew](https://brew.sh)** with the command on its page, in an administrator
+   account. If you will play under a standard account, also run this there now, because a
+   standard account cannot install with Homebrew:
+
+   ```sh
+   brew install mingw-w64 meson ninja glslang
+   ```
+
 3. **Paste this into Terminal:**
 
    ```sh

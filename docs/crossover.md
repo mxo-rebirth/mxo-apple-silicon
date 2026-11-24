@@ -65,7 +65,7 @@ own DirectMusic files fix it. They come from two old Microsoft packages:
 | DirectX End-User Runtimes, February 2010 (`directx_feb2010_redist.exe`), inside it `dxnt.cab` | `dmband.dll`, `dmcompos.dll`, `dmime.dll`, `dmloader.dll`, `dmscript.dll`, `dmstyle.dll`, `dmsynth.dll`, `dmusic.dll`, `dswave.dll`, `dsound.dll` |
 | DirectX 9.0c redistributable, April 2006 (`directx_apr2006_redist.exe`), inside it `DirectX.cab` | `gm16.dls`, renamed to `gm.dls` |
 
-Both packages are archives of `.cab` files. `cabextract` (`brew install cabextract`) unpacks
+Both packages are archives of `.cab` files. `cabextract` (`brew install cabextract`, from an administrator account) unpacks
 them:
 
 ```sh

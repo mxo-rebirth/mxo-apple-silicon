@@ -24,7 +24,7 @@
 #   bottle     what the game needs to start: Microsoft's shader compiler, DirectMusic and DirectSound,
 #              the music sound bank and a larger memory limit
 #   build      build d3d9.dll from this bottle's client.dll. Asks before it installs missing
-#              build tools (docs/building.md)
+#              build tools, which only an administrator account can (docs/building.md)
 #   install    install that d3d9.dll for the game executables, with the bottle settings it needs
 #   detail     every graphics option at its maximum, the main display's resolution and 16x
 #              anisotropic filtering
@@ -319,6 +319,28 @@ lower() { printf '%s' "$1" | LC_ALL=C tr '[:upper:]' '[:lower:]'; }   # plain le
 
 job_output() {   # where a failed job's output is: in the log behind a spinner, above when piped
   if [ $FANCY = 1 ]; then echo "Its output is in $LOG"; else echo "Its output is above"; fi
+}
+
+named() {   # named STEP: it was named on the command line
+  local step
+  for step in "${STEPS[@]+"${STEPS[@]}"}"; do
+    if [ "$step" = "$1" ]; then return 0; fi
+  done
+  return 1
+}
+
+# python3 does the file edits and reads the download pages. Without Apple's command line developer
+# tools, the python3 of macOS is a stand-in that only offers to install them.
+python3_there() {
+  local python
+  python=$(command -v python3) || return 1
+  [ "$python" != /usr/bin/python3 ] || xcode-select -p >/dev/null 2>&1
+}
+
+can_brew_install() {   # Homebrew's folders take changes from administrator accounts only
+  local prefix
+  prefix=$(brew --prefix 2>/dev/null) || return 1
+  if [ -e "$prefix/Cellar" ]; then [ -w "$prefix/Cellar" ]; else [ -w "$prefix" ]; fi
 }
 
 find_brew() {   # Homebrew is not on every account's PATH
@@ -636,30 +658,29 @@ ok "macOS $MACOS"
 [ -x "$WINE" ] || die "CrossOver not found in /Applications. Install it first: https://www.codeweavers.com/crossover"
 ok "CrossOver $(defaults read "${CX%/SharedSupport/*}/Info" CFBundleShortVersionString 2>/dev/null || true)"
 
-named() {   # named STEP: it was named on the command line
-  local step
-  for step in "${STEPS[@]+"${STEPS[@]}"}"; do
-    if [ "$step" = "$1" ]; then return 0; fi
-  done
-  return 1
-}
-
-# What the setup itself runs on, checked before anything is downloaded or changed.
+# Homebrew and the tools the speed-up is built with: checked here, before anything is downloaded or
+# changed. A run that builds nothing can do without them: with a built DLL, given or there already.
 find_brew || true
-# python3 does the file edits and reads the download pages. Without Apple's command line developer
-# tools, the python3 of macOS is a stand-in that only offers to install them.
-python3_there() {
-  local python
-  python=$(command -v python3) || return 1
-  [ "$python" != /usr/bin/python3 ] || xcode-select -p >/dev/null 2>&1
-}
 python3_there || die "Apple's command line developer tools are missing, and the setup needs them. Install Homebrew first, which brings them along (https://brew.sh), then run this again"
-# The speed-up is built with tools from Homebrew, unless a built DLL is given or there already.
-if [ -z "$DLL" ] && { [ ${#STEPS[@]} = 0 ] || named build; } && [ ! -f "$ROOT/build/d3d9.dll" ] \
-  && [ -n "$(missing_build_tools)" ] && ! command -v brew >/dev/null; then
+BUILD_AHEAD=0
+if [ -z "$DLL" ] && { [ ${#STEPS[@]} = 0 ] || named build; } && [ ! -f "$ROOT/build/d3d9.dll" ]; then BUILD_AHEAD=1; fi
+TOOLS_MISSING=$(missing_build_tools)
+if command -v brew >/dev/null; then
+  ok "Homebrew"
+elif [ $BUILD_AHEAD = 1 ] && [ -n "$TOOLS_MISSING" ]; then
   die "Homebrew is missing, and the tools that build the speed-up come from it. Install it first (https://brew.sh), then run this again"
+else
+  note "Homebrew: not found. This run does not need it"
 fi
-if command -v brew >/dev/null; then ok "Homebrew"; else ok "developer tools"; fi
+if [ -z "$TOOLS_MISSING" ]; then
+  ok "build tools (${BREW_PACKAGES[*]})"
+elif [ $BUILD_AHEAD = 0 ]; then
+  note "build tools: not all there. This run does not need them"
+elif can_brew_install; then
+  note "build tools: not installed yet (${BREW_PACKAGES[*]}). The setup asks before it installs them"
+else
+  die "the build tools are missing, and this account cannot install them: Homebrew installs from an administrator account only. Run this in one, then run the setup here again: $(brew_command)"
+fi
 
 # The CrossOver app shows a bottle's new icons only after it starts again. Its window, in this account
 # only: the programs in the bottles run on without it.
@@ -717,7 +738,11 @@ if [ ${#STEPS[@]} = 0 ] || named game; then
   note "Our advice: install and play under a separate, standard (non-admin) user account on your computer, with your main account behind its own password."
   info "A game client then cannot reach your everyday files and logins."
   case " $(id -Gn 2>/dev/null || true) " in
-    *" admin "*) info "This account is an administrator account." ;;
+    *" admin "*)
+      info "This account is an administrator account."
+      if [ -n "$TOOLS_MISSING" ]; then
+        info "A standard account cannot install the build tools. Install them from this account first: $(brew_command)"
+      fi ;;
     *) ok "This account is a standard account." ;;
   esac
 fi
@@ -1327,7 +1352,7 @@ choose_tools() {   # installing the build tools is a question like the others
   TOOLS=ready
   [ -n "$(missing_build_tools)" ] || return 0
   TOOLS=missing
-  if command -v brew >/dev/null && ask "Install the build tools with Homebrew (${BREW_PACKAGES[*]})?"; then TOOLS=install; fi
+  if can_brew_install && ask "Install the build tools with Homebrew (${BREW_PACKAGES[*]})?"; then TOOLS=install; fi
 }
 
 step_build() {
@@ -1337,10 +1362,10 @@ step_build() {
   choose_tools
   if [ $TOOLS = install ]; then
     spin "Installing the build tools with Homebrew" brew install "${BREW_PACKAGES[@]}" \
-      || die "Homebrew could not install them. In an account that does not own Homebrew, run this in the one that does: $(brew_command)"
+      || die "Homebrew could not install them. Run this in an administrator account, then run the setup again: $(brew_command)"
   fi
   if [ -n "$(missing_build_tools)" ]; then
-    die "the build tools are missing:$(missing_build_tools). They come from Homebrew (https://brew.sh): $(brew_command)"
+    die "the build tools are missing:$(missing_build_tools). They come from Homebrew (https://brew.sh). Run this in an administrator account: $(brew_command)"
   fi
   client=$(build_client)
   spin "Building the speed-up from your copy of the game (5 to 10 minutes)" "$ROOT/scripts/build.sh" "$client" \

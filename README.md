@@ -26,6 +26,11 @@ MxO Revived at 63 fps, in a window on a 3440×1440 screen.
 - [CrossOver](https://www.codeweavers.com/crossover)
 - [Homebrew](https://brew.sh). Its installer also brings Apple's command line developer tools,
   which the setup needs
+- Homebrew's build tools. In an administrator account the setup installs them for you. A
+  standard account cannot install them: run this in an administrator account first:
+  `brew install mingw-w64 meson ninja glslang`
+
+The setup checks all of this before it changes anything, and says what is missing.
 
 Tested on one Mac (M4) with macOS 27 and CrossOver 26.3. The setup can download the game itself.
 
@@ -102,8 +107,8 @@ The game goes back to CrossOver's normal graphics. What stays is listed in
 
 - **Use it at your own risk.** See the [licence](LICENSE).
 - **Our advice, not a requirement: play under a separate macOS account.** Programs in CrossOver
-  can reach every file of the account they run in. If you do, install the build tools from the
-  account that has Homebrew first: `brew install mingw-w64 meson ninja glslang`
+  can reach every file of the account they run in. In a standard account, the build tools have
+  to be there first (see "What you need").
 - **Built on your Mac, from your game.** No game file is in this repository. Do not share the
   built `d3d9.dll`.
 - **It replaces some of the game's math code in memory** with faster code that gives the same

@@ -11,9 +11,12 @@ see [crossover.md](crossover.md) first.
 
 ## The setup
 
-`scripts/setup.sh` checks the Mac (Apple Silicon, macOS, CrossOver, Apple's command line
-developer tools and Homebrew) and offers to quit CrossOver if it is open (it shows new icons
-only after it starts again). In a bottle without a game the game step comes first. Then the
+`scripts/setup.sh` first checks the Mac: Apple Silicon, the macOS version, CrossOver, Homebrew
+and the build tools (`mingw-w64 meson ninja glslang`). It stops there when something is missing
+and says what to install. Homebrew installs from an administrator account only. In such an
+account the setup offers to install the build tools. In a standard account it names the command
+to run in an administrator account first. It then offers to quit CrossOver if it is open (it
+shows new icons only after it starts again). In a bottle without a game the game step comes first. Then the
 setup asks its questions and runs the other steps in this order.
 [quick-start.md](quick-start.md) is the short way through it. The setup stops if a game is
 running.
@@ -28,7 +31,7 @@ running.
    game (4 GB instead of 2). The two DirectX packages come from Microsoft via the Internet Archive and are checked
    against the checksums `winetricks` uses.
 3. **build**: `scripts/build.sh` with the bottle's `client.dll`, after `brew install` of the
-   missing build tools if you agreed.
+   missing build tools if you agreed (administrator accounts only).
 4. **install**: the DLL for every game executable found (`matrix.exe`, `mxorev.exe`), with the
    bottle settings it needs. Unless you answer `n`, also `DXVK_MXO_RESPECT_ADDONS=0`
    ([Switches](#switches)): faster, but an add-on such as Revived's interface scaling may stop
@@ -94,6 +97,9 @@ The setup does this for you. By hand:
 brew install mingw-w64 meson ninja glslang
 scripts/build.sh "/path/to/your/client.dll"
 ```
+
+`brew install` works in an administrator account only. The build itself runs in any account
+once the tools are there.
 
 `client.dll` is the one in your game folder. After five to ten minutes the result is
 `build/d3d9.dll`. The script
