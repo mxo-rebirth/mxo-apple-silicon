@@ -7,11 +7,14 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# the official bash 3.2 image, by its contents: a moved tag cannot change what runs here
+OLD_BASH_IMAGE=bash:3.2@sha256:2556c2da19c32c1614d318645c73a7bf64d38be21cf69e98e3ca51f053983719
+
 old_bash() {   # bash 3.2: the one in /bin on a Mac, the same version in a container elsewhere
   if [ "$(/bin/bash -c 'echo "${BASH_VERSINFO[0]}"')" = 3 ]; then
     /bin/bash "$@"
   else
-    docker run --rm -v "$PWD:/repo" -w /repo bash:3.2 bash "$@"
+    docker run --rm -v "$PWD:/repo:ro" -w /repo "$OLD_BASH_IMAGE" bash "$@"
   fi
 }
 
