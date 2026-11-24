@@ -908,9 +908,9 @@ download() {   # download URL CHECKSUM FILE FROM: into the cache, unless it is t
   local out="$CACHE/$3"
   if [ -f "$out" ] && [ "$(checksum "$out" "$2")" = "$2" ]; then return 0; fi
   fetch_file "$1" "$out.part" "Downloading $3 from $4" || die "$3: download failed"
-  [ "$(checksum "$out.part" "$2")" = "$2" ] || { rm -f "${out:?}.part"; die "$3: checksum does not match"; }
+  [ "$(checksum "$out.part" "$2")" = "$2" ] || { rm -f "${out:?}.part"; die "$3: the download is not the file its publisher published (the checksum does not match)"; }
   mv "$out.part" "$out" || die "could not keep $3 in the cache"
-  ok "$3: checksum matches the published one"
+  ok "$3: checked, it is the file its publisher published"
 }
 
 page_link() {   # page_link PAGE NAME-PATTERN: "URL SHA256" of the installer on a project's download page
@@ -1021,7 +1021,7 @@ download_client() {   # download_client LINK: into the cache, resuming an earlie
 # One rename then puts the game in drive C whole or not at all. Sets STAGED_CLIENT to client.dll's folder.
 no_links() {   # a game has no symbolic links: one could make a later write land outside the bottle
   if [ -n "$(find "$1" -type l -print -quit 2>/dev/null)" ]; then
-    die "the game files hold a symbolic link, which a game does not need. They were not used"
+    die "the game files contain a link to somewhere else on the Mac, which a game never has. They were not used, to be safe"
   fi
 }
 
@@ -1191,12 +1191,12 @@ put_shader_compiler() {   # the game ships Microsoft's, and Wine's cannot handle
     if [ -f "$d/D3DCompiler_43.dll" ]; then src="$d/D3DCompiler_43.dll"; break; fi
   done
   if [ -z "$src" ]; then
-    note "shader compiler: no game folder with D3DCompiler_43.dll yet, skipped"
+    note "shader compiler: no game yet to take it from, skipped"
   elif cmp -s "$src" "$SYS/d3dcompiler_43.dll"; then
     ok "shader compiler: already in place"
   else
     put_file "$src" "$SYS/d3dcompiler_43.dll"
-    ok "shader compiler: copied the game's d3dcompiler_43.dll"
+    ok "shader compiler: Microsoft's, taken from the game folder"
   fi
 }
 
@@ -1209,7 +1209,7 @@ dm_dlls_in_place() {   # all of them Microsoft's: a run cut short can leave some
 
 put_directmusic() {   # Wine's DirectMusic hangs on this game, and Microsoft's needs Microsoft's DirectSound
   local name
-  if dm_dlls_in_place; then ok "DirectMusic and DirectSound: Microsoft's DLLs already in place"; return 0; fi
+  if dm_dlls_in_place; then ok "music and sound: Microsoft's DirectMusic and DirectSound already in place"; return 0; fi
   download "$DX2010_URL" "$DX2010_SHA" directx_feb2010_redist.exe "Microsoft, via the Internet Archive"
   temp_dir
   tar -xf "$CACHE/directx_feb2010_redist.exe" -C "$TMP" dxnt.cab || die "could not unpack directx_feb2010_redist.exe"
@@ -1217,7 +1217,7 @@ put_directmusic() {   # Wine's DirectMusic hangs on this game, and Microsoft's n
     tar -xf "$TMP/dxnt.cab" -C "$TMP" "$name.dll" || die "no $name.dll in Microsoft's DirectX package"
   done
   for name in "${DM_DLLS[@]}"; do put_file "$TMP/$name.dll" "$SYS/$name.dll"; done
-  ok "DirectMusic and DirectSound: Microsoft's DLLs installed"
+  ok "music and sound: Microsoft's DirectMusic and DirectSound installed"
 }
 
 put_sound_bank() {   # the instruments DirectMusic plays with
@@ -1229,7 +1229,7 @@ put_sound_bank() {   # the instruments DirectMusic plays with
   mkdir -p "$SYS/drivers" "$DRIVE/windows/system32/drivers" || die "could not make the drivers folders"
   put_file "$TMP/gm16.dls" "$DRIVE/windows/system32/drivers/gm.dls"
   put_file "$TMP/gm16.dls" "$SYS/drivers/gm.dls"   # last: the check above looks at this one
-  ok "music sound bank: gm.dls installed"
+  ok "music sound bank installed"
 }
 
 step_bottle() {
@@ -1239,10 +1239,10 @@ step_bottle() {
   put_shader_compiler
   put_directmusic
   put_sound_bank
-  spin "Telling Wine to use them for ${EXES[*]} (registry)" write_start_overrides \
+  spin "Telling CrossOver to use them for the game (${EXES[*]})" write_start_overrides \
     || die "a registry write failed. $(job_output)"
   set_env "$LARGE_ADDRESS_ENV"
-  ok "large address space for 32-bit programs (the game crashed after a minute without it)"
+  ok "more memory for the game (without it, it crashed after about a minute)"
 }
 
 # The client.dll to build from. One DLL serves every install: each routine is checked against the client
@@ -1291,7 +1291,7 @@ step_build() {
     die "the build tools are missing:$(missing_build_tools). They come from Homebrew (https://brew.sh): $(brew_command)"
   fi
   client=$(build_client)
-  spin "Building d3d9.dll from $(win_path "$client") (5 to 10 minutes)" "$ROOT/scripts/build.sh" "$client" \
+  spin "Building the speed-up from your copy of the game (5 to 10 minutes)" "$ROOT/scripts/build.sh" "$client" \
     || die "the build failed. $(job_output)"
 }
 
@@ -1314,7 +1314,7 @@ choose_addons() {   # add-on files next to the game (mx*.dll) hook some routines
   [ -z "$ADDONS" ] || return 0
   local default=yes
   if [ $SPEEDUP_BEFORE = 1 ] && [ "$(bottle_env DXVK_MXO_RESPECT_ADDONS)" != 0 ]; then default=no; fi   # as the bottle has it
-  if ask "Speed up the routines that game add-ons hook, too? An add-on such as Revived's interface scaling can then stop working." "$default"; then
+  if ask "Also speed up the game code that add-ons use? It gave about 10 fps on the test machine, but an add-on such as Revived's interface scaling may stop working." "$default"; then
     ADDONS=replace
   else
     ADDONS=keep
@@ -1336,9 +1336,9 @@ merge_caches() {   # each executable starts with the pipelines the others built
   done
   [ ${#caches[@]} -ge 2 ] || return 0
   if said=$(python3 -I "$ROOT/scripts/merge-pipeline-caches.py" "${caches[@]}" 2>&1); then
-    info "pipeline caches ${said##*"$newline"}"
+    info "shader caches of the games combined, so each starts with what the others built (${said##*"$newline"})"
   else
-    note "pipeline caches not merged: ${said##*"$newline"}"
+    note "shader caches not combined: ${said##*"$newline"}"
   fi
 }
 
@@ -1350,7 +1350,7 @@ step_install() {
   choose_fps
   choose_addons
   put_file "$DLL" "$SYS/d3d9.dll"
-  spin "Switching ${EXES[*]} to the new Direct3D 9 (registry)" write_d3d9_overrides \
+  spin "Switching the game to the speed-up (${EXES[*]})" write_d3d9_overrides \
     || die "a registry write failed. $(job_output)"
   mkdir -p "$DXVK_DIR" || die "could not make $DXVK_DIR"
   set_env "${SPEEDUP_ENV[@]}" "$LARGE_ADDRESS_ENV"
@@ -1362,7 +1362,7 @@ step_install() {
   fi
   if [ "$ADDONS" = replace ]; then   # without it the DLL leaves alone every routine an add-on file points into
     set_env DXVK_MXO_RESPECT_ADDONS=0
-    ok "routines that game add-ons hook are replaced too"
+    ok "the game code that add-ons use is sped up too"
   else
     unset_env DXVK_MXO_RESPECT_ADDONS
   fi
@@ -1484,7 +1484,7 @@ ScreenHeight = $SCREEN_H"
   # sharp ground and walls at shallow angles. DXVK reads this file when the game starts
   set_options "$DXVK_DIR/dxvk.conf" "d3d9.samplerAnisotropy = 16"
   set_env "DXVK_CONFIG_FILE=C:/$DXVK_FOLDER/dxvk.conf"
-  ok "16x anisotropic filtering"
+  ok "sharper textures at a distance (16x anisotropic filtering)"
   info "The window mode stays as the launchers set it."
 }
 
@@ -1618,7 +1618,7 @@ refresh_icons() {   # only when a launcher has or should have an icon. The bottl
 
 step_uninstall() {
   say "Uninstall"
-  info "The game executables go back to Wine's Direct3D 9."
+  info "The game goes back to CrossOver's normal graphics."
   need_game_closed
   local exe
   for exe in "${EXES[@]}"; do
@@ -1626,8 +1626,8 @@ step_uninstall() {
   done
   if [ -f "$SYS/d3d9.dll.setup-backup" ]; then copy_whole "$SYS/d3d9.dll.setup-backup" "$SYS/d3d9.dll"; fi
   unset_env "${SPEEDUP_ENV[@]%%=*}" "${SPEEDUP_ENV_BY_CHOICE[@]}"
-  ok "done: Wine's Direct3D 9 is back, and the speed-up's settings are out of the bottle"
-  info "What the game needs to start stays: Microsoft's DirectMusic and DirectSound, the game's shader compiler and the large address space."
+  ok "done: the game uses CrossOver's normal graphics again, and the speed-up's settings are gone from the bottle"
+  info "What the game needs to start stays: Microsoft's DirectMusic and DirectSound, the shader compiler and the larger memory limit."
   info "The game's own settings (detail, logo movies, music) stay as they are. What they were before is next to each file, with a .setup-backup suffix."
 }
 
@@ -1678,7 +1678,7 @@ if [ ${#STEPS[@]} = 0 ]; then
       step_build
     else
       say "Speed-up: build"
-      ok "already built from these sources and this game. To build it again: scripts/setup.sh build"
+      ok "already built for this game and this version. To build it again: scripts/setup.sh build"
     fi
   fi
   step_install
