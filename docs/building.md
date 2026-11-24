@@ -38,7 +38,8 @@ setup stops if a game is running.
 4. **install**: the DLL for every game executable found (`matrix.exe`, `mxorev.exe`), with the
    bottle settings it needs. Unless you answer `n`, also `DXVK_MXO_RESPECT_ADDONS=0`
    ([Switches](#switches)): faster, but an add-on such as Revived's interface scaling may stop
-   working.
+   working. The frame-rate limit is `DXVK_FRAME_RATE`: 90, or the number after `--fps`. An `n`
+   to the limit writes `0`, no limit, and the next run starts from that answer.
 5. **detail**, on request: graphics settings and the main display's size in each game's
    `options.cfg`, and 16× anisotropic filtering in `C:\Games\dxvk\dxvk.conf`. There are two
    sets, and the question names the one for the Mac it runs on. Return takes that one in a game
@@ -186,7 +187,7 @@ called `MatrixOnline`. Close the game and its launcher first.
 
    | Line | What it does |
    |---|---|
-   | `"DXVK_FRAME_RATE" = "90"` | limits the frame rate. Without a limit the game reaches up to 200 fps in light scenes, which only makes heat and fan noise |
+   | `"DXVK_FRAME_RATE" = "90"` | limits the frame rate, `0` for no limit. Without a limit the game reaches up to 200 fps in light scenes, which only makes heat and fan noise |
    | `"DXVK_HUD" = "fps,frametimes,gpuload"` | the frame-rate overlay, hidden until Ctrl+Shift+F |
    | `"DXVK_MXO_RESPECT_ADDONS" = "0"` | also replaces the routines that add-on files next to the game point into. About 10 fps less without it in a bottle with Revived's add-on files ([measurements.md](measurements.md#settings-that-change-the-numbers)) |
    | `"WINEMSYNC" = "1"` | set on the test machine |

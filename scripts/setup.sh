@@ -998,6 +998,11 @@ if [ ${#STEPS[@]} -gt 0 ] && ! named game && [ ${#INSTALLS[@]} = 0 ] \
   die "no game in the bottle $BOTTLE (no folder with client.dll), so nothing was changed. Name the game's bottle with --bottle NAME, or get the game first: scripts/setup.sh game"
 fi
 
+# The folder of DXVK's log, shader cache and settings. mkdir cannot make it through a link whose folder is gone.
+if [ -L "$DXVK_DIR" ] && [ ! -e "$DXVK_DIR" ] && { [ ${#STEPS[@]} = 0 ] || named install || named detail; }; then
+  die "$DXVK_DIR is a link to a folder that is gone ($(readlink "$DXVK_DIR")), so nothing was changed. Make that folder again or delete the link, then run this again."
+fi
+
 # only where icons can change: a run of every step, the game step and the icons step
 if [ ${#STEPS[@]} = 0 ] || named game || named icons; then quit_crossover; fi
 
@@ -1396,15 +1401,15 @@ step_build() {
 FPS_LIMIT=""   # yes or no, once asked
 choose_fps() {   # unlimited, the game draws up to 200 fps in light scenes: only heat and fan noise
   [ -z "$FPS_LIMIT" ] || return 0
-  local default=yes current
-  if [ $SPEEDUP_BEFORE = 1 ] && [ $FPS_GIVEN = 0 ]; then   # the bottle's own limit, or that it has none
+  local default=yes current now=""
+  if [ $SPEEDUP_BEFORE = 1 ] && [ $FPS_GIVEN = 0 ]; then   # the bottle's own limit, or the 0 of a "no" given before
     current=$(bottle_env DXVK_FRAME_RATE)
     case "$current" in
-      ''|*[!0-9]*) default=no ;;
-      *) if [ $((10#$current)) -gt 0 ]; then FPS=$((10#$current)); else default=no; fi ;;
+      ''|*[!0-9]*) ;;   # never answered in this bottle: offered as in a new one
+      *) if [ $((10#$current)) -gt 0 ]; then FPS=$((10#$current)); else default=no; now=" It runs without a limit now."; fi ;;
     esac
   fi
-  if [ "$FPS" -gt 0 ] && ask "Limit the frame rate to $FPS fps (quieter fans)?" "$default"; then FPS_LIMIT=yes; else FPS_LIMIT=no; fi
+  if [ "$FPS" -gt 0 ] && ask "Limit the frame rate to $FPS fps (quieter fans)?$now" "$default"; then FPS_LIMIT=yes; else FPS_LIMIT=no; fi
 }
 
 ADDONS=""   # replace or keep, once asked
@@ -1457,7 +1462,7 @@ step_install() {
     set_env "DXVK_FRAME_RATE=$FPS"
     ok "frame rate limited to $FPS fps"
   else
-    unset_env DXVK_FRAME_RATE
+    set_env DXVK_FRAME_RATE=0   # no limit for DXVK, and the "no" the next run starts from
   fi
   if [ "$ADDONS" = replace ]; then   # without it the DLL leaves alone every routine an add-on file points into
     set_env DXVK_MXO_RESPECT_ADDONS=0
