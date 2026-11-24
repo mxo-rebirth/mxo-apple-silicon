@@ -663,32 +663,49 @@ if command -v brew >/dev/null; then ok "Homebrew"; else ok "developer tools"; fi
 
 # The CrossOver app shows a bottle's new icons only after it starts again. Its window, in this account
 # only: the programs in the bottles run on without it.
-crossover_open() {
-  local programs
-  programs=$(ps -xo comm=) || return 1
-  case $'\n'"$programs"$'\n' in *$'\n'"${CX%/SharedSupport/*}/MacOS/CrossOver"$'\n'*) return 0 ;; esac
-  return 1
+crossover_pid() {   # the app's process number, or nothing. "ww": ps cuts its lines to the terminal's width otherwise
+  local pid program
+  while read -r pid program; do
+    if [ "$program" = "${CX%/SharedSupport/*}/MacOS/CrossOver" ]; then printf '%s' "$pid"; return 0; fi
+  done < <(ps -xwwo pid=,comm=)
+}
+
+crossover_open() { [ -n "$(crossover_pid)" ]; }
+
+crossover_gone() {   # crossover_gone SECONDS: waits that long for the app to close
+  local tick
+  for ((tick = 0; tick < $1 * 2; tick++)); do
+    crossover_open || return 0
+    sleep 0.5
+  done
+  ! crossover_open
+}
+
+# The ordinary way to quit an app. The first time, macOS asks whether the terminal may control
+# CrossOver, and the request waits for that answer.
+ask_crossover_to_quit() {
+  osascript -e 'with timeout of 30 seconds' -e 'tell application id "com.codeweavers.CrossOver" to quit' \
+    -e 'end timeout' >/dev/null 2>&1 || true
 }
 
 CROSSOVER_CLOSED=0
 quit_crossover() {   # asks first. With --yes it stays open: an app is not closed unasked
+  local pid
   crossover_open || return 0
   if [ $YES = 1 ] || ! ask "CrossOver is open. Quit it now? It shows new icons only after it starts again."; then
     note "CrossOver stays open. Quit and open it again when the setup is done, to see new icons"
     return 0
   fi
-  # a dialog of CrossOver's own would keep the request waiting, so it is given five seconds
-  osascript -e 'with timeout of 5 seconds' -e 'tell application id "com.codeweavers.CrossOver" to quit' \
-    -e 'end timeout' >/dev/null 2>&1 || true
-  for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
-    crossover_open || break
-    sleep 0.5
-  done
-  if crossover_open; then
-    note "CrossOver is still open. Quit it with Cmd+Q and open it again when the setup is done"
-  else
+  spin "Quitting CrossOver. If macOS asks whether the terminal may control it, allow that" ask_crossover_to_quit || true
+  if ! crossover_gone 5; then   # a window of its own or a refused request kept it open: ended directly then
+    pid=$(crossover_pid)
+    if [ -n "$pid" ]; then kill "$pid" 2>/dev/null || true; fi
+  fi
+  if crossover_gone 5; then
     ok "CrossOver closed"
     CROSSOVER_CLOSED=1
+  else
+    note "CrossOver is still open. Quit it with Cmd+Q and open it again when the setup is done"
   fi
 }
 # only where icons can change: a run of every step, the game step and the icons step
@@ -832,7 +849,7 @@ reg_del() { "$WINE" --bottle "$BOTTLE" -- reg delete "$1" /v "$2" /f >/dev/null 
 # on a pipe can end it early, which pipefail takes for a failure.
 running() {
   local programs name
-  programs=$(ps -axo comm= | LC_ALL=C tr '[:upper:]' '[:lower:]') || die "could not list the running programs"
+  programs=$(ps -axwwo comm= | LC_ALL=C tr '[:upper:]' '[:lower:]') || die "could not list the running programs"
   programs=$'\n'"$programs"$'\n'
   for name in "$@"; do
     name=$(lower "$name")
