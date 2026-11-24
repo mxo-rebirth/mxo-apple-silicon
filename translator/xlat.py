@@ -97,6 +97,8 @@ FLAG_DEF = {'add', 'sub', 'cmp', 'test', 'and', 'or', 'xor', 'neg', 'sahf', 'pop
 FLAG_NEUTRAL = {'mov', 'lea', 'push', 'pop', 'movzx', 'movsx', 'xchg', 'nop', 'not', 'cdq', 'cwde', 'cbw',
                 'bswap', 'fwait'}
 # Jumps, calls and returns behind a prefix (branch hint, "rep ret", 16-bit form): classify() goes by the first byte and misses them.
+# what can stand before an opcode: segment, operand size, address size, lock and repeat prefixes
+PREFIX_BYTES = (0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65, 0x66, 0x67, 0xf0, 0xf2, 0xf3)
 PREFIXED_TRANSFER = re.compile(r'(?:^|\s)(?:j[a-z,]+|l?call[a-z]*|[li]?ret[a-z]*|ljmp[a-z]*|loop[a-z]*)(?:\s|$)')
 
 
@@ -149,7 +151,7 @@ def classify(i, base):
     # copied as bytes, its displacement would point elsewhere and a return would not end the routine
     if i.kind == 'raw' and PREFIXED_TRANSFER.search(i.text):
         raise Fail('jump, call or return with a prefix at %x: %s' % (i.rva, i.text))
-    if re.search(r'\b(xmm|mm)\d', i.text):
+    if re.search(r'\b(xmm|mm)\d', i.text) or i.mnem in ('emms', 'femms', 'ldmxcsr', 'stmxcsr'):
         raise Fail('function already uses SSE/MMX at %x' % i.rva)
 
 
@@ -464,7 +466,8 @@ class Translator:
                         i.x87 = x87_decode(i)
                         i.kind = 'x87'
                     else:
-                        if i.mnem.startswith('f') and i.mnem != 'fwait':
+                        opcode = next((byte for byte in i.raw if byte not in PREFIX_BYTES), 0)
+                        if (i.mnem.startswith('f') and i.mnem != 'fwait') or 0xd8 <= opcode <= 0xdf:
                             raise Fail('prefixed x87 instruction at %x: %s' % (i.rva, i.text))
                         classify(i, img.base)
                         if i.kind == 'call' and i.target in self.ftol:
@@ -821,6 +824,8 @@ class Translator:
                     out.extend(['lea esp, [esp-8]', 'movsd QWORD PTR [esp], %s' % x, 'fld QWORD PTR [esp]', name,
                               'fstp QWORD PTR [esp]', 'movsd %s, QWORD PTR [esp]' % x, 'lea esp, [esp+8]'])
                     nfall += 1
+                    if name != 'frndint':   # they set a status bit of their own: a read after them is not the compare's
+                        pending = None
                 elif name in ('fpatan', 'fyl2x'):
                     to_d(top - 1)
                     to_d(top)
@@ -837,6 +842,7 @@ class Translator:
                               'movsd %s, QWORD PTR [esp+8]' % x, 'lea esp, [esp+16]'])
                     held[d] = 'd'
                     nfall += 1
+                    pending = None   # as after fsin and fcos
                 elif name == 'ftst':
                     compare(x, ['xorpd %s, %s' % (T2, T2)], held[top] == 'f', ['xorps %s, %s' % (T2, T2)])
                 elif name == 'compp':
@@ -1124,8 +1130,9 @@ class Translator:
 
     def emit_ftol(self, f):
         """Replaces the compiler's float-to-integer helper itself (st0 -> edx:eax, truncated, st0 popped): two
-        FPU instructions instead of nine in the 32-bit range, the original otherwise. Assumes no FPU precision,
-        so it serves every thread."""
+        FPU instructions instead of nine in the 32-bit range, the original otherwise. It needs no FPU
+        setting, so it serves every thread. It reads st0 as a double: a value that takes more than 53 bits
+        and lies just below a whole number converts to that number (docs/translator.md, Rounding)."""
         img, p, out = self.img, self.prefix, self.out
         ins, end = helper_code(img, f)
         relocs = img.relocs_in(f, end)
