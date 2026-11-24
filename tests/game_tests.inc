@@ -30,6 +30,14 @@ static const uint32_t KeyTable = 0x2fe4d0;         // a value from a table of ke
 static const uint32_t KeyTableStep = 0x2fe560;     // two values per key, blended by a weight, from the last key reached
 static const uint32_t KeyTableBlend = 0x2fe670;    // two values per key, between two keys and blended
 static const uint32_t MaxKeys = 24;                // the longest table the shaping makes
+static const uint32_t LightKind = 0x8c19ec;        // the table of functions of the kind of light the filter knows
+static const uint32_t LightKindSlots = 20;         // how much of that table a made-up kind copies
+static const uint32_t ShapedLights = 32;           // light objects the shaping makes. A list can name them more than once
+static const size_t   ShapedLightSize = 96, ShapedPartSize = 128;   // room for each of them and for its part
+static const size_t   LightsBlock = 4, PartsBlock = 7;   // the arena blocks they start in
+static const size_t   LightEntrySize = 0x54;       // what the loop writes for a light it takes
+static const uint32_t LightEntries = 8;            // the loop stops at this many
+static const uint32_t QuietNan = 0x7fc00000;       // the bits of a float that is not a number
 
 static jmp_buf g_crashJmp;
 static volatile int g_guard = 0;
@@ -77,6 +85,7 @@ static uint8_t*  g_dataInit;    // what the image's data is reset to before ever
 static uint8_t*  g_dataPristine;   // the image's data as loaded, from which g_dataInit starts for every routine
 static uint8_t*  g_dataA;
 static uint8_t*  g_base;
+static uint32_t  g_imageSize;
 
 struct Result { bool crashed; uint32_t eax; double st0; uint32_t tags; };
 static int g_plain = 0;   // 1: only ordinary float values in the arena (no integers, pointers, huge or tiny numbers)
@@ -166,7 +175,143 @@ static void shapeKeyTable(const GameFn& g, uint32_t* args) {
   g_betweenKeys = count >= 2 && asked >= first && asked < last;
 }
 
+// The light loop (MxoLightLoopRva): arg0 = object {+24 low corner, +30 high corner of its box},
+// arg1 = {begin, end} of a list of pointers to lights, arg2 = the entries it writes, arg3 = the index of
+// the first one. A light = {+0 its kind's table of functions, +24 a part or null, +28 position}. The part
+// holds what the kind's functions return: +1c four floats, +3c a colour, +40, +44, +48 the reach.
+// One light in eight is of a made-up kind that keeps its reach in itself, which the filter passes on unseen.
+static void shapeLights(uint32_t* args) {
+  const uint32_t arena = uint32_t(uintptr_t(g_arena));
+  const size_t object = BlockSize * 1, list = BlockSize * 2, pointers = BlockSize * 3, lights = BlockSize * LightsBlock;
+  const size_t otherKind = BlockSize * 6, parts = BlockSize * PartsBlock, entries = BlockSize * 11;
+  const size_t lightSize = ShapedLightSize, partSize = ShapedPartSize;
+
+  float low[3], middle[3], extent[3];
+  for (int axis = 0; axis < 3; axis++) {
+    low[axis] = float(rndRange(-100, 100));
+    float size = float(rndRange(0.5, 60));
+    if (rnd32() % 40 == 0) size = rnd32() % 2 ? 0.0f : -size;   // an empty box, or one turned inside out
+    putf(object + MxoBoxMinOffset + 4 * axis, low[axis]);
+    putf(object + MxoBoxMaxOffset + 4 * axis, low[axis] + size);
+    extent[axis] = ((low[axis] + size) - low[axis]) * MxoBoxScale;
+    middle[axis] = extent[axis] + low[axis];
+  }
+
+  memcpy((uint8_t*)g_init + otherKind, g_base + LightKind, 4 * LightKindSlots);
+  // the made-up kind has the function for a part's reach in the light's own slot, so its reach is read from the light
+  g_init[(otherKind + MxoLightReachSlot) / 4] = uint32_t(uintptr_t(g_base)) + MxoPartReachRva;
+
+  for (uint32_t k = 0; k < ShapedLights; k++) {
+    const size_t light = lights + lightSize * k, part = parts + partSize * k;
+    const bool known = rnd32() % 8 != 0;
+    float reach = float(rndRange(0, 150));
+    const uint32_t odd = rnd32() % 40;
+    if (odd == 0) reach = 0.0f;
+    if (odd == 1) reach = -reach;
+    if (odd == 2) reach = 30000.0f;
+    // Anything, not a number included. A reach whose square leaves the float range is where the translation
+    // and the original part ways (docs/translator.md, Rounding), so MXO_PLAIN=1 keeps it out.
+    if (odd == 3 && !g_plain) reach = float(rndf());
+    g_init[light / 4] = known ? uint32_t(uintptr_t(g_base)) + LightKind : arena + uint32_t(otherKind);
+    g_init[(light + MxoLightPartOffset) / 4] = rnd32() % 10 ? arena + uint32_t(part) : 0;
+    putf(part + MxoPartReachOffset, reach);
+    putf(light + MxoPartReachOffset, reach);   // where the made-up kind keeps it
+    const uint32_t where = rnd32() % 8;
+    for (int axis = 0; axis < 3; axis++) {
+      float pos = middle[axis] + float(rndRange(-250, 250));
+      if (where == 0) pos = middle[axis] + float(rndRange(-5000, 5000));   // far away
+      if (where == 1) pos = middle[axis] + extent[axis] * float(rndRange(-1, 1));   // inside the box
+      putf(light + MxoLightPosOffset + 4 * axis, pos);
+    }
+    // not a number on one axis: that axis counts for nothing in the loop's distance
+    if (rnd32() % 40 == 0 && !g_plain) g_init[(light + MxoLightPosOffset) / 4 + rnd32() % 3] = QuietNan;
+    if (where == 2) {   // as far from one side of the box as its reach goes, the other two axes inside
+      const int axis = int(rnd32() % 3);
+      const float side = rnd32() % 2 ? 1.0f : -1.0f;
+      for (int other = 0; other < 3; other++)
+        putf(light + MxoLightPosOffset + 4 * other, middle[other] + extent[other] * float(rndRange(-1, 1)));
+      putf(light + MxoLightPosOffset + 4 * axis, middle[axis] + side * (extent[axis] + reach * float(rndRange(0.98, 1.02))));
+    }
+  }
+
+  // Mostly a short list, sometimes none, sometimes a long one as a street at night has. One long list in
+  // four names only lights inside the box: more of them in reach than the filter keeps, so it steps aside.
+  uint32_t count = 1 + rnd32() % 48;
+  const uint32_t length = rnd32() % 16;
+  if (length == 0) count = 0;
+  if (length == 1 || length == 2) count = uint32_t(MxoMaxKeptLights) + 1 + rnd32() % 200;
+  const bool allInside = length == 1 && rnd32() % 2 == 0;
+  if (allInside) {
+    for (uint32_t k = 0; k < ShapedLights; k++)
+      for (int axis = 0; axis < 3; axis++)
+        putf(lights + lightSize * k + MxoLightPosOffset + 4 * axis, middle[axis] + extent[axis] * float(rndRange(-0.9, 0.9)));
+  }
+  for (uint32_t k = 0; k < count; k++)
+    g_init[pointers / 4 + k] = arena + uint32_t(lights + lightSize * (rnd32() % ShapedLights));
+  g_init[list / 4] = arena + uint32_t(pointers);
+  g_init[list / 4 + 1] = arena + uint32_t(pointers) + 4 * count;
+  args[1] = arena + uint32_t(list);
+  args[2] = arena + uint32_t(entries);
+  args[3] = rnd32() % (LightEntries + 1);
+}
+
+// The light loop's translation behind the filter, as the DLL installs the two
+static void* g_lightLoop = nullptr;
+static bool g_lightLeftOut = false;   // the filter left a light out in the last call
+
+static uint32_t __stdcall lightsThroughFilter(const uint8_t* object, const MxoLightList* lights, void* entries, uint32_t first) {
+  MxoLightCount count;
+  const uint32_t taken = MxoRunLightLoop(MxoLightLoop(uintptr_t(g_lightLoop)), uint32_t(uintptr_t(g_base)), object, lights, entries, first, &count);
+  g_lightLeftOut = count.kept < count.seen;
+  return taken;
+}
+
+// What one call of the light loop was given and what the original and the tested version made of it, for
+// the first calls that differ. The arena still holds the lights as they went in.
+static const char* LightsDetailFile = "lights-detail.txt";
+static const int LightsDetailCases = 4;
+static int g_lightsDetailed = 0, g_lightsAloneDiffer = 0, g_lightsFilteredDiffer = 0, g_lightsCompared = 0;
+
+static void describeLights(int iteration, const uint32_t* args, uint32_t countOriginal, uint32_t countAlone, uint32_t countFiltered) {
+  FILE* out = fopen(LightsDetailFile, "a");
+  if (!out) return;
+  const uint8_t* arena = (const uint8_t*)g_arena;
+  const uint8_t* object = (const uint8_t*)uintptr_t(args[0]);
+  const MxoLightList* list = (const MxoLightList*)uintptr_t(args[1]);
+  const size_t count = size_t(list->end - list->begin);
+  const MxoLightBox box = MxoLightBoxOf(object);
+  fpu_setcw(Cw53);   // printf rounds the digits of a double with FPU arithmetic
+  fprintf(out, "== iteration %d: %u lights, first entry %u, lights taken: original %u, translation alone %u, with the filter %u\n",
+    iteration, unsigned(count), unsigned(args[3]), unsigned(countOriginal), unsigned(countAlone), unsigned(countFiltered));
+  fprintf(out, "   box middle %g %g %g, extent %g %g %g\n", box.middle[0], box.middle[1], box.middle[2], box.extent[0], box.extent[1], box.extent[2]);
+  for (size_t k = 0; k < count && k < 60; k++) {
+    const uint8_t* light = list->begin[k];
+    const bool known = MxoWordAt((const uint8_t*)uintptr_t(MxoWordAt(light)) + MxoLightReachSlot) == uint32_t(uintptr_t(g_base)) + MxoLightReachRva;
+    const uint8_t* part = (const uint8_t*)uintptr_t(MxoWordAt(light + MxoLightPartOffset));
+    const float reach = known ? (part ? MxoFloatAt(part + MxoPartReachOffset) : 0.0f) : MxoFloatAt(light + MxoPartReachOffset);
+    float distance = 0.0f;
+    for (int axis = 0; axis < 3; axis++) {
+      const float offset = MxoFloatAt(light + MxoLightPosOffset + 4 * axis) - box.middle[axis];
+      if (offset < -box.extent[axis]) distance += (offset + box.extent[axis]) * (offset + box.extent[axis]);
+      else if (offset > box.extent[axis]) distance += (offset - box.extent[axis]) * (offset - box.extent[axis]);
+    }
+    fprintf(out, "   %2u light %2u %s %s reach %g squared %g, distance squared %g: %s by this reading, filter %s\n", unsigned(k),
+      unsigned((light - arena - BlockSize * LightsBlock) / ShapedLightSize), known ? "known" : "other", part ? "part" : "none", reach, double(reach) * reach, distance,
+      double(reach) * reach < double(distance) ? "dropped" : "taken", MxoLightOutOfReach(box, light, uint32_t(uintptr_t(g_base))) ? "leaves it out" : "passes it on");
+  }
+  const size_t entries = size_t((const uint8_t*)uintptr_t(args[2]) - arena);
+  for (uint32_t k = 0; k <= LightEntries + 1; k++) {
+    const size_t at = (entries + LightEntrySize * k) / 4;
+    if (g_resA[at] == g_init[at] && g_arena[at] == g_init[at] && g_resA[at + 1] == g_arena[at + 1]) continue;
+    float a, b; memcpy(&a, &g_resA[at + 1], 4); memcpy(&b, &g_arena[at + 1], 4);
+    fprintf(out, "   entry %u: original kind %08x x %g, tested kind %08x x %g, before the call %08x\n", unsigned(k), g_resA[at], a, g_arena[at], b, g_init[at]);
+  }
+  fclose(out);
+  fpu_setcw(CwGame);
+}
+
 static void shapeInput(const GameFn& g, uint32_t* args) {
+  if (g.rva == MxoLightLoopRva) { shapeLights(args); return; }
   if (isKeyTable(g.rva)) { shapeKeyTable(g, args); return; }
   if (g.rva == SortComparator) {
     // two pointers to element pointers. Each element has a box at +24..+2c (min) and +30..+38
@@ -233,7 +378,32 @@ static DWORD WINAPI gameWorker(void* param) {
     memcpy(g_dataA, g_data, g_dataSize);
     memcpy(g_data, g_dataInit, g_dataSize);
     memcpy(g_arena, g_init, BlockSize * Blocks);
-    Result rb = runOne(j.f->replacement, g, args);
+    // The light loop is tested the way the DLL installs it: behind the filter. MXO_LIGHT_FILTER=0 tests its
+    // translation alone. Either way the translation alone runs first, so that a difference can be told apart.
+    void* second = j.f->replacement;
+    g_lightLeftOut = false;
+    const bool lightLoop = g.rva == MxoLightLoopRva && MxoLightFilterFits(g_base, g_imageSize);
+    Result alone = {};
+    bool aloneDiffers = false;
+    if (lightLoop) {
+      alone = runOne(j.f->replacement, g, args);
+      size_t at = 0;
+      aloneDiffers = !ra.crashed && !alone.crashed && (ra.eax != alone.eax || diff(g_resA, g_arena, BlockSize * Blocks, &at));
+      memcpy(g_data, g_dataInit, g_dataSize);
+      memcpy(g_arena, g_init, BlockSize * Blocks);
+      g_lightLoop = j.f->replacement;
+      if (!(getenv("MXO_LIGHT_FILTER") && *getenv("MXO_LIGHT_FILTER") == '0')) second = (void*)&lightsThroughFilter;
+    }
+    Result rb = runOne(second, g, args);
+    if (g_lightLeftOut && !ra.crashed && !rb.crashed) g_reached++;
+    if (lightLoop && !ra.crashed && !rb.crashed && !alone.crashed) {
+      size_t at = 0;
+      const bool differs = ra.eax != rb.eax || diff(g_resA, g_arena, BlockSize * Blocks, &at);
+      g_lightsCompared++;
+      g_lightsAloneDiffer += aloneDiffers;
+      g_lightsFilteredDiffer += differs;
+      if ((differs || aloneDiffers) && g_lightsDetailed < LightsDetailCases) { g_lightsDetailed++; describeLights(it, args, ra.eax, alone.eax, rb.eax); }
+    }
     if (ra.crashed || rb.crashed) { j.crashed++; if (ra.crashed != rb.crashed) j.crashdiff++; continue; }
     j.done++;
     size_t where = 0;
@@ -250,6 +420,13 @@ static DWORD WINAPI gameWorker(void* param) {
       if (!j.bad++ && j.nmsg < 3) snprintf(j.msg[j.nmsg++], 200, "st0 differs: orig %016llx xlat %016llx (iteration %d)", (unsigned long long)a, (unsigned long long)b, it);
     } else if (diff(g_resA, g_arena, BlockSize * Blocks, &where) || diff(&ra.st0, &rb.st0, 8, &where)) {
       if (!j.bad++ && j.nmsg < 3) snprintf(j.msg[j.nmsg++], 200, "result differs at arena+%u: orig %08x xlat %08x (iteration %d)", unsigned(where), g_resA[where / 4], g_arena[where / 4], it);
+    }
+  }
+  if (g.rva == MxoLightLoopRva) {
+    if (FILE* out = fopen(LightsDetailFile, "a")) {
+      fprintf(out, "== %d calls compared: the translation alone differs from the original in %d, the tested version in %d\n",
+        g_lightsCompared, g_lightsAloneDiffer, g_lightsFilteredDiffer);
+      fclose(out);
     }
   }
   j.finished = 1;
@@ -290,6 +467,7 @@ static int runGameChild(int iterations, int first, int count) {
   auto nt = (const IMAGE_NT_HEADERS32*)(base + ((const IMAGE_DOS_HEADER*)base)->e_lfanew);
   uint32_t imageSize = nt->OptionalHeader.SizeOfImage;
   if (!MxoXFixups(base, MxoX_imagebase, MxoX_absfix, MxoX_relfix, MxoX_code_begin, MxoX_code_end)) return 2;
+  g_imageSize = imageSize;
   ResolveMathImports(base, imageSize);
   AddVectoredExceptionHandler(1, crashHandler);
   CreateThread(nullptr, 0, watchdog, nullptr, 0, nullptr);
@@ -357,6 +535,7 @@ static MxoXFunc* findHelper() {
 static int runGame(int iterations) {
   int problems = 0;
   DeleteFileA(FuzzFile);
+  DeleteFileA(LightsDetailFile);
   const int total = int(sizeof(g_gameFns) / sizeof(g_gameFns[0]));
   printf("== game routines: %d translations, each compared with the original in client.dll\n", total);
   {

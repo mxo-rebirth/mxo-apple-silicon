@@ -143,7 +143,8 @@ Four routines are replaced by code written for them:
 | `msvcr71!sqrt` (import slot `0x8682AC`) | `MxoSqrtSSE` in the DLL, below |
 
 The two matrix routines are not on the routine list. The DLL recognises them by position,
-length and hash, and installs them together with the translated routines. A game add-on that
+length and hash (`MxoXCodeHash`, which the light filter uses for its two functions too), and
+installs them together with the translated routines. A game add-on that
 names an address inside one keeps it original, and `x87max.txt` counts them after the
 translated routines. Unlike a translation they make no assumption about the FPU setup, so they
 run on every thread. No test in `tests/` covers them.
@@ -154,6 +155,38 @@ that gives the same bits. It computes only when the thread runs at 24-bit or 53-
 with rounding to nearest, the input is positive and finite, and (at 24 bits) the result is a
 normal float that does not sit exactly halfway between two floats. Anything else goes to Wine's
 `sqrt`. `DXVK_MXO_SQRT=0` turns it off.
+
+**The light filter.** The routine at `0x48FA40` chooses the projector lights for one object. It
+walks every light of the scene, and for each one it makes three calls through the light's table
+of functions and one to a distance routine before it compares the light's reach with the
+distance to the object's box. At night among many characters that was 27 to 31% of the main
+thread. The DLL enters the routine through a filter (`translator/mxo_lights.h`) that works out
+the same distance from the same fields and leaves out every light whose squared reach, with 1%
+added, is below it. The routine then runs on the rest and decides each of those itself, so its
+result is the same: the calls it no longer makes only read the light.
+
+What the filter passes on unseen: a light of any other kind than the one it knows (by the
+function its table has for the reach), and a light whose reach is not a number. An axis on
+which a position is not a number counts for nothing in the distance, as in the routine. With
+more than 256 lights in reach of one object the routine gets its list as it is. The list itself
+can have any length: up to 635 lights were counted in one session.
+
+The filter is used only when all of this holds:
+
+- the routine's translation is installed
+- the two functions that return a light's reach have the known hashes, and the reach without
+  a part is 0
+- the factor the routine scales the box by is 0.75
+- no game add-on names an address inside those two functions, since the filter reads the
+  reach itself (`DXVK_MXO_RESPECT_ADDONS=0` lifts this as for the routines)
+
+The log says `light filter on`, or why it is off. `DXVK_MXO_LIGHT_FILTER=0` turns it off. With
+`debug.flag` the log has a `LIGHTS` line every five seconds: how many lights the filter looked
+at per frame, how many it passed on and how long the longest list was.
+
+Measured in a crowd at night ([measurements.md](measurements.md#in-a-crowd)): the filter looked
+at 40,000 to 160,000 lights per frame and passed on 80 to 160. The light loop went from 27 to
+31% of the main thread to under 1%, and the filter itself takes 1 to 3%.
 
 ## At run time
 
@@ -200,6 +233,9 @@ code and as translation on the same input and compare everything it wrote, bit f
 | The translation of the 537 routines then on the list against the one before it | no differing line, with ordinary and with random input |
 | The current translation of the 535 routines against that one | the same assembly text apart from label names, and the same bytes once assembled |
 | `_ftol2` replacement | 400,000 values over the whole range, identical |
+| The light filter against a plain reading of the light loop's decision, on made-up lights | 200,000 lights, 150,282 left out, none of them wrongly |
+| The light loop `0x48FA40` on plausible lists of up to 456 lights, ordinary values: its translation alone, and behind the light filter | 20,000 calls, all identical both ways. The filter left a light out in 17,934 of them |
+| The same with huge, tiny and not-a-number values among them | 33 of 20,000 calls differ, the same 33 with and without the filter: values that leave the `float` range |
 | `sqrt` replacement against Wine's, under seven FPU control words | 7 million cases, no differences |
 | `roundsd` against Wine's `floor` and `ceil` | no differences |
 

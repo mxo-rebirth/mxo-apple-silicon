@@ -84,9 +84,11 @@ rm -rf "${WORK:?}/unpack"
 
 echo "== applying the patch"
 (cd "$WORK/dxvk" && patch -p1 -s < "$ROOT/dxvk/dxvk-d3d9-mxo.patch")
-# The tests include translator/mxo_x87_apply.h, the DLL its copy in the patch. They must be the same file.
+# The tests include two headers from translator/, the DLL their copies in the patch. They must be the same files.
 cmp -s "$ROOT/translator/mxo_x87_apply.h" "$WORK/dxvk/src/d3d9/d3d9_mxo_x87.h" \
   || die "translator/mxo_x87_apply.h differs from src/d3d9/d3d9_mxo_x87.h in the patch"
+cmp -s "$ROOT/translator/mxo_lights.h" "$WORK/dxvk/src/d3d9/d3d9_mxo_lights.h" \
+  || die "translator/mxo_lights.h differs from src/d3d9/d3d9_mxo_lights.h in the patch"
 
 echo "== mapping the functions of client.dll (about a minute)"
 python3 -I "$ROOT/translator/discover.py" "$CLIENT" "$WORK/client.map"

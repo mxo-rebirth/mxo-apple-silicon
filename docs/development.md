@@ -15,7 +15,8 @@ benchmark and regenerating the patch. Building and installing are in [building.m
 | `translator/dis.py` | disassembles address ranges of a PE file |
 | `translator/peimage.py` | the one reader of PE files: sections, relocations, imports, exports |
 | `translator/mingw.py` | the one place that starts `objdump` and `nm` and reads what they print |
-| `translator/mxo_x87_apply.h` | run-time side of the translation: fixups and installation. The patch holds the same file as `src/d3d9/d3d9_mxo_x87.h`. `scripts/build.sh` stops if the two differ |
+| `translator/mxo_x87_apply.h` | run-time side of the translation: fixups, installation and the hash that recognises game code. The patch holds the same file as `src/d3d9/d3d9_mxo_x87.h`. `scripts/build.sh` stops if the two differ |
+| `translator/mxo_lights.h` | which projector lights can reach an object, in front of the game's light loop ([translator.md](translator.md#hand-written-replacements)). Included after `mxo_x87_apply.h`. In the patch as `src/d3d9/d3d9_mxo_lights.h`, checked the same way |
 | `tests/` | differential tests: translation against original code ([README](../tests/README.md)) |
 | `bench/d3d9bench.rs` | standalone Direct3D 9 benchmark |
 | `scripts/build.sh` | builds `d3d9.dll` from a `client.dll` and the CodeWeavers source |
@@ -42,7 +43,7 @@ are off unless the file exists.
 
 | File | Effect |
 |---|---|
-| `debug.flag` | empty file. Every 5 s the log gets the frame rate, the render throttle, DXVK's per-frame statistics, the game's calls per frame, memory activity and which DXVK routine interrupted render passes how often. Every frame slower than 40 ms gets a `SPIKE` line saying what happened in it (pipelines built, waits, uploads, new memory). While a frame is more than 200 ms late, a `STALL` line records where the game's main thread is, as `module+offset` call chains. One stall is sampled for 30 seconds at most. The log takes at most 400 `SPIKE` and 300 `STALL` lines and says so when either ends. |
+| `debug.flag` | empty file. Every 5 s the log gets the frame rate, the render throttle, DXVK's per-frame statistics, the game's calls per frame, memory activity and which DXVK routine interrupted render passes how often. Every frame slower than 40 ms gets a `SPIKE` line saying what happened in it (pipelines built, waits, uploads, new memory). While a frame is more than 200 ms late, a `STALL` line records where the game's main thread is, as `module+offset` call chains. One stall is sampled for 30 seconds at most. The log takes at most 400 `SPIKE` and 300 `STALL` lines and says so when either ends. With the light filter at work, a `LIGHTS` line says how many projector lights it looked at per frame, how many it passed on to the game and how long the longest list was. |
 | `shot.req` | with `debug.flag`: saves the next frame to `shot.bmp`. Needs a back buffer with 8 bits per colour (`X8R8G8B8` or `A8R8G8B8`) |
 | `drawlog.req` | with `debug.flag`: writes one `DRAW` line per draw call of the next frame (shaders, textures, render target, blending) |
 | `sample-light.flag` | empty file. A sampling profiler records where the game's main thread and DXVK's own threads are, every 20 ms, and appends to `samples.bin` every 10 s. It also writes `modules.txt`, the list of loaded modules with their addresses. If `sample.flag` exists too, this one wins. |

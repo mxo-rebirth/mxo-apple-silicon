@@ -622,7 +622,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_mxo_fastmath.cpp b/src/d3d9/d3d9_mxo_fastmath.cpp
 --- a/src/d3d9/d3d9_mxo_fastmath.cpp	2026-11-19 00:00:00
 +++ b/src/d3d9/d3d9_mxo_fastmath.cpp	2026-11-19 00:00:00
-@@ -0,0 +1,710 @@
+@@ -0,0 +1,747 @@
 +#include <windows.h>
 +#include <tlhelp32.h>
 +
@@ -645,6 +645,9 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +// x87 routines of the client translated to SSE2 by xlat.py
 +#include "d3d9_mxo_x87.h"
 +#include "d3d9_mxo_x87.inc"
++
++// which projector lights can reach an object
++#include "d3d9_mxo_lights.h"
 +
 +extern "C" {
 +  extern uint32_t MxoX_funcs[], MxoX_absfix[], MxoX_relfix[], MxoX_deps[], MxoX_inlined[], MxoX_xrdeps[], MxoX_crtslots[];
@@ -820,6 +823,36 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +  }
 +
 +
++  // The client's light loop is entered here and gets only the lights that can reach the object
++  // (d3d9_mxo_lights.h). The loop it runs is its own translation, which sends other threads on
++  // to the original.
++  static MxoLightLoop s_lightLoop  = nullptr;
++  static uint32_t     s_clientBase = 0;
++  static std::atomic<uint32_t> s_lightsSeen    = { 0 };
++  static std::atomic<uint32_t> s_lightsKept    = { 0 };
++  static std::atomic<uint32_t> s_lightsLongest = { 0 };
++
++  static uint32_t __stdcall LightLoopBehindFilter(const uint8_t* object, const MxoLightList* lights, void* entries, uint32_t first) {
++    MxoLightCount count;
++    const uint32_t taken = MxoRunLightLoop(s_lightLoop, s_clientBase, object, lights, entries, first, &count);
++
++    s_lightsSeen.fetch_add(count.seen, std::memory_order_relaxed);
++    s_lightsKept.fetch_add(count.kept, std::memory_order_relaxed);
++
++    if (count.seen > s_lightsLongest.load(std::memory_order_relaxed))
++      s_lightsLongest.store(count.seen, std::memory_order_relaxed);
++
++    return taken;
++  }
++
++
++  void TakeMxoLightCounts(uint32_t& seen, uint32_t& kept, uint32_t& longest) {
++    seen    = s_lightsSeen.exchange(0, std::memory_order_relaxed);
++    kept    = s_lightsKept.exchange(0, std::memory_order_relaxed);
++    longest = s_lightsLongest.exchange(0, std::memory_order_relaxed);
++  }
++
++
 +  // The hand-written replacements. The originals are recognised by position, length and a hash of
 +  // their code (address fields excluded), so no game code is carried in this file.
 +  struct HandWritten {
@@ -839,44 +872,18 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +  static constexpr uint32_t HandWrittenCount = sizeof(s_handWritten) / sizeof(s_handWritten[0]);
 +
-+  // FNV-1a, the hash translator/xlat.py prints for a routine
-+  static constexpr uint64_t FnvOffsetBasis = 0xcbf29ce484222325ull;
-+  static constexpr uint64_t FnvPrime       = 0x100000001b3ull;
-+
 +  static bool MatchesHandWritten(const uint8_t* base, uint32_t imageSize, const HandWritten& h) {
 +    if (!IsInImage(imageSize, h.rva, h.size))
 +      return false;
 +
 +    const uint8_t* code = base + h.rva;
-+    uint64_t hash = FnvOffsetBasis;
 +
-+    for (uint32_t i = 0; i < h.size; ) {
-+      bool isRef = false;
-+
-+      for (uint32_t k = 0; k < h.refCount; k++)
-+        isRef = isRef || h.refs[k] == i;
-+
-+      if (isRef) {
-+        uint32_t address;
-+        std::memcpy(&address, code + i, sizeof(address));
-+
-+        const uint32_t imageBase = uint32_t(uintptr_t(base));
-+        float one = 0.0f;
-+
-+        if (address >= imageBase && address <= imageBase + imageSize - sizeof(float))
-+          std::memcpy(&one, reinterpret_cast<const void*>(uintptr_t(address)), sizeof(one));
-+
-+        if (one != 1.0f)
-+          return false;
-+
-+        i += sizeof(address);
-+      } else {
-+        hash = (hash ^ code[i]) * FnvPrime;
-+        i += 1;
-+      }
++    for (uint32_t k = 0; k < h.refCount; k++) {
++      if (!MxoImageFloatIs(base, imageSize, MxoWordAt(code + h.refs[k]), 1.0f))
++        return false;
 +    }
 +
-+    return hash == h.hash;
++    return MxoXCodeHash(code, h.size, h.refs, h.refCount) == h.hash;
 +  }
 +
 +
@@ -1190,10 +1197,36 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +      }
 +    }
 +
++    // The light loop is entered through the filter when its translation goes in, the game code the
++    // filter relies on is the known one and no add-on names the functions that return a light's
++    // reach: the filter reads the reach itself. DXVK_MXO_LIGHT_FILTER=0 leaves the filter out.
++    static constexpr size_t NoSlot = ~size_t(0);
++    const char* lightFilter = "off, the light loop's translation is not installed";
++    size_t lightSlot = NoSlot;
 +    std::vector<Redirect> redirects;
 +
-+    for (const MxoXFunc* f : todo)
-+      redirects.push_back({ f->rva, f->replacement });
++    for (const MxoXFunc* f : todo) {
++      const void* replacement = f->replacement;
++
++      if (f->rva == MxoLightLoopRva) {
++        if (!env::isFixEnabled("DXVK_MXO_LIGHT_FILTER")) {
++          lightFilter = "off by DXVK_MXO_LIGHT_FILTER";
++        } else if (!MxoLightFilterFits(base, imageSize)) {
++          lightFilter = "off, the game code it relies on differs";
++        } else if (IsNamedByAddon(addonRefs, MxoLightReachRva, MxoLightReachSize)
++                || IsNamedByAddon(addonRefs, MxoPartReachRva, MxoPartReachSize)) {
++          lightFilter = "off, a game add-on uses a function that returns a light's reach";
++        } else {
++          s_lightLoop  = reinterpret_cast<MxoLightLoop>(reinterpret_cast<uintptr_t>(f->replacement));
++          s_clientBase = uint32_t(uintptr_t(base));
++          replacement  = reinterpret_cast<const void*>(reinterpret_cast<uintptr_t>(&LightLoopBehindFilter));
++          lightSlot    = redirects.size();
++          lightFilter  = "on";
++        }
++      }
++
++      redirects.push_back({ f->rva, replacement });
++    }
 +
 +    // The hand-written routines go in with the translated ones, so that add-ons and x87max.txt
 +    // count for them too. Unlike the translated ones they run on every thread.
@@ -1235,6 +1268,9 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +        busy += str::format(" ", std::hex, todo[i]->rva);
 +    }
 +
++    if (lightSlot != NoSlot && results[lightSlot] != RedirectResult::Installed)
++      lightFilter = "off, the light loop was left alone";
++
 +    for (uint32_t r = 0; r < HandWrittenCount; r++) {
 +      if (handWrittenState[r])
 +        continue;
@@ -1274,6 +1310,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +    if (translated) {
 +      Logger::info(str::format("MxO fast math: ", installed, " of ", total, " translated x87 routines installed (",
 +        matching, " match this client.dll)"));
++      Logger::info(str::format("MxO fast math: light filter ", lightFilter));
 +    }
 +  }
 +
@@ -1336,7 +1373,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_mxo_fastmath.h b/src/d3d9/d3d9_mxo_fastmath.h
 --- a/src/d3d9/d3d9_mxo_fastmath.h	2026-11-19 00:00:00
 +++ b/src/d3d9/d3d9_mxo_fastmath.h	2026-11-19 00:00:00
-@@ -0,0 +1,55 @@
+@@ -0,0 +1,62 @@
 +#pragma once
 +
 +#include <cstdint>
@@ -1370,6 +1407,13 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +   * \brief The game's current render throttle (1 = full draw distance), or -1 if unknown
 +   */
 +  float GetMxoRenderThrottle();
++
++  /**
++   * \brief How many projector lights the light filter looked at, how many it passed
++   *        on to the game and how long the longest list of lights was, since the
++   *        last call. All three are set back to 0
++   */
++  void TakeMxoLightCounts(uint32_t& seen, uint32_t& kept, uint32_t& longest);
 +
 +  /// The first page of a loaded module holds its headers, never code
 +  constexpr uint32_t ModuleHeaderSize = 0x1000;
@@ -1543,10 +1587,199 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +extern "C" void MxoSqrtSSE();
 +extern "C" { uint32_t MxoSqrtOriginal = 0; }
+diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_mxo_lights.h b/src/d3d9/d3d9_mxo_lights.h
+--- a/src/d3d9/d3d9_mxo_lights.h	2026-11-19 00:00:00
++++ b/src/d3d9/d3d9_mxo_lights.h	2026-11-19 00:00:00
+@@ -0,0 +1,185 @@
++#pragma once
++
++#include <cstddef>
++#include <cstdint>
++#include <cstring>
++
++// Include after mxo_x87_apply.h: the game code is recognised with its MxoXCodeHash.
++//
++// The client's routine at MxoLightLoopRva chooses the projector lights that light one object. It
++// walks every light of the scene, and for each one makes three calls through the light's table of
++// functions and one to a distance routine before it knows whether the light reaches the object's
++// box. Among many characters at night that was 27 to 31% of the main thread.
++//
++// What is here runs in front of that routine: it leaves out the lights that are clearly out of
++// reach, so that the routine itself only sees the others. The routine still decides every light it
++// is given, and every close case is given to it.
++
++const uint32_t MxoLightLoopRva      = 0x48fa40;
++const uint32_t MxoLightBoxScaleAt[] = { 142, 162, 196 };   // in the loop's code: the addresses of the factor it scales the box by
++const float    MxoBoxScale          = 0.75f;      // what that factor has to be
++const uint32_t MxoBoxMinOffset      = 0x24;       // in the object: the low corner of its box, three floats
++const uint32_t MxoBoxMaxOffset      = 0x30;       // the high corner
++
++const uint32_t MxoLightReachSlot    = 0x24;       // in a light's table of functions: returns its reach
++const uint32_t MxoLightPartOffset   = 0x24;       // in a light: the part that holds the reach, or null
++const uint32_t MxoLightPosOffset    = 0x28;       // in a light: its position, three floats
++const uint32_t MxoPartReachOffset   = 0x48;       // in that part: the reach, a float
++
++// What the one known kind of light has at MxoLightReachSlot: the reach of the light's part, and
++// without a part the float at the address in its code, which has to be 0
++const uint32_t MxoLightReachRva     = 0x4b3fe0;
++const uint32_t MxoLightReachSize    = 19;
++const uint64_t MxoLightReachHash    = 0xfbda6d8eae75e52eull;
++const uint32_t MxoLightReachZeroAt  = 14;
++
++// Where that function jumps with a part: returns the float at MxoPartReachOffset of what it is called on
++const uint32_t MxoPartReachRva      = 0x4a98c0;
++const uint32_t MxoPartReachSize     = 4;
++const uint64_t MxoPartReachHash     = 0xdabfbd814307a612ull;
++
++const float    MxoLightMargin       = 1.01f;      // a light this close to reaching the box is left to the routine
++const size_t   MxoMaxKeptLights     = 256;        // with more lights in reach than this the routine gets the whole list
++
++// The list the routine is handed: where the pointers to the lights begin and end
++struct MxoLightList {
++  const uint8_t* const* begin;
++  const uint8_t* const* end;
++};
++
++// The routine, as the game calls it and as its translation is called. Returns how many lights it took.
++typedef uint32_t (__stdcall* MxoLightLoop)(const uint8_t* object, const MxoLightList* lights, void* entries, uint32_t first);
++
++// What the filter did in one call: the length of the list, and how many lights of it the routine got
++struct MxoLightCount {
++  uint32_t seen;
++  uint32_t kept;
++};
++
++static inline float MxoFloatAt(const uint8_t* address) {
++  float value;
++  std::memcpy(&value, address, sizeof(value));
++  return value;
++}
++
++static inline uint32_t MxoWordAt(const uint8_t* address) {
++  uint32_t value;
++  std::memcpy(&value, address, sizeof(value));
++  return value;
++}
++
++// The box of the routine: for each axis the middle it uses and the distance it allows from there
++struct MxoLightBox {
++  float middle[3];
++  float extent[3];
++};
++
++static inline MxoLightBox MxoLightBoxOf(const uint8_t* object) {
++  MxoLightBox box;
++  for (uint32_t axis = 0; axis < 3; axis++) {
++    const float low = MxoFloatAt(object + MxoBoxMinOffset + 4 * axis);
++    box.extent[axis] = (MxoFloatAt(object + MxoBoxMaxOffset + 4 * axis) - low) * MxoBoxScale;
++    box.middle[axis] = box.extent[axis] + low;
++  }
++  return box;
++}
++
++// Whether the light is out of the box's reach by more than the margin. A light of another kind
++// than the known one is never out of reach here, and neither is one whose reach is not a number.
++// An axis on which the position or the box is not a number adds nothing to the distance, as in
++// the routine. clientBase is where client.dll is loaded.
++static inline bool MxoLightOutOfReach(const MxoLightBox& box, const uint8_t* light, uint32_t clientBase) {
++  const uint8_t* functions = reinterpret_cast<const uint8_t*>(uintptr_t(MxoWordAt(light)));
++  if (MxoWordAt(functions + MxoLightReachSlot) != clientBase + MxoLightReachRva)
++    return false;
++
++  const uint8_t* part = reinterpret_cast<const uint8_t*>(uintptr_t(MxoWordAt(light + MxoLightPartOffset)));
++  const float reach = part ? MxoFloatAt(part + MxoPartReachOffset) : 0.0f;
++
++  // the routine's own sum, branch for branch: the squared distance from the light to the box
++  float distance = 0.0f;
++  for (uint32_t axis = 0; axis < 3; axis++) {
++    const float offset = MxoFloatAt(light + MxoLightPosOffset + 4 * axis) - box.middle[axis];
++    if (offset < -box.extent[axis]) {
++      const float over = offset + box.extent[axis];
++      distance += over * over;
++    } else if (offset > box.extent[axis]) {
++      const float over = offset - box.extent[axis];
++      distance += over * over;
++    }
++  }
++
++  // The routine drops a light when reach * reach < distance. Rounding can differ between its
++  // arithmetic and this one, so only a clear case is decided here.
++  return reach * reach * MxoLightMargin < distance;
++}
++
++// Copies the lights that can reach the object into kept, which has room for MxoMaxKeptLights, in
++// their order, and returns how many. The list can be of any length. Returns MxoMaxKeptLights + 1
++// when more lights than that are in reach, or the list ends before it begins: the routine then
++// has to get the list as it is.
++static inline size_t MxoLightsInReach(const uint8_t* object, const MxoLightList* lights,
++    const uint8_t** kept, uint32_t clientBase) {
++  if (lights->end < lights->begin)
++    return MxoMaxKeptLights + 1;
++
++  const size_t count = size_t(lights->end - lights->begin);
++  const MxoLightBox box = MxoLightBoxOf(object);
++  size_t keptCount = 0;
++  for (size_t i = 0; i < count; i++) {
++    const uint8_t* light = lights->begin[i];
++    if (MxoLightOutOfReach(box, light, clientBase))
++      continue;
++    if (keptCount == MxoMaxKeptLights)
++      return MxoMaxKeptLights + 1;
++    kept[keptCount++] = light;
++  }
++  return keptCount;
++}
++
++// Runs the routine on the lights that can reach the object and returns what it returns. This is
++// the whole of what stands in front of the routine: the DLL and the tests both call it.
++static inline uint32_t MxoRunLightLoop(MxoLightLoop loop, uint32_t clientBase, const uint8_t* object,
++    const MxoLightList* lights, void* entries, uint32_t first, MxoLightCount* count) {
++  const uint8_t* kept[MxoMaxKeptLights];
++  const size_t keptCount = MxoLightsInReach(object, lights, kept, clientBase);
++
++  count->seen = lights->end > lights->begin ? uint32_t(lights->end - lights->begin) : 0u;
++  count->kept = count->seen;
++
++  if (keptCount > MxoMaxKeptLights)
++    return loop(object, lights, entries, first);
++
++  count->kept = uint32_t(keptCount);
++  const MxoLightList inReach = { kept, kept + keptCount };
++  return loop(object, &inReach, entries, first);
++}
++
++// Whether the float at an address inside the image has the given bits
++static inline bool MxoImageFloatIs(const uint8_t* base, uint32_t imageSize, uint32_t address, float value) {
++  const uint32_t rva = address - uint32_t(uintptr_t(base));
++  return imageSize >= sizeof(float) && rva <= imageSize - sizeof(float)
++      && !std::memcmp(base + rva, &value, sizeof(value));
++}
++
++// Whether the filter fits this client.dll: the two functions that give a light's reach are the
++// known ones, the reach without a part is 0, and the routine scales the box by MxoBoxScale. That
++// the routine itself is the known one is for the caller to check, as for any translated routine.
++// base is where client.dll is loaded, imageSize its size in memory.
++static inline bool MxoLightFilterFits(const uint8_t* base, uint32_t imageSize) {
++  if (imageSize < MxoLightReachRva + MxoLightReachSize || imageSize < MxoLightLoopRva + MxoLightBoxScaleAt[2] + sizeof(uint32_t))
++    return false;
++
++  const uint32_t zeroAt[] = { MxoLightReachZeroAt };
++  if (MxoXCodeHash(base + MxoLightReachRva, MxoLightReachSize, zeroAt, 1) != MxoLightReachHash
++   || MxoXCodeHash(base + MxoPartReachRva, MxoPartReachSize, nullptr, 0) != MxoPartReachHash
++   || !MxoImageFloatIs(base, imageSize, MxoWordAt(base + MxoLightReachRva + MxoLightReachZeroAt), 0.0f))
++    return false;
++
++  for (uint32_t at : MxoLightBoxScaleAt) {
++    if (!MxoImageFloatIs(base, imageSize, MxoWordAt(base + MxoLightLoopRva + at), MxoBoxScale))
++      return false;
++  }
++
++  return true;
++}
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_mxo_x87.h b/src/d3d9/d3d9_mxo_x87.h
 --- a/src/d3d9/d3d9_mxo_x87.h	2026-11-19 00:00:00
 +++ b/src/d3d9/d3d9_mxo_x87.h	2026-11-19 00:00:00
-@@ -0,0 +1,100 @@
+@@ -0,0 +1,123 @@
 +// Runtime side of the x87 -> SSE2 translations generated by xlat.py.
 +#pragma once
 +
@@ -1591,6 +1824,29 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +  uint32_t caller;
 +  uint32_t callee;
 +};
++
++// FNV-1a over the bytes of [code, code + size), the hash xlat.py prints for a routine. The four
++// bytes at each of the offsets in skips hold an address and are left out, so the hash stands for
++// the routine wherever its image is loaded, and no code of it has to be carried along.
++static inline uint64_t MxoXCodeHash(const uint8_t* code, uint32_t size, const uint32_t* skips, uint32_t skipCount) {
++  uint64_t hash = 0xcbf29ce484222325ull;
++
++  for (uint32_t i = 0; i < size; ) {
++    bool isAddress = false;
++
++    for (uint32_t k = 0; k < skipCount; k++)
++      isAddress = isAddress || skips[k] == i;
++
++    if (isAddress) {
++      i += sizeof(uint32_t);
++    } else {
++      hash = (hash ^ code[i]) * 0x100000001b3ull;
++      i += 1;
++    }
++  }
++
++  return hash;
++}
 +
 +// Points the translated code at an image loaded at 'base'. Call once.
 +static inline bool MxoXFixups(const uint8_t* base, uint32_t prefBase, const uint32_t* absfix,
@@ -1868,7 +2124,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      else if (message == WM_SIZE)
      {
        D3DDEVICE_CREATION_PARAMETERS create_parms;
-@@ -184,6 +213,660 @@
+@@ -184,6 +213,668 @@
    };
  
  
@@ -2401,6 +2657,14 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +        "; GPU idle ", delta(DxvkStatCounter::GpuIdleTicks) * 100 / spanUs, "%"));
 +      s_lastCounters = counters;
 +
++      uint32_t lightsSeen = 0, lightsKept = 0, lightsLongest = 0;
++      TakeMxoLightCounts(lightsSeen, lightsKept, lightsLongest);
++
++      if (lightsSeen) {
++        Logger::info(str::format("LIGHTS per frame: ", lightsSeen / frames, " looked at, ", lightsKept / frames,
++          " passed on to the game; longest list ", lightsLongest, " lights"));
++      }
++
 +      // what the game asked for, and where render passes were broken up (callers by offset in this DLL)
 +      std::string calls;
 +
@@ -2529,7 +2793,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
    D3D9SwapChainEx::D3D9SwapChainEx(
            D3D9DeviceEx*          pDevice,
            D3DPRESENT_PARAMETERS* pPresentParams,
-@@ -255,6 +938,12 @@
+@@ -255,6 +946,12 @@
            HWND     hDestWindowOverride,
      const RGNDATA* pDirtyRegion,
            DWORD    dwFlags) {
@@ -2542,7 +2806,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      D3D9DeviceLock lock = m_parent->LockDevice();
  
      uint32_t presentInterval = m_presentParams.PresentationInterval;
-@@ -852,11 +1541,105 @@
+@@ -852,11 +1549,105 @@
          {  int32_t(m_dstRect.left),                    int32_t(m_dstRect.top)                    },
          { uint32_t(m_dstRect.right - m_dstRect.left), uint32_t(m_dstRect.bottom - m_dstRect.top) } };
  

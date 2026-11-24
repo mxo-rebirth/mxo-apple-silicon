@@ -50,7 +50,8 @@ The table of files is in [docs/development.md](docs/development.md#layout). A ne
 - Code in the patch follows the style of the DXVK code around it
 - A fix can be switched off with an environment variable and has a row in the [switch table](docs/building.md#switches). [graphics.md](docs/graphics.md) names the few that cannot.
 - A switch is read through `env::isFixEnabled`, `env::getEnvSwitch` or `env::getEnvSizeMB`, which also log a value that is not the default or not understood
-- `translator/mxo_x87_apply.h` and its copy in the patch are one file. The build stops if they differ.
+- `translator/mxo_x87_apply.h` and `translator/mxo_lights.h` are each one file with their copies in the patch. The build stops if a pair differs.
+- Game code is recognised by position, length and hash (`MxoXCodeHash`). None of its bytes are written into the repo.
 - A routine is replaced only when its bytes in memory match the bytes it was translated from
 
 ## Checking Input

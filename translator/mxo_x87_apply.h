@@ -43,6 +43,29 @@ struct MxoXDirectCall {
   uint32_t callee;
 };
 
+// FNV-1a over the bytes of [code, code + size), the hash xlat.py prints for a routine. The four
+// bytes at each of the offsets in skips hold an address and are left out, so the hash stands for
+// the routine wherever its image is loaded, and no code of it has to be carried along.
+static inline uint64_t MxoXCodeHash(const uint8_t* code, uint32_t size, const uint32_t* skips, uint32_t skipCount) {
+  uint64_t hash = 0xcbf29ce484222325ull;
+
+  for (uint32_t i = 0; i < size; ) {
+    bool isAddress = false;
+
+    for (uint32_t k = 0; k < skipCount; k++)
+      isAddress = isAddress || skips[k] == i;
+
+    if (isAddress) {
+      i += sizeof(uint32_t);
+    } else {
+      hash = (hash ^ code[i]) * 0x100000001b3ull;
+      i += 1;
+    }
+  }
+
+  return hash;
+}
+
 // Points the translated code at an image loaded at 'base'. Call once.
 static inline bool MxoXFixups(const uint8_t* base, uint32_t prefBase, const uint32_t* absfix,
                               const uint32_t* relfix, uint8_t* codeBegin, uint8_t* codeEnd) {

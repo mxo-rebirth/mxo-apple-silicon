@@ -6,6 +6,7 @@
 #include <cstdlib>
 
 #include "mxo_x87_apply.h"
+#include "mxo_lights.h"
 #include "xt_synth.inc"
 #ifdef WITH_GAME
 #include "out_game.inc"
@@ -174,6 +175,62 @@ static void benchSynth(const char* name, void (*fn)(), int calls) {
   fpu_setcw(CwGame);
 }
 
+// The light filter against a plain reading of what the game's light loop decides, in double precision:
+// it may leave out no light the loop would keep. Lights and their table of functions are made up here.
+static int lightFilterCheck(int cases) {
+  const uint32_t base = 0x10000000;   // stands for where client.dll is loaded: the filter only compares with it
+  uint32_t known[16] = {}, other[16] = {};
+  known[MxoLightReachSlot / 4] = base + MxoLightReachRva;
+  other[MxoLightReachSlot / 4] = base + MxoLightReachRva + 4;
+  uint8_t object[0x40], light[0x40], part[0x50];
+  auto put = [] (uint8_t* at, float v) { memcpy(at, &v, 4); };
+  int leftOut = 0, wrong = 0, passedOn = 0;
+  g_specials = 0;
+  for (int k = 0; k < cases; k++) {
+    float low[3], size[3], pos[3];
+    for (int axis = 0; axis < 3; axis++) {
+      low[axis] = rndf();
+      size[axis] = rnd32() % 30 ? float(rnd32() % 6000) / 100.0f : -float(rnd32() % 100);
+      put(object + MxoBoxMinOffset + 4 * axis, low[axis]);
+      put(object + MxoBoxMaxOffset + 4 * axis, low[axis] + size[axis]);
+    }
+    const MxoLightBox box = MxoLightBoxOf(object);
+    float reach = float(rnd32() % 15000) / 100.0f;
+    if (rnd32() % 30 == 0) reach = rnd32() % 2 ? -reach : 0.0f;
+    const bool hasPart = rnd32() % 10 != 0, isKnown = rnd32() % 8 != 0;
+    const uint32_t where = rnd32() % 4;
+    for (int axis = 0; axis < 3; axis++) {
+      pos[axis] = box.middle[axis] + float(int32_t(rnd32() % 60001) - 30000) / 100.0f;
+      if (where == 0) pos[axis] = box.middle[axis] + box.extent[axis] * (float(rnd32() % 2001) / 1000.0f - 1.0f);
+    }
+    if (where <= 1) {   // about as far from one side as the reach goes
+      const int axis = int(rnd32() % 3);
+      pos[axis] = box.middle[axis] + (rnd32() % 2 ? 1.0f : -1.0f) * (box.extent[axis] + reach * (0.97f + float(rnd32() % 61) / 1000.0f));
+    }
+    const uint32_t table = uint32_t(uintptr_t(isKnown ? known : other)), partAt = hasPart ? uint32_t(uintptr_t(part)) : 0;
+    memcpy(light, &table, 4);
+    memcpy(light + MxoLightPartOffset, &partAt, 4);
+    for (int axis = 0; axis < 3; axis++) put(light + MxoLightPosOffset + 4 * axis, pos[axis]);
+    put(part + MxoPartReachOffset, reach);
+
+    // the loop's decision, from the box as the loop rounds it
+    const double r = hasPart ? double(reach) : 0.0;
+    double distance = 0.0;
+    for (int axis = 0; axis < 3; axis++) {
+      const double offset = double(pos[axis]) - double(box.middle[axis]), extent = double(box.extent[axis]);
+      if (offset < -extent) distance += (offset + extent) * (offset + extent);
+      else if (offset > extent) distance += (offset - extent) * (offset - extent);
+    }
+    const bool loopDrops = r * r < distance;
+    const bool out = MxoLightOutOfReach(box, light, base);
+    if (out) leftOut++;
+    if (out && (!loopDrops || !isKnown)) wrong++;
+    if (!out && loopDrops && isKnown) passedOn++;
+  }
+  printf("== light filter: %d lights, %d left out, %d of them wrongly, %d passed on that the loop drops\n", cases, leftOut, wrong, passedOn);
+  return wrong;
+}
+
 #ifdef WITH_GAME
 #include "game_tests.inc"
 #endif
@@ -214,6 +271,7 @@ int main(int argc, char** argv) {
     bad += runSynth("t16", t16, false, iterations);
   }
   XT_tid = GetCurrentThreadId();
+  bad += lightFilterCheck(iterations);
   printf("== speed, FPU control word %04x (24-bit precision)\n", CwGame);
   benchSynth("t1", t1, BenchCalls); benchSynth("t2", t2, BenchCalls); benchSynth("t3", t3, BenchCalls); benchSynth("t4", t4, BenchCalls);
   benchSynth("t5", t5, BenchCalls); benchSynth("t6", t6, BenchCalls); benchSynth("t9", t9, BenchCalls); benchSynth("t10", t10, BenchCalls);

@@ -50,8 +50,9 @@ zero mismatches. The pass with huge, tiny, zero, infinite and NaN inputs reports
 translation made with `--exact-range`. The default, faster form differs there where a value leaves the
 float range ([docs/translator.md](../docs/translator.md#rounding)), and its counts must not change from one translator version to the
 next. A translated caller reaches the translation of its callee directly, so such a difference in a
-callee shows in its callers too. After the passes the program prints the time per call of eight of the
-routines, as x87 code and as translation.
+callee shows in its callers too. After the passes it checks the light filter on made-up lights against a plain reading of what the
+game's light loop decides: `left out ... wrongly` must be 0. Then it prints the time per call of eight
+of the routines, as x87 code and as translation.
 
 With `MXO_PLAIN=1` the game part fills the scratch area with ordinary float values only (no integers,
 pointers, huge or tiny numbers). The translation keeps values in the float range, so on such input it
@@ -69,6 +70,16 @@ cell): a map object with sane bounds, grid size and cell size, and positions mos
 to what the image holds before the next routine runs. The three routines that look a value up in a table
 of keys (`0x2FE4D0`, `0x2FE560`, `0x2FE670`) get a table with rising times, a time that mostly lies between
 two keys and a weight from 0 to 1. For them `reached=` counts the calls with a time between two keys.
+
+The light loop at `0x48FA40` gets an object with a box and a list of lights around it: inside the box,
+far away, and as far from one side as their reach goes. Most lists have up to 48 lights, one in eight
+has 257 to 456 as a street at night does, and some of those name only lights inside the box, where the
+filter has to step aside. Without `MXO_PLAIN=1` a light can also have a position that is not a number.
+The loop is tested the way the DLL installs it, through `MxoRunLightLoop` of `translator/mxo_lights.h`,
+so the original is compared with filter and translation together. `reached=` counts the calls in which the filter left a light out. Each call also
+runs the translation alone, and `lights-detail.txt` in the current folder says for how many calls either
+differs from the original and lists the lights of the first four such calls. A run of the whole game
+part starts that file afresh, a `child` run adds to it. `MXO_LIGHT_FILTER=0` leaves the filter out. On random memory the routine crashes at once, so this shaping is its only test.
 
 The image is loaded without its imports. Originals that call msvcr71's `floor` or `ceil` would crash
 where their translations compute the result in place, so those two import slots get the real functions.

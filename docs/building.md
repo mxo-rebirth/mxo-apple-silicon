@@ -203,6 +203,7 @@ Environment variables, in `cxbottle.conf` under `[EnvironmentVariables]`:
 | `DXVK_MXO_X87=0` | keep the graphics fixes, do not install the translated routines. First thing to try if the game misbehaves in the world. |
 | `DXVK_MXO_FASTMATH=0` | no math replacement at all, including the hand-written routines |
 | `DXVK_MXO_SQRT=0` | the game's `sqrt` import stays Wine's |
+| `DXVK_MXO_LIGHT_FILTER=0` | the game's light loop is handed every projector light again, not only those that can reach the object |
 | `DXVK_LOCK_RENAME_COPY=0` | buffer locks wait for the GPU again. `d3d9.lockRenameCopy = False` in `dxvk.conf` does the same |
 | `DXVK_HOIST_UPLOADS=0` | texture and buffer uploads interrupt the render pass again |
 | `DXVK_PREFAULT_MAPPED_MEMORY=0` | no pre-touching of mapped memory |
