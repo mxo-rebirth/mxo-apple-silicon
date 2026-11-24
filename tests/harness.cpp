@@ -1,5 +1,6 @@
 // Differential test: original x87 code against its SSE2 translation, bit for bit.
 #include <windows.h>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -94,6 +95,15 @@ static int diff(const void* a, const void* b, size_t size, size_t* where) {
   return 0;
 }
 
+// Bit for bit, from byte 'from' on: for integers. A small negative integer has the bits of a float NaN,
+// so diff would take any two of them for equal.
+static int diffExact(const void* a, const void* b, size_t from, size_t size, size_t* where) {
+  const uint32_t* x = (const uint32_t*)a; const uint32_t* y = (const uint32_t*)b;
+  for (size_t i = from / 4; i < size / 4; i++)
+    if (x[i] != y[i]) { *where = i * 4; return 1; }
+  return 0;
+}
+
 static MxoXFunc* findFunc(uint32_t* table, uint32_t rva) {
   for (MxoXFunc* f = (MxoXFunc*)table; f->size; f++)
     if (f->rva == rva) return f;
@@ -102,6 +112,7 @@ static MxoXFunc* findFunc(uint32_t* table, uint32_t rva) {
 
 struct In  { float f[16]; int32_t i[4]; double d[4]; int16_t w[2]; int64_t q; } __attribute__((packed));
 struct Out { float o[16]; double od[4]; int32_t oi[4]; int16_t ow[2]; int64_t oq; uint32_t pad[8]; } __attribute__((packed));
+static const size_t OutIntegers = offsetof(Out, oi);   // the routines write only integers from here on
 
 static int runSynth(const char* name, void (*fn)(), bool fpret, int iterations) {
   uint32_t rva = uint32_t((uint8_t*)fn - synth_begin);
@@ -134,7 +145,7 @@ static int runSynth(const char* name, void (*fn)(), bool fpret, int iterations) 
       fpu_setcw(CwGame);
     }
     size_t where = 0;
-    if (diff(&a, &b, sizeof(a), &where) || diff(&ra, &rb, 8, &where)) {
+    if (diff(&a, &b, OutIntegers, &where) || diffExact(&a, &b, OutIntegers, sizeof(a), &where) || diff(&ra, &rb, 8, &where)) {
       if (bad++ < 4) {
         printf("%-6s MISMATCH at out+%u: orig %08x xlat %08x (iteration %d)\n", name, unsigned(where),
           *(uint32_t*)((char*)&a + where), *(uint32_t*)((char*)&b + where), it);

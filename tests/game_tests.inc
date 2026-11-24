@@ -531,7 +531,11 @@ static int runGame(int iterations) {
   {
     // the float-to-integer helper against the inline fast path used by the translations
     HMODULE mod = LoadLibraryExA(clientPath(), nullptr, DONT_RESOLVE_DLL_REFERENCES);
-    MxoXFunc* helper = mod ? findHelper() : nullptr;
+    if (!mod) {   // or every routine would be listed as lost and the total would still be 0
+      printf("cannot load %s. Set MXO_CLIENT_DLL to the game's client.dll\n", clientPath());
+      return 1;
+    }
+    MxoXFunc* helper = findHelper();
     if (helper) {
       void* ftol = (uint8_t*)mod + helper->rva;
       int badf = 0, fast = 0;
