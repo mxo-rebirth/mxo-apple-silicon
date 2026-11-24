@@ -200,15 +200,16 @@ When the game creates its Direct3D device, the DLL:
    msvcr71's own function, and callers whose callees were skipped
 3. pins itself in memory, so that nothing can unload it while `client.dll` jumps into it
 4. pauses all other threads, writes a 5-byte jump at the start of each remaining routine, and
-   resumes them. A routine that a thread is just entering is left out.
+   resumes them. A routine that a thread is just entering is left out. If a running thread
+   cannot be paused, no jump is written at all.
 5. checks, at once and then on every frame, that the FPU control word and the SSE control
-   register (MXCSR) are what the translation assumes (24-bit precision, round to nearest,
-   exceptions masked, no flushing to zero), and switches the translated routines off while they
-   are not
+   register (MXCSR) are what the translation assumes (24-bit precision and round to nearest
+   in the control word. In MXCSR round to nearest, exceptions masked and no flushing to zero),
+   and switches the translated routines off while they are not
 
 The log names every routine it left alone and why: its code in memory differs, an add-on uses
-it, a routine it calls was left alone, a thread was entering it, or its code could not be made
-writable.
+it, a routine it calls was left alone, a thread was entering it, a thread could not be paused,
+or its code could not be made writable.
 
 Translated routines run only on the thread that owns the Direct3D device. Other threads have a
 different FPU precision, so for them the jump leads to a few instructions that do what the jump

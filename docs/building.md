@@ -11,15 +11,18 @@ see [crossover.md](crossover.md) first.
 
 ## The setup
 
-`scripts/setup.sh` first checks the Mac: Apple Silicon, the macOS version, CrossOver, Homebrew
-and the build tools (`mingw-w64 meson ninja glslang`). It stops there when something is missing
-and says what to install. Homebrew installs from an administrator account only. In such an
-account the setup offers to install the build tools. In a standard account it names the command
-to run in an administrator account first. It then offers to quit CrossOver if it is open (it
-shows new icons only after it starts again). In a bottle without a game the game step comes first. Then the
-setup asks its questions and runs the other steps in this order.
-[quick-start.md](quick-start.md) is the short way through it. The setup stops if a game is
-running.
+`scripts/setup.sh` first checks the Mac: Apple Silicon, the macOS version, CrossOver, Apple's
+command line developer tools, Homebrew and the build tools (`mingw-w64 meson ninja glslang`).
+It stops there when something this run needs is missing, and says what to install. Homebrew
+installs only from the account that installed it, an administrator account. There the setup
+offers to install the build tools. In any other account it names the command to run in that
+account first.
+
+In a bottle without a game the game step comes first. A run of every step, or one with `game`
+or `icons`, then offers to quit CrossOver if it is open, because CrossOver shows new icons only
+after it starts again. `--yes` leaves it open. Then the setup asks its questions and runs the
+other steps in this order. [quick-start.md](quick-start.md) is the short way through it. The
+setup stops if a game is running.
 
 1. **game**, in a bottle without a game: makes the bottle, puts the client in `C:\Games\MxO`
    (from the MxOEmu project's page, a folder, an archive or an `https` link) and installs the
@@ -38,13 +41,16 @@ running.
    working.
 5. **detail**, on request: graphics settings and the main display's size in each game's
    `options.cfg`, and 16× anisotropic filtering in `C:\Games\dxvk\dxvk.conf`. There are two
-   sets, and the setup offers the one for the Mac it runs on first:
+   sets, and the question names the one for the Mac it runs on. Return takes that one in a game
+   without settings. Where a game has settings, Return and `--yes` leave them. The step named
+   by itself (`detail`) starts on this Mac's set, and `--yes detail` writes it.
    - maximum, for an M3, M4 or newer: the highest Video Options values, with
      `Client_RenderThrottle_Override = 1`
    - lighter, for an M1 or M2: the same with the draw distance held at 70%
      (`Client_RenderThrottle_Override = 0.7`), no character shadows, no wet streets and no
-     anti-aliasing. It is a first version: its parts were measured on the M4 only
-     ([measurements.md](measurements.md#settings-that-change-the-numbers)).
+     anti-aliasing. It is a first version. On the M4, anti-aliasing cost a few fps and
+     character shadows 12 to 13% in a crowd ([measurements.md](measurements.md#in-a-crowd)).
+     The 70% draw distance and the wet streets are not measured.
 6. **intro**, on request: `EnableSplash = 0` in each game's `useropts.cfg`.
 7. **music**, Revived only: `music = on` in its starter's music guard, and the music setting in
    its `options.cfg` and `useropts.cfg` back to 1. A later run of every step leaves
@@ -104,8 +110,8 @@ brew install mingw-w64 meson ninja glslang
 scripts/build.sh "/path/to/your/client.dll"
 ```
 
-`brew install` works in an administrator account only. The build itself runs in any account
-once the tools are there.
+`brew install` works only in the account that installed Homebrew. The build itself runs in any
+account once the tools are there.
 
 `client.dll` is the one in your game folder. After five to ten minutes the result is
 `build/d3d9.dll`. The script

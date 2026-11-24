@@ -32,7 +32,7 @@ The table of files is in [docs/development.md](docs/development.md#layout). A ne
 - Programs are found by name with `ps -o comm=`. Their command lines are never read or printed.
 - The setup never looks for, prints or sends passwords, launcher logins or credential stores, and keeps every file it replaces with a `.setup-backup` suffix. Registry values and CrossOver's shortcut list are the exceptions.
 - Colours, frames and animation appear only on a terminal. Piped, every message is a plain line that still makes sense alone.
-- Every question has a default, and `--yes` takes it. A default never replaces settings a player already has. Where the game comes from is the one question `--yes` skips: a 1.3 GB download is not started unasked.
+- Every question has a default, and `--yes` takes it. A default never replaces settings a player already has. Two questions `--yes` does not answer with yes: where the game comes from (a 1.3 GB download is not started unasked) and quitting CrossOver (an app is not closed unasked).
 - A file in the bottle is written next to the old one and renamed, so it is there whole or not at all
 - A temporary folder is entered in `LEFTOVERS` when it is made. The exit trap removes it however the setup ends.
 - A message names a step as its command: `scripts/setup.sh NAME`

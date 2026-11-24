@@ -102,7 +102,7 @@ What is left in "Wine and system code":
 
 ## Settings that change the numbers
 
-| Setting | Effect at 3440×1440 |
+| Setting | Effect (at 3440×1440 on the M4 unless it says otherwise) |
 |---|---|
 | Rejacked launcher, "new glow shader for Screen Filter: Over-Bright (BETA)" (it rewrites `rezmap.ltb`) | halves the frame rate (18–29 fps instead of 36–52) |
 | Wet-street reflections while it rains, which Revived switches on ([settings](client-notes.md#settings)) | Revived: 45–55 fps down to about 30 |
@@ -161,5 +161,5 @@ profile ([what the loop is](client-notes.md#in-a-crowd)).
 - **Not tested:** long sessions, interiors, other districts.
 - **One other Mac, an M1 at 2560×1440:** Revived runs at about 70 fps there, read from the
   frame-rate counter by the player. It ran at about 40 fps while the animation behind the
-  launcher's window was on. The setup's lighter settings were probably not in effect in either
-  session. No frame log yet.
+  launcher's window was on. Whether the setup's lighter settings were in effect in either
+  session is not confirmed. No frame log yet.

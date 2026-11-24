@@ -60,13 +60,13 @@ open problems: [measurements.md](measurements.md).
   ([measurements.md](measurements.md)).
 - The translated math gives up the x87 unit's wider exponent range for speed. Results match
   for every value a `float` can hold. `xlat.py --exact-range` keeps the full range, at a cost.
-- The DLL changes `client.dll` in memory. That is also what cheats do. See the questions below.
+- The DLL changes `client.dll` in memory. That is also what cheats do.
 - The DLL does not check that it runs on Apple Silicon. On a real x86 processor the translated
   code is expected to be slightly slower than the original.
 
 ## Other platforms
 
-Only one setup was tested. This section is what we expect from how the fixes work. None of it
+Only Apple Silicon Macs with CrossOver were tested. This section is what we expect from how the fixes work. None of it
 has been measured.
 
 The math replacement helps where x86 code is translated and x87 is emulated in software. The

@@ -6,7 +6,8 @@
 Makes The Matrix Online run fast in CrossOver on Apple Silicon Macs. It supports MxO Rejacked,
 MxO Revived and MxOEmu.
 
-It is the result of reverse engineering: taking the 2009 game apart without its source code.
+It is the result of reverse engineering: taking the game's 2009 client apart without its
+source code.
 The game does its math with an old kind of processor instruction, which Apple's chips can only
 imitate slowly. This project translates 535 of the game's math routines into the modern kind
 and swaps them in when the game starts. The results stay the same. It also fixes fifteen
@@ -14,8 +15,8 @@ graphics problems between the game and the Mac's graphics chip.
 [How it works](docs/how-it-works.md)
 
 On an M4 the game went from about 15 fps, with the game cutting its draw distance, to 55–89 fps
-at full draw distance and maximum detail, fullscreen at 3440×1440. An M1 runs it at about
-70 fps at 2560×1440.
+at full draw distance and maximum detail, fullscreen at 3440×1440. On an M1 the frame-rate
+counter showed about 70 fps in Revived at 2560×1440.
 
 ![The game in a window on a Mac desktop, the frame-rate counter at the top left showing 63 fps](docs/screenshot.png)
 
@@ -27,9 +28,9 @@ MxO Revived at 63 fps, in a window on a 3440×1440 screen.
 - [CrossOver](https://www.codeweavers.com/crossover)
 - [Homebrew](https://brew.sh). Its installer also brings Apple's command line developer tools,
   which the setup needs
-- Homebrew's build tools. In an administrator account the setup installs them for you. A
-  standard account cannot install them: run this in an administrator account first:
-  `brew install mingw-w64 meson ninja glslang`
+- Homebrew's build tools. The setup installs them for you in the account that installed
+  Homebrew, an administrator account. Any other account cannot install them: run this in
+  that account first: `brew install mingw-w64 meson ninja glslang`
 
 The setup checks all of this before it changes anything, and says what is missing.
 
@@ -92,11 +93,9 @@ Then start the game from its launcher as usual.
 - **Rejacked:** untick "Use the new glow shader for 'Screen Filter: Over-Bright' (BETA)" in the
   launcher. It halves the frame rate at high resolutions. If the launcher asks for the game
   folder, choose `C:\Games\MxO`.
-- **Revived:** check that the rain animation behind its launcher's window (the background
-  video) is off in the launcher's settings. Left on, it keeps the processor busy while you
-  play: an M1 ran the game at about 40 fps with it and at about 70 without. The setup offers to
-  switch it off once the launcher has been started once: the same command with `video` at the
-  end.
+- **Revived:** switch off the rain animation behind the launcher's window. It costs frame rate
+  while you play. Do it in the launcher's settings or, after the launcher's first start, with
+  `video` at the end of the command.
 - **Stutter:** close memory-hungry apps before playing.
 - **Who is online:** <https://whoisjackedin.com>
 
@@ -119,8 +118,8 @@ The game goes back to CrossOver's normal graphics. What stays is listed in
 
 - **Use it at your own risk.** See the [licence](LICENSE).
 - **Our advice, not a requirement: play under a separate macOS account.** Programs in CrossOver
-  can reach every file of the account they run in. In a standard account, the build tools have
-  to be there first (see "What you need").
+  can reach every file of the account they run in. Such an account cannot install the build
+  tools, so they have to be there first (see "What you need").
 - **Built on your Mac, from your game.** No game file is in this repository. Do not share the
   built `d3d9.dll`.
 - **It replaces some of the game's math code in memory** with faster code that gives the same
