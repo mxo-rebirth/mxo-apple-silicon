@@ -13,8 +13,9 @@ and swaps them in when the game starts. The results stay the same. It also fixes
 graphics problems between the game and the Mac's graphics chip.
 [How it works](docs/how-it-works.md)
 
-On the test machine (M4) the game went from about 15 fps, with the game cutting its draw distance,
-to 55–89 fps at full draw distance and maximum detail, fullscreen at 3440×1440.
+On an M4 the game went from about 15 fps, with the game cutting its draw distance, to 55–89 fps
+at full draw distance and maximum detail, fullscreen at 3440×1440. An M1 runs it at about
+70 fps at 2560×1440.
 
 ![The game in a window on a Mac desktop, the frame-rate counter at the top left showing 63 fps](docs/screenshot.png)
 
@@ -32,7 +33,8 @@ MxO Revived at 63 fps, in a window on a 3440×1440 screen.
 
 The setup checks all of this before it changes anything, and says what is missing.
 
-Tested on one Mac (M4) with macOS 27 and CrossOver 26.3. The setup can download the game itself.
+Tested on an M4 (macOS 27, CrossOver 26.3) and on an M1, the first Apple Silicon chip, so every
+Apple Silicon Mac should run it. The setup can download the game itself.
 
 ## Set up
 
@@ -90,8 +92,18 @@ Then start the game from its launcher as usual.
 - **Rejacked:** untick "Use the new glow shader for 'Screen Filter: Over-Bright' (BETA)" in the
   launcher. It halves the frame rate at high resolutions. If the launcher asks for the game
   folder, choose `C:\Games\MxO`.
+- **Revived:** check that the rain animation behind its launcher's window (the background
+  video) is off in the launcher's settings. Left on, it keeps the processor busy while you
+  play: an M1 ran the game at about 40 fps with it and at about 70 without. The setup offers to
+  switch it off once the launcher has been started once: the same command with `video` at the
+  end.
 - **Stutter:** close memory-hungry apps before playing.
 - **Who is online:** <https://whoisjackedin.com>
+
+## Problems
+
+Known problems and what to do about them:
+[docs/crossover.md](docs/crossover.md#things-that-still-go-wrong).
 
 ## Undo
 
@@ -119,7 +131,7 @@ The game goes back to CrossOver's normal graphics. What stays is listed in
 | | |
 |---|---|
 | [docs/quick-start.md](docs/quick-start.md) | step by step, without the details |
-| [docs/crossover.md](docs/crossover.md) | setting up by hand |
+| [docs/crossover.md](docs/crossover.md) | setting up by hand, known problems |
 | [docs/building.md](docs/building.md) | every setup step, building by hand, switches |
 | [docs/how-it-works.md](docs/how-it-works.md) | why the game is slow on Apple Silicon and what the fix is |
 | [docs/client-notes.md](docs/client-notes.md) | notes on the client |

@@ -107,6 +107,7 @@ What is left in "Wine and system code":
 | Rejacked launcher, "new glow shader for Screen Filter: Over-Bright (BETA)" (it rewrites `rezmap.ltb`) | halves the frame rate (18–29 fps instead of 36–52) |
 | Wet-street reflections while it rains, which Revived switches on ([settings](client-notes.md#settings)) | Revived: 45–55 fps down to about 30 |
 | Revived's `mxrdisp` interface scaling | about 40% of the GPU |
+| The rain animation behind the Revived launcher's window (its background video), left on while playing | on an M1 at 2560×1440: about 40 fps instead of about 70, read from the frame-rate counter by the player |
 | `DXVK_MXO_RESPECT_ADDONS` at its default, with Revived's add-on files next to the game | about 10 fps less than with `0`. Seen by the player comparing two bottles, not taken from a frame log |
 | Anti-aliasing | a few fps |
 | The green tint | nothing measurable |
@@ -158,6 +159,7 @@ profile ([what the loop is](client-notes.md#in-a-crowd)).
 - **Thirteen routines** translate but cannot be verified by the tests, so they stay original
   ([client-notes.md](client-notes.md#routines-we-identified)).
 - **Not tested:** long sessions, interiors, other districts.
-- **One other Mac, an M1:** the maximum settings ran at about 40 fps there, read from the
-  frame-rate counter by the player. No frame log yet. The setup's lighter settings are meant for
-  it and have not been measured.
+- **One other Mac, an M1 at 2560×1440:** Revived runs at about 70 fps there, read from the
+  frame-rate counter by the player. It ran at about 40 fps while the animation behind the
+  launcher's window was on. The setup's lighter settings were probably not in effect in either
+  session. No frame log yet.

@@ -4,7 +4,7 @@ The 2009 client of The Matrix Online runs badly in CrossOver on Apple Silicon Ma
 says why, what this repository changes and what it gains. The documents listed at the end have
 the details.
 
-It is experimental: tested on one Mac, with MxO Rejacked, MxO Revived and the MxOEmu launcher. No
+It is experimental: tested on two Macs, an M4 and an M1, with MxO Rejacked, MxO Revived and the MxOEmu launcher. No
 game file is in the repository. The replacement code is generated on the player's Mac from their
 own `client.dll`.
 
@@ -55,8 +55,9 @@ open problems: [measurements.md](measurements.md).
 
 ## Limits
 
-- Not tested: long sessions, interiors, other districts. Besides the M4 it has run on one M1,
-  without measurements yet ([measurements.md](measurements.md)).
+- Not tested: long sessions, interiors, other districts. The numbers on this page are the M4's.
+  An M1 has run it too, with its frame rate read from the counter only
+  ([measurements.md](measurements.md)).
 - The translated math gives up the x87 unit's wider exponent range for speed. Results match
   for every value a `float` can hold. `xlat.py --exact-range` keeps the full range, at a cost.
 - The DLL changes `client.dll` in memory. That is also what cheats do. See the questions below.

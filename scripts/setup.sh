@@ -1516,7 +1516,8 @@ audio_high_quality = 1
 "
 
 # The lighter set: the maximum, then these. For the M1 and M2, whose processors run the game's main
-# thread slower. What they are worth on the M4 is in docs/measurements.md. On an M1 they are untried.
+# thread slower. What they are worth on the M4 is in docs/measurements.md. On an M1 they are
+# not measured yet.
 # A Client_RenderThrottle_Override between 0 and 1 holds the draw distance at that share.
 LIGHT_DETAIL="
 Client_RenderThrottle_Override = 0.7
@@ -1839,7 +1840,7 @@ fi
 if ! named uninstall; then
   if [ $CROSSOVER_CLOSED = 1 ]; then info "Open CrossOver again: it shows the launchers' icons."; fi
   if [ -n "$REVIVED" ] && [ ! -f "$REVIVED/launcher-settings.json" ]; then
-    info "Revived's launcher plays a video that keeps a processor core busy. After its first start this switches it off: scripts/setup.sh video"
+    note "Revived's launcher plays a rain animation behind its window, also while you play, which costs frame rate. Switch it off in the launcher's settings, or after its first start with: scripts/setup.sh video"
   fi
 fi
 site_frame
