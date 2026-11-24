@@ -45,7 +45,9 @@ def write_whole(path, data):
     """Writes DATA to a new file next to PATH and renames it over PATH."""
     new = path + '.new'
     try:
-        with open(new, 'wb') as file:
+        if os.path.lexists(new):   # a leftover, or a link that would be written through
+            os.unlink(new)
+        with open(new, 'xb') as file:
             file.write(data)
             file.flush()
             os.fsync(file.fileno())
@@ -212,6 +214,24 @@ def video_off(path):
 
 # --- the publishers' pages ---
 
+def without_scripts(page):
+    """The page without its script and style blocks, in one pass: a regular expression takes time
+    that grows with the square of the page on unclosed blocks."""
+    lower, kept, at = page.lower(), [], 0
+    opening = re.compile(r'<(script|style)\b')
+    while True:
+        found = opening.search(lower, at)
+        if not found:
+            kept.append(page[at:])
+            break
+        kept.append(page[at:found.start()])
+        end = lower.find('</' + found.group(1), found.end())
+        if end < 0:
+            break
+        at = end
+    return ' '.join(kept)
+
+
 def page_link(page_path, base, pattern):
     """Prints the link to the file a page offers and the SHA-256 the page prints after the file's
     name. Returns 1 when the page has no such link, no checksum for it, or a link that is not https."""
@@ -222,7 +242,7 @@ def page_link(page_path, base, pattern):
     name = link.group(2)
     url = urljoin(base, (link.group(1) or '') + name)
     # the checksum that comes after the file's name, before the page names another file
-    text = html.unescape(re.sub(r'<[^>]*>', ' ', re.sub(r'(?s)<(script|style)\b.*?</\1>', ' ', page)))
+    text = html.unescape(re.sub(r'<[^<>]*>', ' ', without_scripts(page)))
     found = re.search(re.escape(name) + r'(?:(?!\.exe|\.AppImage)[\s\S]){0,200}?\b([0-9A-Fa-f]{64})\b', text)
     if not found or not url.startswith('https://'):
         return 1

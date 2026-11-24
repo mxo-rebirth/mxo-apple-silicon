@@ -35,8 +35,9 @@
 #   video      Revived only: switch off the video behind its launcher, which keeps a core busy
 #   uninstall  the game executables go back to Wine's Direct3D 9 (DirectMusic stays, the game needs it)
 #
-# The script never reads passwords, launcher logins or credential stores, and never prints command
-# lines of running programs. Every file it replaces is kept with a ".setup-backup" suffix.
+# The script never looks for, prints or sends passwords, launcher logins or credential stores, and
+# never prints command lines of running programs. It reads the settings files it edits. Every file it
+# replaces is kept with a ".setup-backup" suffix.
 
 set -euo pipefail
 
@@ -69,6 +70,9 @@ DX2010_URL="https://web.archive.org/web/20100205000000id_/https://download.micro
 DX2010_SHA=f6d191e89a963d7cca34f169d30f49eab99c1ed3bb92da73ec43617caaa1e93f
 DX2006_URL="https://web.archive.org/web/20100920035904/https://download.microsoft.com/download/3/9/7/3972f80c-5711-4e14-9483-959d48a2d03b/directx_apr2006_redist.exe"
 DX2006_SHA=dd8c3d401efe4561b67bd88475201b2f62f43cd23e4acc947bb34a659fa74952
+HTTPS_ONLY=(--proto "=https" --proto-redir "=https")   # for every download, redirects included
+PAGE_LIMIT=(--max-filesize 8000000)                # a web page or list the setup reads
+
 DM_DLLS=(dmband dmcompos dmime dmloader dmscript dmstyle dmsynth dmusic dswave dsound)
 
 # the projects' installer pages, each with a SHA-256, and Microsoft's .NET release list
@@ -476,17 +480,17 @@ fetch_file() {   # fetch_file URL OUT TITLE [resume]: with a progress bar, retur
   local url=$1 out=$2 title=$3 resume=${4:-} rc=0 total have pct fill width tail i=0 rows=0
   if [ $FANCY = 0 ]; then
     info "$title"
-    curl -L --fail -sS ${resume:+-C -} -o "$out" "$url" || rc=$?
+    curl "${HTTPS_ONLY[@]}" -L --fail -sS ${resume:+-C -} -o "$out" "$url" || rc=$?
     return $rc
   fi
   mkdir -p "$CACHE" || die "could not make $CACHE"
-  total=$(curl -sIL --max-time 20 "$url" 2>/dev/null | tr -d '\r' \
+  total=$(curl "${HTTPS_ONLY[@]}" -sIL --max-time 20 "$url" 2>/dev/null | tr -d '\r' \
     | awk 'tolower($1) == "content-length:" { n = $2 } END { print n + 0 }') || total=0
   if [ $GLYPHS = 1 ]; then
     row "$M_DOWN" "$GRN" "$title"
     rows=$ROW_LINES
   fi
-  curl -L --fail -sS ${resume:+-C -} -o "$out" "$url" 2>> "$LOG" &
+  curl "${HTTPS_ONLY[@]}" -L --fail -sS ${resume:+-C -} -o "$out" "$url" 2>> "$LOG" &
   JOB=$!
   printf '\033[?25l'
   while kill -0 "$JOB" 2>/dev/null; do
@@ -789,6 +793,7 @@ is_wine_builtin() {   # Wine marks its own DLLs with this text in the DOS header
 }
 
 copy_whole() {   # copy_whole SOURCE TARGET: the target is there whole or not at all
+  rm -f "${2:?}.new" || die "could not remove $2.new"   # a leftover, or a link that would be written through
   cp "$1" "$2.new" || { rm -f "${2:?}.new"; die "could not copy $(basename "$1") to $2"; }
   mv "$2.new" "$2" || die "could not put $2 in place"
 }
@@ -882,11 +887,11 @@ download() {   # download URL CHECKSUM FILE FROM: into the cache, unless it is t
 }
 
 page_link() {   # page_link PAGE NAME-PATTERN: "URL SHA256" of the installer on a project's download page
-  curl -fsSL --max-time 60 "$1" 2>/dev/null | helper page-link - "$1" "$2"
+  curl "${HTTPS_ONLY[@]}" "${PAGE_LIMIT[@]}" -fsSL --max-time 60 "$1" 2>/dev/null | helper page-link - "$1" "$2"
 }
 
 dotnet_link() {   # "URL SHA512" of the newest .NET Desktop Runtime installer (x64) on Microsoft's release list
-  curl -fsSL --max-time 120 "$DOTNET_RELEASES" 2>/dev/null | helper dotnet-link -
+  curl "${HTTPS_ONLY[@]}" "${PAGE_LIMIT[@]}" -fsSL --max-time 120 "$DOTNET_RELEASES" 2>/dev/null | helper dotnet-link -
 }
 
 fetch_installer() {   # fetch_installer "URL CHECKSUM" FROM: into the cache. Sets INSTALLER
@@ -941,7 +946,7 @@ has_revived() {   # looks afresh: Revived's installer may just have finished
 
 mxoemu_link() {   # the "Full Client" link on the MxOEmu page: https, on that project's own hosts only
   local page link="" version=${CLIENT_VERSION//./\\.}
-  page=$(curl -fsSL --max-time 60 "$MXOEMU_PAGE" 2>/dev/null) || return 1
+  page=$(curl "${HTTPS_ONLY[@]}" "${PAGE_LIMIT[@]}" -fsSL --max-time 60 "$MXOEMU_PAGE" 2>/dev/null) || return 1
   IFS= read -r link < <(grep -oE "https://([A-Za-z0-9-]+\\.)*mxoemu\\.info/[A-Za-z0-9./_-]*${version}[A-Za-z0-9._-]*\\.7z" <<< "$page") || true
   [ -n "$link" ] || return 1
   printf '%s\n' "$link"
@@ -987,6 +992,12 @@ download_client() {   # download_client LINK: into the cache, resuming an earlie
 
 # stage_client FROM STAGING [DOWNLOAD]: copies a folder or unpacks an archive to STAGING, outside drive C.
 # One rename then puts the game in drive C whole or not at all. Sets STAGED_CLIENT to client.dll's folder.
+no_links() {   # a game has no symbolic links: one could make a later write land outside the bottle
+  if [ -n "$(find "$1" -type l -print -quit 2>/dev/null)" ]; then
+    die "the game files hold a symbolic link, which a game does not need. They were not used"
+  fi
+}
+
 stage_client() {
   local from=$1 staging=$2 download=${3:-} src
   rm -rf "${staging:?}" || die "could not clear $staging"
@@ -996,6 +1007,7 @@ stage_client() {
     src=$(first_client "$from" 3)
     [ -n "$src" ] || die "no client.dll in $from"
     spin "Copying the game into the bottle" cp -Rc "$src/." "$staging/game/" || die "copying failed"
+    no_links "$staging/game"
     STAGED_CLIENT="$staging/game"
     return 0
   fi
@@ -1003,6 +1015,7 @@ stage_client() {
     if [ -n "$download" ]; then rm -f "${download:?}" || true; fi   # or the next run would continue a broken download
     die "could not unpack it (zip, 7z and tar archives work, and a link has to lead to the file itself, not to a web page)"
   fi
+  no_links "$staging/game"
   STAGED_CLIENT=$(first_client "$staging/game" "$CLIENT_DEPTH")
   [ -n "$STAGED_CLIENT" ] || die "no client.dll in that archive"
 }
@@ -1187,8 +1200,8 @@ put_sound_bank() {   # the instruments DirectMusic plays with
   tar -xf "$CACHE/directx_apr2006_redist.exe" -C "$TMP" DirectX.cab || die "could not unpack directx_apr2006_redist.exe"
   tar -xf "$TMP/DirectX.cab" -C "$TMP" gm16.dls || die "no gm16.dls in Microsoft's DirectX package"
   mkdir -p "$SYS/drivers" "$DRIVE/windows/system32/drivers" || die "could not make the drivers folders"
-  copy_whole "$TMP/gm16.dls" "$DRIVE/windows/system32/drivers/gm.dls"
-  copy_whole "$TMP/gm16.dls" "$SYS/drivers/gm.dls"   # last: the check above looks at this one
+  put_file "$TMP/gm16.dls" "$DRIVE/windows/system32/drivers/gm.dls"
+  put_file "$TMP/gm16.dls" "$SYS/drivers/gm.dls"   # last: the check above looks at this one
   ok "music sound bank: gm.dls installed"
 }
 

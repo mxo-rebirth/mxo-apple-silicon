@@ -42,7 +42,7 @@ if [ "${MXO_COMPILER:-clang}" != gcc ] && [ ! -x "$LLVM_MINGW/bin/i686-w64-mingw
   echo "== downloading llvm-mingw $LLVM_MINGW_VERSION"
   mkdir -p "$WORK/toolchain"
   archive="$WORK/toolchain/llvm-mingw-$LLVM_MINGW_VERSION.tar.xz"
-  curl -L --fail -o "$archive.part" \
+  curl --proto =https --proto-redir =https -L --fail -o "$archive.part" \
     "https://github.com/mstorsjo/llvm-mingw/releases/download/$LLVM_MINGW_VERSION/llvm-mingw-$LLVM_MINGW_VERSION-ucrt-macos-universal.tar.xz"
   echo "$LLVM_MINGW_SHA256  $archive.part" | shasum -a 256 -c - >/dev/null || die "llvm-mingw checksum mismatch"
   mv "$archive.part" "$archive"
@@ -62,7 +62,7 @@ else
   TARBALL="$WORK/crossover-sources-$VERSION.tar.gz"
   if [ ! -f "$TARBALL" ]; then
     echo "== downloading CodeWeavers' source for CrossOver $VERSION"
-    curl -L --fail -o "$TARBALL.part" "https://media.codeweavers.com/pub/crossover/source/crossover-sources-$VERSION.tar.gz"
+    curl --proto =https --proto-redir =https -L --fail -o "$TARBALL.part" "https://media.codeweavers.com/pub/crossover/source/crossover-sources-$VERSION.tar.gz"
     mv "$TARBALL.part" "$TARBALL"
   fi
   # The checksum is the default version's. Another CROSSOVER_VERSION and a tarball given as argument are taken as they are.

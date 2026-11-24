@@ -44,7 +44,7 @@ have_git() {   # the git of macOS without the developer tools only opens a windo
 is_empty() { [ ! -e "$1" ] || [ -z "$(ls -A "$1" 2>/dev/null)" ]; }
 
 clone_source() {   # REPO DIR: the newest commit only
-  git clone -q --depth 1 --branch "$BRANCH" "$1" "$2" || die "could not clone $1"
+  git clone -q --depth 1 --branch "$BRANCH" -- "$1" "$2" || die "could not clone $1"
   git -C "$2" config "$MARK" true || die "could not mark the clone in $2"
 }
 
@@ -62,7 +62,7 @@ update_source() {   # DIR: git rewrites only the files that changed, so the setu
 
 download_source() {   # URL DIR: over an earlier download, whose build folder with the large downloads stays
   TMP=$(mktemp -d) || die "could not make a temporary folder"
-  curl -fsSL -o "$TMP/source.tar.gz" "$1" || die "could not download $1"
+  curl --proto =https --proto-redir =https -fsSL -o "$TMP/source.tar.gz" "$1" || die "could not download $1"
   mkdir "$TMP/source" || die "could not make a folder in $TMP"
   tar -xzf "$TMP/source.tar.gz" -C "$TMP/source" --strip-components 1 || die "could not unpack the download"
   [ -f "$TMP/source/scripts/setup.sh" ] || die "the downloaded archive has no scripts/setup.sh"
@@ -80,10 +80,11 @@ main() {
   local here="" input=/dev/stdin
 
   [ "$(uname -s)" = Darwin ] || die "this is for macOS"
-  # Through "bash -c" and on standard input the script has no path: BASH_SOURCE is empty and $0 is the
-  # shell or the first argument.
-  if [ -n "${BASH_SOURCE[0]:-}" ]; then
-    here=$(cd "$(dirname -- "${BASH_SOURCE[0]}")" 2>/dev/null && pwd) || here=""
+  # Through "bash -c" and on standard input the script has no path: BASH_SOURCE is empty, or in bash 4
+  # and newer a word such as "environment" or "main".
+  local self=${BASH_SOURCE[0]:-}
+  if [ "${self##*/}" = install.sh ]; then
+    here=$(cd "$(dirname -- "$self")" 2>/dev/null && pwd) || here=""
   fi
   if [ -n "$here" ] && [ -f "$here/install.sh" ] && [ -f "$here/scripts/setup.sh" ]; then
     dir=$here
@@ -92,6 +93,8 @@ main() {
   elif have_git && is_empty "$dir"; then
     echo "Cloning the setup to $dir"
     clone_source "$repo" "$dir"
+  elif ! is_empty "$dir" && [ ! -f "$dir/scripts/setup.sh" ]; then
+    die "$dir holds other files. Move them away or set MXO_DIR to another folder"
   else
     echo "Downloading the setup to $dir"
     download_source "$source" "$dir"

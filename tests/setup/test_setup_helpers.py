@@ -13,6 +13,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from contextlib import redirect_stdout
 
@@ -214,6 +215,14 @@ class Video(WithFolder):
         self.assertEqual(self.read(settings), b'not json')
         self.assert_nothing_left_over()
 
+    def test_a_link_in_place_of_the_new_file_is_not_written_through(self):
+        outside = self.file('outside.txt', 'untouched')
+        settings = self.file('launcher-settings.json', '{"BackgroundVideo": true}')
+        os.symlink(outside, settings + '.new')
+        helpers.video_off(settings)
+        self.assertEqual(self.read(outside), b'untouched')
+        self.assertEqual(json.loads(self.read(settings)), {'BackgroundVideo': False})
+
 
 class Pages(WithFolder):
     CHECKSUM = 'AB' * 32
@@ -239,6 +248,19 @@ class Pages(WithFolder):
         self.assertEqual(helpers.page_link(page, 'http://example.org/', r'launcher-[0-9.]+-win64\.exe'), 1)
         bare = self.file('bare.html', self.PAGE.replace(self.CHECKSUM, 'none'))
         self.assertEqual(helpers.page_link(bare, 'https://example.org/', r'launcher-[0-9.]+-win64\.exe'), 1)
+
+    def test_unclosed_blocks_take_no_long(self):
+        page = self.file('page.html', '<script ' * 200000 + '<' * 200000 + self.PAGE)
+        started = time.monotonic()
+        self.assertEqual(helpers.page_link(page, 'https://example.org/', r'launcher-[0-9.]+-win64\.exe'), 1)
+        self.assertLess(time.monotonic() - started, 5)
+
+    def test_a_script_block_hides_its_text(self):
+        page = self.file('page.html', self.PAGE.replace('<p>', '<SCRIPT>var x = "launcher-1.2.3-win64.exe %s"</script><p>' % ('EE' * 32)))
+        out = io.StringIO()
+        with redirect_stdout(out):
+            helpers.page_link(page, 'https://example.org/', r'launcher-[0-9.]+-win64\.exe')
+        self.assertIn(self.CHECKSUM.lower(), out.getvalue())
 
     def test_the_newest_desktop_runtime(self):
         wanted = {'name': 'windowsdesktop-runtime-win-x64.exe', 'url': 'https://example.org/new.exe', 'hash': 'EF' * 64}
