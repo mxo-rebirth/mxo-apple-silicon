@@ -1,9 +1,6 @@
-// Blind differential test of the translated game routines against the real client.dll.
-// Each routine is called with random floats / pointers into a scratch arena, once as the original
-// and once as the translation. The arena, the image's global data and st0 must come out identical. Of eax
-// the low byte counts where the translator knows that the routine's own integer code sets it before every
-// return (alResult): that is the byte a bool comes back in. The rest of eax is compared and reported, but
-// not counted, because a status word read leaves other bits there than its translation does.
+// Blind differential test of the translated game routines against the real client.dll (tests/README.md).
+// Of eax only al counts, and only with alResult (the routine's own integer code sets it before every return):
+// a status word read leaves other bits in the rest than its translation does.
 #include <csetjmp>
 #include <emmintrin.h>
 
@@ -37,7 +34,7 @@ static const size_t   ShapedLightSize = 96, ShapedPartSize = 128;   // room for 
 static const size_t   LightsBlock = 4, PartsBlock = 7;   // the arena blocks they start in
 static const size_t   LightEntrySize = 0x54;       // what the loop writes for a light it takes
 static const uint32_t LightEntries = 8;            // the loop stops at this many
-static const uint32_t QuietNan = 0x7fc00000;       // the bits of a float that is not a number
+static const uint32_t QuietNan = 0x7fc00000;
 
 static jmp_buf g_crashJmp;
 static volatile int g_guard = 0;
@@ -47,7 +44,7 @@ static volatile LONG g_timeouts = 0;
 
 static void timeoutStub() { g_guard = 0; longjmp(g_crashJmp, 2); }
 
-// A call that spins for too long (random loop counts) is abandoned by redirecting the worker to timeoutStub
+// Redirects the worker to timeoutStub when a call spins for too long (random loop counts)
 static DWORD WINAPI watchdog(void*) {
   for (;;) {
     Sleep(WatchdogPollMs);
@@ -75,7 +72,7 @@ static const char* clientPath() {
 }
 
 static const size_t BlockSize = 2048, Blocks = 14;
-static const int PassedArgs = 12;   // always pass this many, so a routine with more arguments than guessed reads the same values in both runs
+static const int PassedArgs = 12;   // so a routine with more arguments than guessed reads the same values in both runs
 static uint32_t* g_arena;      // live memory the routines work on
 static uint32_t* g_init;
 static uint32_t* g_resA;
@@ -99,8 +96,8 @@ static Result runOne(void* fn, const GameFn& g, const uint32_t* args) {
     r.crashed = true;
     return r;
   }
-  // same FPU state before every call: empty stack with the stack pointer at zero (a routine run on garbage
-  // can pop an empty stack, which leaves it "empty" but rotated and shows up in later status words)
+  // the same FPU state before every call: a routine run on garbage can pop an empty stack, which leaves it
+  // "empty" but rotated and shows up in later status words
   fpu_setcw(CwGame);
   g_callStart = GetTickCount();
   g_guard = 1;
@@ -120,14 +117,13 @@ struct Job {
   char msg[3][200]; int nmsg;
 };
 
-// Random memory rarely gets far into some routines. For those, MXO_SHAPE=1 builds plausible input in the
-// arena (g_init) before the call. MapRoutine maps a world position to a map grid cell: this = {.., +8 grid*},
+// MXO_SHAPE=1 builds plausible input in the arena (g_init) before the call. MapRoutine: this = {.., +8 grid*},
 // grid = {+28 minX, +38 minZ, +40 maxX, +50 maxZ, +58 cell size (double), +60 scale (int), +64/+68 columns/rows},
 // arg0 = position {+0 x, +10 z}, arg1/arg2 = column/row out.
 static void putd(size_t byteOff, double v) { memcpy((uint8_t*)g_init + byteOff, &v, 8); }
 static double rndRange(double lo, double hi) { return lo + (hi - lo) * double(rnd32() % 1000001) / 1000000.0; }
 
-static int g_reached = 0;   // shaped calls whose first output was written by the original
+static int g_reached = 0;   // shaped calls that got to the part their shaping is for
 static bool g_betweenKeys = false;   // the last key table was asked for a time between two of its keys
 
 static void putGlobalFloat(uint32_t rva, float v) {   // in the data both runs of this routine start from. Later routines start from the loaded image again
@@ -144,14 +140,13 @@ static float rndShapeFloat() {   // ordinary values, sometimes repeated exactly
 static void putf(size_t byteOff, float v) { memcpy((uint8_t*)g_init + byteOff, &v, 4); }
 static bool isKeyTable(uint32_t rva) { return rva == KeyTable || rva == KeyTableStep || rva == KeyTableBlend; }
 
-// A key table is a 16-bit count and then, from byte 2 on, the keys with rising times: a time and one
-// value (KeyTable), or a time and two values (the other two). arg0 = table, arg1 = time, arg2 = the
-// weight that blends the two values. The floats sit two bytes into a word, so the arena's own values
-// would reach these routines as arbitrary bit patterns.
+// A key table: a 16-bit count, then from byte 2 on the keys with rising times, each a time and one value
+// (KeyTable) or two (the others). arg0 = table, arg1 = time, arg2 = the weight that blends the two values.
+// The floats sit two bytes into a word, so unshaped they are arbitrary bit patterns.
 static void shapeKeyTable(const GameFn& g, uint32_t* args) {
   const size_t table = BlockSize * 1;                    // where arg0 points
   const size_t keySize = g.rva == KeyTable ? 8 : 12;
-  // mostly a few keys, sometimes none or one. Two keys are always written, so a short table has no garbage behind it
+  // Two keys are always written, so a table of none or one has no garbage behind it
   const uint16_t count = uint16_t(rnd32() % 8 == 0 ? rnd32() % 2 : 2 + rnd32() % (MaxKeys - 1));
   const uint32_t written = count < 2 ? 2 : count, picked = rnd32() % written;
   memcpy((uint8_t*)g_init + table, &count, 2);
@@ -163,23 +158,22 @@ static void shapeKeyTable(const GameFn& g, uint32_t* args) {
     if (k < count) last = time;
     if (k == picked) onKey = time;
   }
-  // the time asked for: mostly between the keys, sometimes exactly on one, before the first or after the last
   const uint32_t where = rnd32() % 10;
   const float asked = where == 0 ? onKey : where == 1 ? first - float(rndRange(0, 50)) : where == 2 ? last + float(rndRange(0, 50))
                     : float(rndRange(first, last));
   args[1] = fbits(asked);
-  if (g.rva != KeyTable) {   // the weight: from 0 to 1, sometimes exactly at an end
+  if (g.rva != KeyTable) {   // the weight
     const uint32_t end = rnd32() % 8;
     args[2] = fbits(end == 0 ? 0.0f : end == 1 ? 1.0f : float(rndRange(0, 1)));
   }
   g_betweenKeys = count >= 2 && asked >= first && asked < last;
 }
 
-// The light loop (MxoLightLoopRva): arg0 = object {+24 low corner, +30 high corner of its box},
-// arg1 = {begin, end} of a list of pointers to lights, arg2 = the entries it writes, arg3 = the index of
-// the first one. A light = {+0 its kind's table of functions, +24 a part or null, +28 position}. The part
-// holds what the kind's functions return: +1c four floats, +3c a colour, +40, +44, +48 the reach.
-// One light in eight is of a made-up kind that keeps its reach in itself, which the filter passes on unseen.
+// The light loop: arg0 = object {+24 low corner, +30 high corner of its box}, arg1 = {begin, end} of a list
+// of pointers to lights, arg2 = the entries it writes, arg3 = the index of the first one. A light = {+0 its
+// kind's table of functions, +24 a part or null, +28 position}. The part holds what those functions return:
+// +1c four floats, +3c a colour, +40, +44, +48 the reach. One light in eight is of a made-up kind that keeps
+// its reach in itself: the filter passes it on unseen.
 static void shapeLights(uint32_t* args) {
   const uint32_t arena = uint32_t(uintptr_t(g_arena));
   const size_t object = BlockSize * 1, list = BlockSize * 2, pointers = BlockSize * 3, lights = BlockSize * LightsBlock;
@@ -198,7 +192,7 @@ static void shapeLights(uint32_t* args) {
   }
 
   memcpy((uint8_t*)g_init + otherKind, g_base + LightKind, 4 * LightKindSlots);
-  // the made-up kind has the function for a part's reach in the light's own slot, so its reach is read from the light
+  // the made-up kind has the part's reach function in the light's slot, so its reach is read from the light
   g_init[(otherKind + MxoLightReachSlot) / 4] = uint32_t(uintptr_t(g_base)) + MxoPartReachRva;
 
   for (uint32_t k = 0; k < ShapedLights; k++) {
@@ -209,8 +203,8 @@ static void shapeLights(uint32_t* args) {
     if (odd == 0) reach = 0.0f;
     if (odd == 1) reach = -reach;
     if (odd == 2) reach = 30000.0f;
-    // Anything, not a number included. A reach whose square leaves the float range is where the translation
-    // and the original part ways (docs/translator.md, Rounding), so MXO_PLAIN=1 keeps it out.
+    // A reach whose square leaves the float range is where the translation and the original part ways
+    // (docs/translator.md, Rounding), so MXO_PLAIN=1 keeps it out.
     if (odd == 3 && !g_plain) reach = float(rndf());
     g_init[light / 4] = known ? uint32_t(uintptr_t(g_base)) + LightKind : arena + uint32_t(otherKind);
     g_init[(light + MxoLightPartOffset) / 4] = rnd32() % 10 ? arena + uint32_t(part) : 0;
@@ -225,7 +219,7 @@ static void shapeLights(uint32_t* args) {
     }
     // not a number on one axis: that axis counts for nothing in the loop's distance
     if (rnd32() % 40 == 0 && !g_plain) g_init[(light + MxoLightPosOffset) / 4 + rnd32() % 3] = QuietNan;
-    if (where == 2) {   // as far from one side of the box as its reach goes, the other two axes inside
+    if (where == 2) {   // as far from one side as its reach goes, the other two axes inside
       const int axis = int(rnd32() % 3);
       const float side = rnd32() % 2 ? 1.0f : -1.0f;
       for (int other = 0; other < 3; other++)
@@ -234,8 +228,7 @@ static void shapeLights(uint32_t* args) {
     }
   }
 
-  // Mostly a short list, sometimes none, sometimes a long one as a street at night has. One long list in
-  // four names only lights inside the box: more of them in reach than the filter keeps, so it steps aside.
+  // One long list in four names only lights inside the box: more in reach than the filter keeps, so it steps aside.
   uint32_t count = 1 + rnd32() % 48;
   const uint32_t length = rnd32() % 16;
   if (length == 0) count = 0;
@@ -266,8 +259,8 @@ static uint32_t __stdcall lightsThroughFilter(const uint8_t* object, const MxoLi
   return taken;
 }
 
-// What one call of the light loop was given and what the original and the tested version made of it, for
-// the first calls that differ. The arena still holds the lights as they went in.
+// Writes what the first calls that differ were given and what each version made of it. The arena still holds
+// the lights as they went in.
 static const char* LightsDetailFile = "lights-detail.txt";
 static const int LightsDetailCases = 4;
 static int g_lightsDetailed = 0, g_lightsAloneDiffer = 0, g_lightsFilteredDiffer = 0, g_lightsCompared = 0;
@@ -360,7 +353,7 @@ static DWORD WINAPI gameWorker(void* param) {
     g_specials = !g_plain && (it & 3) == 3;
     for (size_t k = 0; k < BlockSize * Blocks / 4; k++) {
       uint32_t r = g_plain ? 0 : rnd32() % 64;
-      // mostly floats, with a few small integers and in-arena pointers so counts and links are sometimes sane
+      // a few small integers and in-arena pointers, so counts and links are sometimes sane
       g_init[k] = r < 56 ? fbits(rndf()) : r < 61 ? rnd32() % 5 : uint32_t(uintptr_t(g_arena)) + (rnd32() % (BlockSize * (Blocks - 1) / 4)) * 4;
     }
     uint32_t args[PassedArgs];
@@ -378,8 +371,8 @@ static DWORD WINAPI gameWorker(void* param) {
     memcpy(g_dataA, g_data, g_dataSize);
     memcpy(g_data, g_dataInit, g_dataSize);
     memcpy(g_arena, g_init, BlockSize * Blocks);
-    // The light loop is tested the way the DLL installs it: behind the filter. MXO_LIGHT_FILTER=0 tests its
-    // translation alone. Either way the translation alone runs first, so that a difference can be told apart.
+    // The light loop runs behind the filter, as the DLL installs it, unless MXO_LIGHT_FILTER=0. The translation
+    // alone runs first either way, so a difference can be told apart.
     void* second = j.f->replacement;
     g_lightLeftOut = false;
     const bool lightLoop = g.rva == MxoLightLoopRva && MxoLightFilterFits(g_base, g_imageSize);
@@ -433,12 +426,11 @@ static DWORD WINAPI gameWorker(void* param) {
   return 0;
 }
 
-static const char* FuzzFile = "fuzz.txt";   // in the current folder
+static const char* FuzzFile = "fuzz.txt";
 
-// The image is loaded without resolving imports, so originals that call msvcr71's floor or ceil would crash
-// where their translations (which compute these in place) do not. The translator's table says where the image
-// keeps those two imports. Each slot gets the real function, after a check that the unresolved slot names it
-// (the table belongs to the client.dll the translation was made from).
+// The image is loaded without its imports, so originals that call msvcr71's floor or ceil would crash where
+// their translations compute the result in place. Each slot in the translator's table gets the real function,
+// if the unresolved slot names it: the table belongs to the client.dll the translation was made from.
 static void ResolveMathImports(uint8_t* base, uint32_t imageSize) {
   HMODULE crt = LoadLibraryA("msvcr71.dll");
   if (!crt)
@@ -458,8 +450,8 @@ static void ResolveMathImports(uint8_t* base, uint32_t imageSize) {
   }
 }
 
-// Child: tests routines [first, first + count) and appends one line per routine. A routine that blocks
-// for good ends the process, because whatever it holds would block everything after it too.
+// Child: tests routines [first, first + count), one line each. A routine that blocks for good ends the
+// process: whatever it holds would block everything after it too.
 static int runGameChild(int iterations, int first, int count) {
   HMODULE mod = LoadLibraryExA(clientPath(), nullptr, DONT_RESOLVE_DLL_REFERENCES);
   if (!mod) return 2;
@@ -501,7 +493,6 @@ static int runGameChild(int iterations, int first, int count) {
       if (j.heartbeat != lastBeat) { lastBeat = j.heartbeat; lastChange = GetTickCount(); }
       else if (GetTickCount() - lastChange > BlockedAfterMs) { killed = true; break; }
     }
-    // al is -1 for a routine whose al is not compared
     fprintf(out, "%d %06x %s ran=%d crashed=%d crashdiff=%d timeouts=%ld result=%d data=%d eax=%d stack=%d al=%d reached=%d sig=%s%s\n", idx, g.rva,
       killed ? "BLOCKED" : "DONE", j.done, j.crashed, j.crashdiff, long(g_timeouts), j.bad, j.databad, j.eaxdiff, j.stack, g.alResult ? j.aldiff : -1,
       g_reached, g.thisPtr ? "this," : "", g.kinds);
@@ -524,8 +515,7 @@ static int lastIndexDone() {
   return last;
 }
 
-// The float-to-integer helper is the one dependency that also has a replacement. The other rows of the
-// dependency table are jump tables.
+// The float-to-integer helper is the one dependency with a replacement. The other rows are jump tables.
 static MxoXFunc* findHelper() {
   for (const MxoXFunc* dep = (const MxoXFunc*)MxoX_deps; dep->size; dep++)
     if (MxoXFunc* f = findFunc(MxoX_funcs, dep->rva)) return f;
@@ -557,7 +547,7 @@ static int runGame(int iterations) {
       }
       printf("float-to-integer helper vs inline path: %d cases on the fast path, %d mismatches\n", fast, badf);
       problems += badf;
-      // the replacement for the helper itself, over the whole range including huge values, infinities and NaN
+      // the helper's replacement, over the whole range with huge values, infinities and NaN
       {
         MxoXFixups((uint8_t*)mod, MxoX_imagebase, MxoX_absfix, MxoX_relfix, MxoX_code_begin, MxoX_code_end);
         int badr = 0, stackr = 0;
@@ -596,7 +586,6 @@ static int runGame(int iterations) {
     next = done + 1;
     printf("... %d of %d\n", next, total);
   }
-  // summary
   FILE* in = fopen(FuzzFile, "r");
   char line[512]; int tested = 0, exercised = 0, clean = 0, blocked = 0, alCompared = 0, eaxRoutines = 0; long runs = 0, eaxCases = 0;
   while (in && fgets(line, sizeof(line), in)) {

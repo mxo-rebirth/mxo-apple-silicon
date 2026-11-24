@@ -123,7 +123,7 @@ d3d9bench.exe [vp] [width] [height] [draws] [seconds] [texture] [flags] [mode]
 | `draws` | world draw calls per frame | 2000 |
 | `seconds` | length of the timed run | 4 |
 | `texture` | 0 A8R8G8B8, 1 DXT1 | 0 |
-| `flags` | a sum of: 1 topmost window, 2 UI quads through a dynamic vertex buffer, 4 no UI quads, 8 fullscreen | 0 |
+| `flags` | a sum of: 1 topmost window, brought to the front, 2 UI quads through a dynamic vertex buffer instead of `DrawPrimitiveUP`, 4 no UI quads, 8 fullscreen | 0 |
 | `mode` | what each world draw does | 0 |
 
 | Mode | Each world draw |
@@ -141,9 +141,19 @@ d3d9bench.exe [vp] [width] [height] [draws] [seconds] [texture] [flags] [mode]
 | 11 | as 10, and the draws use the filled texture |
 
 It prints a `RESULT` line with the frame rate and the time per part of a frame, and a `PIXELS`
-line that says whether the world and the UI reached the back buffer. When a call that the chosen
-mode depends on fails, it stops with exit code 6. A back buffer smaller than 830×100 is refused
-with exit code 1: the pixel check needs that much.
+line that says whether the world and the UI reached the back buffer.
+
+| Exit code | Meaning |
+|---|---|
+| 0 | the run finished |
+| 1 | a back buffer smaller than 830×100, which the pixel check needs, or larger than 16384 either way |
+| 2 | no window |
+| 3 | no Direct3D |
+| 4 | no device |
+| 6 | a call that the chosen mode depends on failed |
+| 99 | a panic |
+
+5 is not used: it is what Wine reports when a program crashes.
 
 Run it in a bottle with the DLL override set for `d3d9bench.exe`.
 

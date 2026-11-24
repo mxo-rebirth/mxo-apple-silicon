@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 """merge-pipeline-caches.py <cache> <cache>...
 
-Merges DXVK pipeline caches (*.dxvk-cache) so that every MxO executable starts with what the others
-have already seen. Rejacked (matrix.exe) and Revived (mxorev.exe) run the same engine, but DXVK keeps
-one cache per executable name. Without merging, each one hitches while it builds pipelines the other
-already has. DXVK skips entries it cannot use, so merging is safe.
+Merges DXVK pipeline caches (*.dxvk-cache). Rejacked (matrix.exe) and Revived (mxorev.exe) run the same
+engine, but DXVK keeps one cache per executable name, so each hitches while it builds pipelines the
+other already has. DXVK skips entries it cannot use, so merging is safe.
 
     scripts/merge-pipeline-caches.py "$BOTTLE/drive_c/Games/dxvk"/*.dxvk-cache
 
-Every file given gets the union of all entries (duplicates removed). The original of each file is kept
-once as <file>.merge-backup. Close the games first.
+Every file given gets the union of all entries. The original of each file is kept once as
+<file>.merge-backup. Close the games first.
 """
 
 import os

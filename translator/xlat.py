@@ -1,21 +1,23 @@
 #!/usr/bin/env python3
 """xlat.py <pe|flat> <image> <prefix> <out.inc> [options] <start-limit | @list> ...
 
-Translates x87 routines of a 32-bit x86 image into SSE2 assembly text. Writes <out.inc> and, for the
-tests, the table <out.inc>.tests.
+Translates x87 routines of a 32-bit x86 image into SSE2 assembly text. Writes <out.inc> and the tests'
+table <out.inc>.tests.
 
-  pe    the image is a PE file, addresses are RVAs
-  flat  the image is a flat binary linked at 0x62000000, addresses are offsets
+  pe    a PE file, addresses are RVAs
+  flat  a flat binary linked at 0x62000000, addresses are offsets
 
-  <start-limit>      one routine, in hex: where it starts and the furthest it may reach
+  <start-limit>      one routine, in hex: its start and the furthest it may reach
   @list              a routine list. LIST_HEAD in this file describes the format
-  --map file         the map made by discover.py, to refuse routines that other code jumps into
+  --map file         discover.py's map, to refuse routines that other code jumps into
   --ftol rva,...     the compiler's float-to-integer helper (a list names it with an ftol line)
   --min samples      leave out list entries with a smaller weight
   --max count        translate at most this many routines
   --skip rva,...     leave these routines out
-  --write-list file  write the list of the routines that were translated, with sizes and hashes
+  --write-list file  write the list of the translated routines, with sizes and hashes
   --exact-range      rounding that also matches the x87 outside the float range (slower)
+
+The XLAT_NO_ switches for finding a fault are in docs/translator.md.
 """
 import bisect
 import os
@@ -30,15 +32,14 @@ from peimage import Fail, Image
 
 T1, T2 = 'xmm6', 'xmm7'
 MAXDEPTH = 6
-MAX_SWITCH_CASES = 1024     # a jump table without a bound in the code is read at most this far
-MAX_DATA_PASSES = 8         # how often a routine is disassembled again after a table was found inside it
-FLOW_BUDGET = 48            # instructions a "is this value still read" search follows before it gives up
-HELPER_SCAN_BYTES = 0x400   # the float-to-integer helper's first return lies within this many bytes
-ABOVE_ANY_RVA = 1 << 40     # paired with an address, it sorts after every real (address, address) pair
+MAX_SWITCH_CASES = 1024     # how far a jump table without a bound in the code is read
+MAX_DATA_PASSES = 8         # disassembly passes over a routine while tables turn up inside it
+FLOW_BUDGET = 48            # instructions a "still read?" search follows before it gives up
+HELPER_SCAN_BYTES = 0x400   # the float-to-integer helper's first return lies within this
+ABOVE_ANY_RVA = 1 << 40     # (address, this) sorts after every real (address, address) pair
 MAX_REASONS_SHOWN = 25      # kinds of refusal the log sums up at its end
 
-# The format of a routine list (translator/routines.list). --write-list puts these lines at the head of
-# the list it writes, so this is the one description of the format.
+# The one description of the routine list format (translator/routines.list): --write-list writes it at the head of its list.
 LIST_HEAD = '''# Routines of client.dll to translate, one per line:   start limit weight size hash
 # start and limit are RVAs in hex: where the routine begins and the furthest it may reach, which is
 # the start of the next routine. weight is its number of profile samples, in decimal. size and hash,
@@ -66,8 +67,8 @@ class Ins:
         self.target = None      # rva a direct call or jump goes to
         self.x87 = None         # (name, argument) of an x87 instruction
         self.mem = None         # its memory operand as text
-        self.err = None         # the Fail that stops the translation if this instruction can be reached
-        self.relocs = []        # offsets of relocated address fields inside the instruction
+        self.err = None         # the Fail to raise if this instruction can be reached
+        self.relocs = []        # offsets of its relocated address fields
         self.table = None       # a switch: rva of its jump table,
         self.index = None       # the register that picks the case
         self.cases = []         # and the rvas the table holds
@@ -95,8 +96,7 @@ FLAG_DEF = {'add', 'sub', 'cmp', 'test', 'and', 'or', 'xor', 'neg', 'sahf', 'pop
             'call', 'ret'}
 FLAG_NEUTRAL = {'mov', 'lea', 'push', 'pop', 'movzx', 'movsx', 'xchg', 'nop', 'not', 'cdq', 'cwde', 'cbw',
                 'bswap', 'fwait'}
-# classify() tells jumps, calls and returns by their first byte. One that it took for an ordinary
-# instruction has a prefix in front (a branch hint, "rep ret", a 16-bit form).
+# Jumps, calls and returns behind a prefix (branch hint, "rep ret", 16-bit form): classify() goes by the first byte and misses them.
 PREFIXED_TRANSFER = re.compile(r'(?:^|\s)(?:j[a-z,]+|l?call[a-z]*|[li]?ret[a-z]*|ljmp[a-z]*|loop[a-z]*)(?:\s|$)')
 
 
@@ -146,7 +146,7 @@ def classify(i, base):
             raise Fail('far indirect transfer at %x' % i.rva)
     if i.kind in ('jmp', 'jcc') and i.mnem not in JCC and i.mnem not in ('jmp', 'loop', 'loope', 'loopne', 'jecxz'):
         raise Fail('unexpected branch mnemonic %s at %x' % (i.text, i.rva))
-    # copied byte for byte, its displacement would point somewhere else, and a return would not end the routine
+    # copied as bytes, its displacement would point elsewhere and a return would not end the routine
     if i.kind == 'raw' and PREFIXED_TRANSFER.search(i.text):
         raise Fail('jump, call or return with a prefix at %x: %s' % (i.rva, i.text))
     if re.search(r'\b(xmm|mm)\d', i.text):
@@ -154,7 +154,7 @@ def classify(i, base):
 
 
 def x87_decode(i):
-    """Returns (name, arg) for an x87 instruction. arg is the st index or the size of the memory operand."""
+    """(name, arg) of an x87 instruction. arg is the st index or the size of the memory operand."""
     op, modrm = i.raw[0], i.raw[1]
     mod, reg, rm = modrm >> 6, (modrm >> 3) & 7, modrm & 7
     arith = ['add', 'mul', 'com', 'comp', 'sub', 'subr', 'div', 'divr']
@@ -275,40 +275,39 @@ def stack_effect(name, arg):
 class Translator:
     """Static x87 to SSE2 translation of whole routines.
 
-    Each x87 register is kept in an xmm register as a double. The game runs its FPU in 24-bit precision
-    mode (Direct3D 9 default), so every add/sub/mul/div/sqrt result is rounded to a 24-bit significand
-    with round-to-nearest-even while keeping the wide exponent range, as the x87 does. Translated code
-    changes EFLAGS only where nothing reads them afterwards: at a status word read (flow analysis checks
-    it, or the flags are saved and restored), at a call to the float-to-integer helper and on entry."""
+    Each x87 register is a double in an xmm register. The game runs its FPU at 24-bit precision (the
+    Direct3D 9 default), so each add/sub/mul/div/sqrt result is rounded to a 24-bit significand,
+    nearest-even, in the x87's wide exponent range. Translated code changes EFLAGS only where nothing
+    reads them afterwards: at a status word read (flow analysis checks, or they are saved and restored),
+    at a call to the float-to-integer helper and on entry."""
 
     def __init__(self, img, prefix):
         self.img = img
         self.prefix = prefix
-        self.branches = []   # sorted (target rva, source rva) of the image's direct branches, from discover.py's map
+        self.branches = []   # sorted (target rva, source rva) of the image's direct branches, from the map
         self.out = []        # asm lines
         self.absfix = []     # expressions of locations holding image-absolute addresses
         self.relfix = []     # (location expression, target rva)
-        self.funcs = []      # (rva, size, [reloc offsets])
+        self.funcs = []      # (rva, size, [relocation rvas], flags)
         self.uid = 0
         self.stats = []
-        self.ftol = set()    # RVAs of the compiler's float-to-integer helper (takes st0, returns edx:eax)
-        self.exact = False   # True: rounding that also matches x87 outside the float range (slower)
+        self.ftol = set()    # RVAs of the compiler's float-to-integer helper
+        self.exact = False   # True with --exact-range
         self.jumptables = [] # (label, [case labels]) of translated switches
         self.tabledeps = []  # (rva, size) of original switch tables the translations were made from
         self.info = []
-        self.edgeconv = 0     # float-to-double conversions placed at branches and branch targets (fast mode)
+        self.edgeconv = 0     # float-to-double conversions at branches and branch targets (fast mode)
         self.fused = 0        # status word reads turned into direct branches on the compare
         self.xrcalls = 0      # calls emitted to the xmm0-returning entry of another routine
-        # (import slot rva, routine rva, INLINE_IMPORTS number): one row for every call computed in place, in
-        # every copy of the routine that is emitted
+        # (import slot rva, routine rva, INLINE_IMPORTS number) per call computed in place, in every emitted copy of the routine
         self.inlined = []
-        self.xr_targets = set()   # routines translated callers call directly, result in xmm0 (see translate's xr)
+        self.xr_targets = set()   # routines translated callers call directly, result in xmm0 (translate's xr)
         self.xrdeps = set()   # (caller rva, callee rva) of such calls
         self.fpcalls = set()  # targets of direct calls whose floating-point result is used
         self.fpret_all = {}   # routine rva -> every return leaves exactly one value on the FPU stack
 
     def label(self):
-        """A new local label. The n keeps these apart from the labels of branch targets, which are hex addresses."""
+        """A new local label. The n keeps it apart from branch target labels, which are hex addresses."""
         self.uid += 1
         return 'L%s_n%d' % (self.prefix, self.uid)
 
@@ -409,13 +408,11 @@ class Translator:
 
     # ---- emission --------------------------------------------------------------------------
     def round_to_24_bits(self, x):
-        """Rounds the double in x to a 24-bit significand, nearest-even, keeping the x87 exponent range
-        (--exact-range): add and subtract 1.5 * 2^(exponent + 29) with the sign of x. Needs only T1 and
-        leaves the flags alone.
+        """Rounds the double in x to 24 bits, nearest-even, in the x87 exponent range (--exact-range): add
+        and subtract 1.5 * 2^(exponent + 29) with the sign of x. Needs only T1 and leaves the flags alone.
 
-        Fast mode converts to float instead (see rounded() in translate): the same result whenever the value
-        lies in the float range. Beyond it the x87 keeps a finite value or a normal tiny one, where the float
-        gives infinity or a denormal."""
+        Fast mode converts to float instead (rounded() in translate), the same within the float range.
+        Beyond it the x87 keeps a finite or a normal tiny value where the float gives infinity or a denormal."""
         p = self.prefix
         return ['movapd %s, %s' % (T1, x),
                 'andpd %s, XMMWORD PTR [_%s_signexp]' % (T1, p),
@@ -429,8 +426,7 @@ class Translator:
 
     @staticmethod
     def load(dst, form, size, m):
-        """Instructions that put a memory operand (form 'm' a float or double, 'mi' an integer) into dst as a
-        double with a zero upper half."""
+        """Loads a memory operand ('m' a float or double, 'mi' an integer) into dst as a double with a zero upper half."""
         if form == 'm' and size == 32:
             return ['movss %s, %s' % (dst, m), 'cvtps2pd %s, %s' % (dst, dst)]
         if form == 'm' and size == 64:
@@ -441,14 +437,13 @@ class Translator:
 
     @staticmethod
     def arith(op, dst, src):
-        """dst = dst op src. Add, subtract and multiply use the full-width forms, which the
-        translator under Rosetta handles without a merge step. Divide stays scalar."""
+        """dst = dst op src. Add, subtract and multiply use the full-width forms, which Rosetta translates
+        without a merge step. Divide stays scalar."""
         return ['%s %s, %s' % ({'add': 'addpd', 'sub': 'subpd', 'mul': 'mulpd', 'div': 'divsd'}[op], dst, src)]
 
     def translate(self, s, e, xr=False):
-        """Translates the function at s. e is the furthest it may extend (start of the next function). With xr, the
-        variant that translated callers call directly: no entry check, and a floating-point result returned in xmm0
-        (as a double) instead of on the FPU stack."""
+        """Translates the function at s, which reaches e at most (the start of the next one). With xr, the variant for
+        translated callers: no entry check, a floating-point result in xmm0 (a double) instead of on the FPU stack."""
         img = self.img
         relocs = img.relocs_in(s, e)
 
@@ -478,7 +473,7 @@ class Translator:
                         if r + 4 > len(i.raw):
                             raise Fail('relocation crosses an instruction boundary at %x' % i.rva)
                 except Fail as f:
-                    # only a problem if the instruction can actually be reached
+                    # a problem only if the instruction can be reached
                     i.err = f
                     i.x87 = None
                     i.kind = 'err'
@@ -486,8 +481,8 @@ class Translator:
             for n, i in enumerate(ins):
                 if i.kind != 'switch':
                     continue
-                # number of cases: from "cmp index, N / ja default" right before the jump, else as far as the
-                # table holds relocated pointers into this function
+                # case count: from "cmp index, N / ja default" before the jump, else as far as the table holds
+                # relocated pointers into this function
                 bound = None
                 if n >= 2 and ins[n - 1].mnem == 'ja':
                     m = re.match(r'cmp\s+%s,0x([0-9a-f]+)$' % i.index, ins[n - 2].text)
@@ -509,8 +504,7 @@ class Translator:
                 i.cases = cases
                 tables.append((i.table, 4 * len(cases)))
                 found.append((i.table, 4 * len(cases)))
-                # two-level switch: "cmp x, N / ja / movzx index, byte [x + bytes] / jmp" picks the case through
-                # a byte table, which is data as well
+                # two-level switch: "cmp x, N / ja / movzx index, byte [x + bytes] / jmp" goes through a byte table, also data
                 if n >= 3 and ins[n - 1].mnem == 'movzx' and 'BYTE PTR' in ins[n - 1].text and ins[n - 1].relocs \
                         and ins[n - 2].mnem == 'ja':
                     m = re.match(r'cmp\s+\w+,0x([0-9a-f]+)$', ins[n - 3].text)
@@ -591,8 +585,7 @@ class Translator:
         out.append('.p2align 4')
         out.append('.globl %s' % fn)
         out.append('%s:' % fn)
-        # the translation assumes the FPU precision of the thread that owns the Direct3D device (the xr variant is
-        # only called from translated code, which has already checked)
+        # the translation assumes the FPU precision of the Direct3D device's thread (xr: called only from translated code, which has checked)
         if not xr:
             out.extend(['push eax', 'mov eax, DWORD PTR fs:[0x24]', 'cmp eax, DWORD PTR [_%s_tid]' % p, 'pop eax',
                       'jne %s' % tramp])
@@ -600,8 +593,7 @@ class Translator:
         self.fpret_all[s] = (any(i.kind == 'ret' for n, i in live)
                              and all(depth[n] == 1 for n, i in live if i.kind == 'ret')
                              and not any(i.kind == 'ijmp' or (i.kind == 'jmp' and not (s <= i.target < e)) for n, i in live))
-        # how a compare that is not yet read is held: 'pair' = operands in T1/T2 as doubles, 'pairf' = as floats,
-        # 'stash' = status image in T2
+        # how a compare not yet read is held: 'pair' = operands in T1/T2 as doubles, 'pairf' = as floats, 'stash' = status image in T2
         pending = None
         nfall = 0
 
@@ -619,15 +611,13 @@ class Translator:
         def spill_push(src):        # xmm -> real FPU stack, esp restored afterwards
             return ['lea esp, [esp-8]', 'movsd QWORD PTR [esp], %s' % src, 'fld QWORD PTR [esp]', 'lea esp, [esp+8]']
 
-        # Fast mode keeps every result of a rounded operation as a float, and float loads stay floats, so
-        # operations between two floats are single SSE instructions: with the 24-bit precision Direct3D
-        # sets, rounding the double result to float equals the float result, and fast mode already confines
-        # values to the float range. held[j] says how xmm j holds its stack value: 'f' = float in the low
-        # lane, 'd' = double in the low lane. Values from integers, doubles and constants other than 0 and
-        # 1 stay doubles. At every branch and branch target all values are doubles.
+        # Fast mode keeps rounded results and float loads as floats, so an operation on two floats is a single
+        # SSE instruction: at Direct3D's 24-bit precision the double result rounded to float equals the float
+        # result, and fast mode already confines values to the float range. held[j] is how xmm j holds its
+        # stack value: 'f' = float in the low lane, 'd' = double. At every branch and branch target all are doubles.
         fast = not self.exact
         held = ['d'] * 8
-        falls = True            # the previous reachable instruction can fall through to the next one
+        falls = True            # the previous reachable instruction can fall through
 
         def to_d(j):
             if held[j] == 'f':
@@ -648,8 +638,8 @@ class Translator:
         fused_jump = {}             # their jcc: index -> (outcomes taken, target)
 
         def fuse(n):
-            """At a status word read right after a compare: a direct branch on the compare when the code only tests
-            ah and jumps. Returns True if emitted."""
+            """At a status word read after a compare: a direct branch on the compare if the code only tests ah and
+            jumps. True if emitted."""
             if os.environ.get('XLAT_NO_FUSE'):
                 return False
             f = self.fused_status_branch(ins, n, targets, idx_of, s, e)
@@ -692,16 +682,15 @@ class Translator:
                 mova = 'cvtps2pd' if af else 'movapd'
                 if self.compare_use(ins, n, targets) != 'stash':
                     if af and bfload is not None and not os.environ.get('XLAT_NO_COMISS'):
-                        # two floats are compared as floats: widening both to double first changes neither their
-                        # order nor whether one is a NaN
+                        # two floats compare as floats: widening both to double changes neither their order nor whether one is a NaN
                         memfix(['movaps %s, %s' % (T1, a)] + bfload)
                         pending = 'pairf'
                     else:
                         memfix(['%s %s, %s' % (mova, T1, a)] + bload)
                         pending = 'pair'
                     return
-                # FP code runs between this compare and the status word read: work the condition bits out now,
-                # without touching flags or eax, and keep them in T2 (the only register that code leaves alone)
+                # FP code runs before the status word read: work out the condition bits now, without touching flags
+                # or eax, and keep them in T2 (the only register that code leaves alone)
                 memfix(bload + [
                     '%s %s, %s' % (mova, T1, a), 'cmpltsd %s, %s' % (T1, T2), 'andpd %s, XMMWORD PTR [_%s_sw_c0]' % (T1, p),
                     'lea esp, [esp-16]', 'movsd QWORD PTR [esp], %s' % T1,
@@ -722,10 +711,8 @@ class Translator:
                         self.absfix.append(lab + ' - 4')
 
             if i.kind == 'x87':
-                # One path for both modes. Fast mode tracks per register whether it holds a float ('f') or a double
-                # ('d'). With --exact-range every value stays a double: held[] is all 'd', to_d() emits nothing and
-                # the float cases below never apply. Apart from that the modes differ in how a result is rounded
-                # to 24 bits (rounded()) and in a few instruction forms.
+                # One path for both modes. With --exact-range held[] stays all 'd', so to_d() emits nothing and the float
+                # cases below never apply. Otherwise the modes differ only in rounded() and a few instruction forms.
                 name, arg = i.x87
                 m = i.mem
                 if i.relocs and len(i.relocs) != 1:
@@ -962,7 +949,7 @@ class Translator:
             elif i.kind in ('jmp', 'jcc') and s <= i.target < e:
                 out.append('%s L%s_%06x' % (i.mnem, lp, i.target))
             elif i.kind == 'call' and n in fpret and i.target in self.xr_targets:
-                # a translated routine that returns its result in xmm0 when called from here: no FPU stack round trip
+                # the callee's xr entry returns in xmm0: no round trip over the FPU stack
                 out.append('call _%s_%06x_xr' % (p, i.target))
                 self.xrdeps.add((s, i.target))
                 self.xrcalls += 1
@@ -973,7 +960,7 @@ class Translator:
                 if i.kind == 'call' and n in fpret:
                     self.fpcalls.add(i.target)
                 lab = self.label()
-                # always the form with a 32-bit displacement: a jump out of the routine can be a short one in the original
+                # always the 32-bit displacement form: a jump out of the routine can be a short one in the original
                 out.append('.byte 0xe8' if i.kind == 'call' else '.byte 0xe9')
                 out.append('%s: .long 0' % lab)
                 self.relfix.append((lab, i.target))
@@ -1046,9 +1033,9 @@ class Translator:
         return True if overwrites and not read else has_value
 
     def al_set_at_returns(self, ins, depth):
-        """True if at every return al holds a value that integer code of this routine put there, and not a
-        status word or what a callee left behind. The blind test then compares al as well, the byte a bool comes
-        back in. Anything unclear counts as no: such a routine is compared as before."""
+        """True if at every return al holds a value this routine's integer code put there, not a status word
+        or what a callee left behind. The blind test then compares al too, the byte a bool comes back in.
+        Anything unclear counts as no."""
         index_of = {i.rva: n for n, i in enumerate(ins)}
         known = [None] * len(ins)       # al holds such a value on every path found so far to the instruction
         work = [(0, False)]
@@ -1114,8 +1101,8 @@ class Translator:
 
     @staticmethod
     def compare_use(ins, n, targets):
-        """How the result of the compare at n is consumed: 'pair' if the next status word read follows with
-        no FP code in between, 'stash' if FP code runs in between, None if it is not read in this block."""
+        """How the compare at n is consumed: 'pair' if the next status word read follows with no FP code in
+        between, 'stash' if FP code runs in between, None if it is not read in this block."""
         fp = False
         k = n + 1
         while k < len(ins):
@@ -1136,9 +1123,9 @@ class Translator:
         return None
 
     def emit_ftol(self, f):
-        """Replacement for the compiler's float-to-integer helper itself (st0 -> edx:eax, truncated, st0 popped):
-        two FPU instructions instead of nine for everything in the 32-bit range, the original otherwise.
-        Makes no assumption about the FPU precision, so it serves every thread."""
+        """Replaces the compiler's float-to-integer helper itself (st0 -> edx:eax, truncated, st0 popped): two
+        FPU instructions instead of nine in the 32-bit range, the original otherwise. Assumes no FPU precision,
+        so it serves every thread."""
         img, p, out = self.img, self.prefix, self.out
         ins, end = helper_code(img, f)
         relocs = img.relocs_in(f, end)
@@ -1180,9 +1167,9 @@ class Translator:
                    'leave', 'pusha', 'pushad', 'popa', 'popad'}
 
     def ax_dead(self, ins, n, idx, dirty=('al', 'ah'), budget=FLOW_BUDGET, seen=None):
-        """True if, on every path from instruction n, no instruction reads a byte of ax still holding the status
-        word ('dirty') before it is overwritten. Calls overwrite eax (the return register). A return counts as a
-        read unless al has been written since (a byte-sized return value: the caller looks at al only)."""
+        """True if on every path from n no instruction reads a byte of ax that still holds the status word
+        ('dirty'). Calls overwrite eax, the return register. A return counts as a read unless al was written
+        since (a byte-sized return value: the caller looks at al only)."""
         seen = set() if seen is None else seen
         dirty = set(dirty)
         while n < len(ins) and budget > 0:
@@ -1245,11 +1232,10 @@ class Translator:
         return False
 
     def fused_status_branch(self, ins, n, targets, idx, s, e):
-        """For 'fnstsw ax / test ah, M / jcc' at n (FPU register moves allowed before the test) with ax and the
-        flags dead afterwards: the set of compare outcomes ('G', 'L', 'E', 'U') on which the jump is taken, the
-        jump target and the index of the test. None otherwise."""
+        """For 'fnstsw ax / test ah, M / jcc' at n with ax and the flags dead afterwards: (compare outcomes of
+        'G', 'L', 'E', 'U' on which the jump is taken, jump target, index of the test). None otherwise."""
         k = n + 1
-        # register moves of the FPU stack may sit between: they become SSE moves, which leave the flags alone
+        # FPU register moves may sit between: they become SSE moves, which leave the flags alone
         while k < len(ins) and ins[k].kind == 'x87' and ins[k].x87[0] in ('fst_r', 'fstp_r', 'fxch') \
                 and ins[k].rva not in targets:
             k += 1
@@ -1426,22 +1412,20 @@ class Translator:
         for s, size, _relocs, _flags in deps:
             lines.append('.long 0x%x, %d, 0, L%s_orig_%06x, L%s_rel_%06x, 0' % (s, size, p, s, p, s))
         lines += ['.long 0, 0, 0, 0, 0, 0']
-        # imports computed in place: import slot, routine, function (0 floor, 1 ceil). The installer leaves the
-        # routine original unless the slot still holds msvcr71.dll's own function
+        # imports computed in place: import slot, routine, function (0 floor, 1 ceil), for the installer's check of the slot
         lines += ['.globl _%s_inlined' % p, '_%s_inlined:' % p]
         for slot, rva, k in self.inlined:
             lines.append('.long 0x%x, 0x%x, %d' % (slot, rva, k))
         lines += ['.long 0, 0, 0']
         # where client.dll's import table holds msvcr71.dll's floor (0), ceil (1) and sqrt (2): slot, number.
-        # The installer points the sqrt slot at its own version. The tests give the unresolved image real
-        # floor and ceil. This is the only place the import table is read.
+        # The installer points the sqrt slot at its own version, the tests give the unresolved image real
+        # floor and ceil.
         lines += ['.globl _%s_crtslots' % p, '_%s_crtslots:' % p]
         for slot, (dll, fn) in sorted(img.imports.items()):
             if dll == 'msvcr71.dll' and fn in self.CRT_SLOTS:
                 lines.append('.long 0x%x, %d' % (slot, self.CRT_SLOTS[fn]))
         lines += ['.long 0, 0']
-        # direct calls into the xmm0-returning variant of another translated routine: caller, callee. The installer
-        # installs a caller only together with its callees.
+        # direct calls into another translated routine's xr variant: caller, callee. A caller is installed only with its callees.
         lines += ['.globl _%s_xrdeps' % p, '_%s_xrdeps:' % p]
         for a, b in sorted(self.xrdeps):
             lines.append('.long 0x%x, 0x%x' % (a, b))
@@ -1490,15 +1474,15 @@ class Underflow(Exception):
 
 
 def replace_file(path, text):
-    """Writes a file under a temporary name and renames it, so a run that stops early leaves the old file whole."""
+    """Writes under a temporary name and renames, so a run that stops early leaves the old file whole."""
     with open(path + '.tmp', 'w') as file:
         file.write(text)
     os.replace(path + '.tmp', path)
 
 
 def read_list(path, img, min_weight):
-    """What a routine list names: the routines as (start, limit, weight, (size, hash) or None) and the
-    float-to-integer helpers. LIST_HEAD describes the format. A line that does not fit it stops the run."""
+    """(routines as (start, limit, weight, (size, hash) or None), float-to-integer helpers) of a routine
+    list in LIST_HEAD's format. A line that does not fit it stops the run."""
     routines, helpers = [], set()
     with open(path) as file:
         for number, line in enumerate(file, 1):
@@ -1569,8 +1553,8 @@ def translate_checked(translator, s, e, check):
 
 
 def direct_call_targets(translator, jobs, skip, max_count):
-    """A dry run that finds the routines which return a float on every path and are called for it by
-    translated code. Those get a second entry that returns in xmm0 (translate's xr)."""
+    """Dry run: the routines that return a float on every path and are called for it by translated code.
+    They get a second entry that returns in xmm0 (translate's xr)."""
     if os.environ.get('XLAT_NO_XR'):
         return set()
     trial = Translator(translator.img, translator.prefix)

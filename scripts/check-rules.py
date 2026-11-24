@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """check-rules.py
 
-The rules of STYLEGUIDE.md that a script can check: no semicolons in prose, comments, docstrings and
-messages, nothing in the shell scripts that the bash of macOS does not know, and one list of setup
-steps in every place that writes it out. Prints what it finds and fails if there is anything."""
+The STYLEGUIDE.md rules a script can check: no semicolons in prose, comments, docstrings and messages,
+nothing in the shell scripts that macOS's bash does not know, and one list of setup steps in every
+place that writes it out. Prints what it finds and fails if there is anything."""
 import ast
 import os
 import re

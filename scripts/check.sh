@@ -1,7 +1,7 @@
 #!/bin/bash
-# The checks that need neither the game nor CrossOver: shell syntax under the bash macOS ships, the
-# two linters, the tests of the setup's Python helpers, and the rules of STYLEGUIDE.md that a script
-# can check. GitHub runs the same on every push and pull request. Needs the linters:
+# The checks that need neither the game nor CrossOver: shell syntax under macOS's bash, the two linters,
+# the tests of the setup's Python helpers and the STYLEGUIDE.md rules a script can check. GitHub runs
+# the same on every pull request and every push to main. Needs the linters:
 #   brew install shellcheck ruff
 
 set -euo pipefail

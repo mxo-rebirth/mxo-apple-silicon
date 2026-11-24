@@ -185,17 +185,16 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
  
      const Rc<DxvkImage> image = pResource->GetImage();
      auto formatInfo  = imageFormatInfo(image->info().format);
-@@ -4705,7 +4790,35 @@
+@@ -4705,7 +4790,34 @@
        const bool usesStagingBuffer = pResource->DoesStagingBufferUploads();
        const bool directMapping = pResource->GetMapMode() == D3D9_COMMON_BUFFER_MAP_MODE_DIRECT;
        const bool skipWait = (!needsReadback && (usesStagingBuffer || readOnly || (noOverlap && !directMapping))) || noOverwrite;
 -      if (!skipWait) {
 +
-+      // A directly mapped buffer locked without DISCARD or NOOVERWRITE would have to wait until the GPU
-+      // is done with every draw that still uses it: a flush, a new render pass and a stall per lock.
-+      // Give the application a fresh backing slice that already holds the current contents instead.
-+      // Draws that are already queued keep the old slice, exactly as with DISCARD.
-+      // Not while another lock is outstanding: its pointer is into the old slice.
++      // A directly mapped buffer locked without DISCARD or NOOVERWRITE would wait for every
++      // draw that uses it: a flush, a new render pass and a stall per lock. Instead it gets a
++      // fresh slice holding the current contents, and queued draws keep the old one, as with
++      // DISCARD. Not while another lock is outstanding: its pointer is into the old slice.
 +      const bool renameWithCopy = !skipWait && directMapping && !needsReadback && m_d3d9Options.lockRenameCopy
 +                               && pResource->GetLockCount() == 0;
 +
@@ -222,7 +221,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
          if (unlikely(needsReadback)) {
            Logger::warn("Buffer readback is unimplemented.");
            // Remember to update the sequence number when implementing buffer readback.
-@@ -4742,6 +4855,7 @@
+@@ -4742,6 +4854,7 @@
  
    HRESULT D3D9DeviceEx::FlushBuffer(
          D3D9CommonBuffer*       pResource) {
@@ -230,16 +229,15 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      auto dstBuffer = pResource->GetBufferSlice<D3D9_COMMON_BUFFER_TYPE_REAL>();
      auto srcSlice = pResource->GetMappedSlice();
  
-@@ -4816,6 +4930,17 @@
+@@ -4816,6 +4929,16 @@
      // order to keep the number of submissions low.
      uint32_t pending = m_dxvkDevice->pendingSubmissions();
  
-+    // A submission ends the render pass that is open. On tile-based GPUs (Apple's) the whole
-+    // colour and depth target is then written to memory and read back when drawing resumes.
-+    // Weak hints come in the middle of drawing (about a hundred buffer unlocks per frame), so
-+    // they only submit when nothing is queued for the GPU at all. Strong hints (end of scene,
-+    // change of the main render target) fall where the pass ends anyway and are not held back.
-+    // DXVK_MXO_WEAK_FLUSH=1 lets weak hints submit the way DXVK does.
++    // A submission ends the open render pass, and a tile-based GPU (Apple's) then writes the
++    // whole colour and depth target to memory and reads it back. Weak hints come in the middle of
++    // drawing (about a hundred buffer unlocks per frame), so they submit only when nothing is
++    // queued for the GPU. Strong hints (end of scene, change of the main render target) fall
++    // where the pass ends anyway. DXVK_MXO_WEAK_FLUSH=1 lets weak hints submit the way DXVK does.
 +    static const bool s_holdWeakHints = env::isFixEnabled("DXVK_MXO_WEAK_FLUSH", env::EnvSwitch::One);
 +
 +    if (!StrongHint && s_holdWeakHints && pending != 0)
@@ -248,13 +246,12 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      if (StrongHint || pending <= MaxPendingSubmits) {
        auto now = dxvk::high_resolution_clock::now();
  
-@@ -5009,13 +5134,21 @@
+@@ -5009,13 +5132,20 @@
  
      constSet.dirty = false;
  
 -    uint32_t floatCount = m_vsFloatConstsCount;
-+    // Without robustness2 the shaders clamp float constant reads to a count we push
-+    // (DxsoOptions::swvpDynamicConstCount), so only the registers the game set are uploaded.
++    // With DxsoOptions::swvpDynamicConstCount only the registers the game set are uploaded
 +    const bool dynamicCount = m_dxsoOptions.swvpDynamicConstCount;
 +
 +    uint32_t floatCount = dynamicCount ? m_swvpFloatHighWater : m_vsFloatConstsCount;
@@ -272,7 +269,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      const uint32_t floatDataSize = floatCount * sizeof(Vector4);
      const uint32_t intDataSize   = std::min(constSet.meta.maxConstIndexI, m_vsIntConstsCount) * sizeof(Vector4i);
      const uint32_t boolDataSize  = divCeil(std::min(constSet.meta.maxConstIndexB, m_vsBoolConstsCount), 32u) * uint32_t(sizeof(uint32_t));
-@@ -5036,6 +5169,12 @@
+@@ -5036,6 +5166,12 @@
              data[constant.uboIdx] = *reinterpret_cast<const Vector4*>(constant.float32);
          }
        }
@@ -285,14 +282,14 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      }
  
      Rc<DxvkBuffer>& intBuffer = constSet.swvpBuffers.intBuffer;
-@@ -5060,7 +5199,23 @@
+@@ -5060,7 +5196,23 @@
  
      DxvkBufferSliceHandle slice;
      if (unlikely(dstBuffer == nullptr || dstBuffer->info().size < size)) {
 -      dstBuffer = CreateConstantBuffer(useSSBO, size, DxsoProgramType::VertexShader, cBufferTarget);
-+      // Grow in power-of-two steps of at least 4 KB, up to 64 KB: every new buffer starts
-+      // with an empty pool of slices, and new memory is slow to touch under Rosetta.
-+      // Not with robustness2: there a read past the constants has to fall outside the buffer to give zero.
++      // Grow in power-of-two steps from 4 KB to 64 KB: a new buffer starts with an empty
++      // pool of slices, and new memory is slow to touch under Rosetta. Not with robustness2,
++      // where a read past the constants must fall outside the buffer to give zero.
 +      static constexpr uint32_t MinGrownBytes = 4096;
 +      static constexpr uint32_t MaxGrownBytes = 65536;
 +
@@ -310,7 +307,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
        slice = dstBuffer->getSliceHandle();
      } else {
        slice = dstBuffer->allocSlice();
-@@ -5097,6 +5252,9 @@
+@@ -5097,6 +5249,9 @@
      }
      floatCount = std::min(constSet.meta.maxConstIndexF, floatCount);
  
@@ -320,7 +317,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      const uint32_t intRange = caps::MaxOtherConstants * sizeof(Vector4i);
      const uint32_t intDataSize = constSet.meta.maxConstIndexI * sizeof(Vector4i);
      uint32_t floatDataSize = floatCount * sizeof(Vector4);
-@@ -6109,7 +6267,45 @@
+@@ -6109,7 +6264,45 @@
    }
  
  
@@ -366,7 +363,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      if (unlikely(m_activeHazardsRT != 0)) {
        EmitCs([](DxvkContext* ctx) {
          ctx->emitRenderTargetReadbackBarrier();
-@@ -6252,6 +6448,9 @@
+@@ -6252,6 +6445,9 @@
      if (depthTextureMask != m_lastSamplerDepthMode)
        UpdateSamplerDepthModeSpecConstant(depthTextureMask);
  
@@ -376,7 +373,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      if (m_flags.test(D3D9DeviceFlag::DirtySharedPixelShaderData)) {
        m_flags.clr(D3D9DeviceFlag::DirtySharedPixelShaderData);
  
-@@ -6302,6 +6501,12 @@
+@@ -6302,6 +6498,12 @@
    void D3D9DeviceEx::BindShader(
    const D3D9CommonShader*                 pShaderModule,
          D3D9ShaderPermutation             Permutation) {
@@ -389,7 +386,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      EmitCs([
        cShader = pShaderModule->GetShader(Permutation)
      ] (DxvkContext* ctx) {
-@@ -6310,6 +6515,62 @@
+@@ -6310,6 +6512,62 @@
    }
  
  
@@ -425,7 +422,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +      const D3D9CommonShader* shader = GetCommonShader(m_state.pixelShader);
 +      const auto& info = shader->GetInfo();
 +
-+      // Only shader model 1 leaves the image type of a sampler to the bound texture
++      // Shader model 1, or the option that forces it: the bound texture decides a sampler's image type
 +      uint32_t types = 0;
 +
 +      if (info.majorVersion() < 2 || m_d3d9Options.forceSamplerTypeSpecConstants) {
@@ -452,15 +449,14 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
    void D3D9DeviceEx::BindInputLayout() {
      m_flags.clr(D3D9DeviceFlag::DirtyInputLayout);
  
-@@ -6551,7 +6812,34 @@
+@@ -6551,7 +6809,33 @@
  
      if constexpr (ProgramType == DxsoProgramType::VertexShader) {
        if constexpr (ConstantType == D3D9ConstantType::Float) {
 -        m_vsFloatConstsCount = std::max(m_vsFloatConstsCount, StartRegister + Count);
-+        // Every draw copies the vertex shader constants up to this mark (with software vertex
-+        // processing that can be 8192 registers). Registers that hold zero need no copy: reads
-+        // past the copied range return zero. So only registers that become nonzero raise it:
-+        // a game that clears all 8192 once would otherwise copy 128 KB on every draw.
++        // Every draw copies the vertex shader constants up to this mark (up to 8192 registers with
++        // software vertex processing). Reads past the copied range return zero, so only a nonzero
++        // register raises it: a game that clears all 8192 once would otherwise copy 128 KB per draw.
 +        uint32_t top = Count;
 +
 +        if (likely(m_mxoZeroAwareConsts)) {
@@ -488,7 +484,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
        } else if constexpr (ConstantType == D3D9ConstantType::Int) {
          m_vsIntConstsCount = std::max(m_vsIntConstsCount, StartRegister + Count);
        } else /* if constexpr (ConstantType == D3D9ConstantType::Bool) */ {
-@@ -7099,6 +7387,8 @@
+@@ -7099,6 +7383,8 @@
  
  
    HRESULT D3D9DeviceEx::ResetState(D3DPRESENT_PARAMETERS* pPresentationParameters) {
@@ -622,7 +618,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_mxo_fastmath.cpp b/src/d3d9/d3d9_mxo_fastmath.cpp
 --- a/src/d3d9/d3d9_mxo_fastmath.cpp	2026-11-19 00:00:00
 +++ b/src/d3d9/d3d9_mxo_fastmath.cpp	2026-11-19 00:00:00
-@@ -0,0 +1,747 @@
+@@ -0,0 +1,736 @@
 +#include <windows.h>
 +#include <tlhelp32.h>
 +
@@ -666,7 +662,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +  // Lists of routines in a log line stop growing at this length
 +  static constexpr size_t MaxListLength = 120;
 +
-+  // Where the flag files of the diagnostics are looked for and where their output goes
++  // Holds the flag files of the diagnostics and their output
 +  static const char* const DiagnosticsFolder = "C:\\Games\\dxvk\\";
 +
 +
@@ -694,7 +690,6 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +  }
 +
 +
-+  // True if size bytes at rva lie inside an image of imageSize bytes
 +  static bool IsInImage(uint32_t imageSize, uint32_t rva, uint32_t size) {
 +    return rva <= imageSize && size <= imageSize - rva;
 +  }
@@ -723,7 +718,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +  enum class RedirectResult : uint8_t {
 +    Installed,
-+    NotWritable,                // the code could not be made writable
++    NotWritable,
 +    Busy,                       // a thread was inside the bytes the jump replaces
 +  };
 +
@@ -734,9 +729,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +  }
 +
 +
-+  // Writes the entry jumps of all given routines while every other thread of the process is
-+  // suspended, and leaves out any routine a thread is just entering. Nothing in the suspended
-+  // section allocates or takes locks.
++  // Writes the entry jumps with all other threads suspended, and skips a routine a thread is entering
 +  static std::vector<RedirectResult> InstallRedirects(uint8_t* base, const std::vector<Redirect>& redirects) {
 +    std::vector<RedirectResult> results(redirects.size(), RedirectResult::NotWritable);
 +    std::vector<DWORD> oldProtect(redirects.size(), 0);
@@ -823,9 +816,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +  }
 +
 +
-+  // The client's light loop is entered here and gets only the lights that can reach the object
-+  // (d3d9_mxo_lights.h). The loop it runs is its own translation, which sends other threads on
-+  // to the original.
++  // Entry of the client's light loop: passes only the lights that can
++  // reach the object on to the loop's translation (d3d9_mxo_lights.h)
 +  static MxoLightLoop s_lightLoop  = nullptr;
 +  static uint32_t     s_clientBase = 0;
 +  static std::atomic<uint32_t> s_lightsSeen    = { 0 };
@@ -853,14 +845,14 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +  }
 +
 +
-+  // The hand-written replacements. The originals are recognised by position, length and a hash of
-+  // their code (address fields excluded), so no game code is carried in this file.
++  // Hand-written replacements. The originals are recognised by position, length and
++  // a hash of their code (address fields excluded), so no game code is carried here.
 +  struct HandWritten {
 +    const char* name;
 +    uint32_t    rva;
 +    uint32_t    size;
 +    uint64_t    hash;
-+    uint32_t    refCount;       // address fields inside the routine, each of which must point at the float 1.0
++    uint32_t    refCount;       // address fields in the routine, each must point at the float 1.0
 +    uint32_t    refs[3];
 +    const void* replacement;
 +  };
@@ -887,8 +879,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +  }
 +
 +
-+  // x87max.txt in the diagnostics folder may hold a number N to install only the first N routines
-+  // (for bisecting). The hand-written routines count after the translated ones.
++  // For bisecting: a number N in x87max.txt in the diagnostics folder lets only
++  // the first N routines go in. Hand-written ones count after the translated ones.
 +  static uint32_t ReadInstallLimit() {
 +    uint32_t limit = ~0u;
 +
@@ -902,7 +894,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +  }
 +
 +
-+  // True for a .NET assembly: its PE optional header has a CLR header among the data directories
++  // A .NET assembly has a CLR header among its PE data directories
 +  static bool IsDotNetAssembly(const std::vector<uint8_t>& file) {
 +    if (file.size() < sizeof(IMAGE_DOS_HEADER))
 +      return false;
@@ -928,10 +920,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +
 +  // Game add-ons (Revived's mxrdisp, the mxowrap wrappers) check and hook client.dll code at
-+  // fixed addresses. A routine they point into is left as it is, so their checks still pass and
-+  // their hooks still run. Any address inside client.dll found in such a module counts.
-+  // DXVK_MXO_RESPECT_ADDONS=0 replaces those routines anyway.
-+  // Returns the addresses found, as sorted offsets into client.dll.
++  // fixed addresses, so a routine they point into is left alone unless DXVK_MXO_RESPECT_ADDONS=0.
++  // Returns every client.dll address found in such a module, as sorted offsets.
 +  static std::vector<uint32_t> FindAddonReferences(const uint8_t* base, uint32_t imageSize) {
 +    // a larger file is left unread: reading it would cost address space the game needs
 +    static constexpr long MaxAddonFileBytes = 64 << 20;
@@ -941,8 +931,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +    if (!env::isFixEnabled("DXVK_MXO_RESPECT_ADDONS"))
 +      return addonRefs;
 +
-+    // Add-on files (mx*.dll) next to the game executable and next to client.dll, read from disk:
-+    // some of them load only after the device exists. The executable itself is not scanned.
++    // mx*.dll next to the game executable and next to client.dll, read from disk:
++    // some load only after the device exists. The executable itself is not scanned.
 +    std::vector<std::string> folders;
 +    char path[MAX_PATH];
 +
@@ -1017,7 +1007,6 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +  }
 +
 +
-+  // True if an add-on names an address inside the routine of size bytes at rva
 +  static bool IsNamedByAddon(const std::vector<uint32_t>& addonRefs, uint32_t rva, uint32_t size) {
 +    auto ref = std::lower_bound(addonRefs.begin(), addonRefs.end(), rva);
 +    return ref != addonRefs.end() && *ref < rva + size;
@@ -1050,10 +1039,9 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +    HMODULE crt = ::GetModuleHandleA("msvcr71.dll");
 +
-+    // MSVCR71!sqrt: client.dll's import slot for it (from the translator's table, so it is the slot of the
-+    // client.dll this build was made from) is pointed at MxoSqrtSSE, but only if it holds the runtime's own sqrt.
-+    // An add-on may have hooked it, and a different client.dll may keep something else there.
-+    // DXVK_MXO_SQRT=0 leaves it alone.
++    // client.dll's import slot for msvcr71's sqrt gets MxoSqrtSSE only while it holds
++    // the runtime's own sqrt: an add-on may have hooked it, and the slot is known only
++    // for the client.dll this build was made from. DXVK_MXO_SQRT=0 leaves it alone.
 +    if (env::isFixEnabled("DXVK_MXO_SQRT")) {
 +      const char* result = "left alone (no import slot known)";
 +      auto crtSqrt = crt ? reinterpret_cast<uint32_t>(::GetProcAddress(crt, "sqrt")) : 0u;
@@ -1095,9 +1083,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +    for (auto f = reinterpret_cast<const MxoXFunc*>(MxoX_funcs); f->size; f++)
 +      total++;
 +
-+    // Translated routines. They assume the FPU setup of the thread that owns the device (24-bit
-+    // precision, round to nearest) and send every other thread back into the original code.
-+    // DXVK_MXO_X87=0 leaves them out.
++    // The translated routines assume the FPU setup of the thread that owns the device (24-bit precision,
++    // round to nearest) and send every other thread to the original code. DXVK_MXO_X87=0 leaves them out.
 +    const bool translated = env::isFixEnabled("DXVK_MXO_X87");
 +    std::vector<const MxoXFunc*> todo;
 +    std::string differing, respected, paired;
@@ -1115,8 +1102,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +      for (auto f = reinterpret_cast<const MxoXFunc*>(MxoX_deps); f->size; f++)
 +        depsIntact = depsIntact && MxoXMatches(base, imageSize, MxoX_imagebase, *f);
 +
-+      // Routines that compute msvcr71's floor or ceil in place instead of calling them through the import table:
-+      // only if the slot still holds the runtime's own function (an add-on could have hooked it).
++      // A routine that computes msvcr71's floor or ceil in place goes in only if the
++      // import slot still holds the runtime's own function: an add-on could have hooked it
 +      std::vector<uint32_t> inlineBlocked;
 +      const uint32_t crtFns[] = {
 +        crt ? reinterpret_cast<uint32_t>(::GetProcAddress(crt, "floor")) : 0u,     // MxoXCrtFloor
@@ -1132,8 +1119,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +      if (!inlineBlocked.empty())
 +        Logger::info(str::format("MxO fast math: ", inlineBlocked.size(), " floor/ceil uses keep their routine original (import hooked or missing)"));
 +
-+      // Which routines go in. "matching" counts every routine whose code in memory is the code its translation
-+      // was made from. Each reason for leaving a matching routine out is logged with its own count.
++      // "matching" counts the routines whose code in memory is what their translation was made from
 +      uint32_t index = 0;
 +
 +      for (auto f = reinterpret_cast<const MxoXFunc*>(MxoX_funcs); f->size; f++, index++) {
@@ -1178,8 +1164,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +        todo.push_back(f);
 +      }
 +
-+      // A routine that calls another translated routine directly (for its result in xmm0) goes in only together
-+      // with that routine. Repeat until nothing changes, since callees can have such callees too.
++      // A routine that calls another translated routine directly (for its result in
++      // xmm0) goes in only with it. Repeated because callees can have such callees too.
 +      for (bool changed = true; changed; ) {
 +        changed = false;
 +        for (auto d = reinterpret_cast<const MxoXDirectCall*>(MxoX_xrdeps); d->caller; d++) {
@@ -1197,9 +1183,9 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +      }
 +    }
 +
-+    // The light loop is entered through the filter when its translation goes in, the game code the
-+    // filter relies on is the known one and no add-on names the functions that return a light's
-+    // reach: the filter reads the reach itself. DXVK_MXO_LIGHT_FILTER=0 leaves the filter out.
++    // The filter needs the light loop's translation, the known game code
++    // around it and no add-on that names the functions returning a light's
++    // reach, which it reads itself. DXVK_MXO_LIGHT_FILTER=0 leaves it out.
 +    static constexpr size_t NoSlot = ~size_t(0);
 +    const char* lightFilter = "off, the light loop's translation is not installed";
 +    size_t lightSlot = NoSlot;
@@ -1228,8 +1214,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +      redirects.push_back({ f->rva, replacement });
 +    }
 +
-+    // The hand-written routines go in with the translated ones, so that add-ons and x87max.txt
-+    // count for them too. Unlike the translated ones they run on every thread.
++    // Hand-written routines go in with the translated ones, so add-ons
++    // and x87max.txt count for them too. They run on every thread.
 +    const char* handWrittenState[HandWrittenCount];
 +    size_t handWrittenSlot[HandWrittenCount];
 +
@@ -1316,9 +1302,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +
 +  float GetMxoRenderThrottle() {
-+    // The client keeps its render throttle (1 = full draw distance, down to 0.25) in an object whose
-+    // address is in one of its globals. That is only trusted if the throttle routine at client+0x28e0
-+    // really stores to that object where expected.
++    // The client keeps its render throttle (1 = full draw distance, down to 0.25) in an object a
++    // global points to. Trusted only if the routine at client+0x28e0 stores to it where expected.
 +    static constexpr uint32_t ThrottleObjectRva   = 0x9f84e8;   // the global
 +    static constexpr uint8_t  ThrottleFieldOffset = 0x14;       // the throttle inside the object
 +    static constexpr uint32_t ThrottleStoreRva    = 0x2900;     // the store inside the routine
@@ -1351,7 +1336,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +
 +  void CheckMxoFastMathFpu() {
-+    // precision control (bits 8-9) must be 24-bit and rounding control (bits 10-11) nearest: all four bits clear
++    // 24-bit precision (bits 8-9) and rounding to nearest (bits 10-11): all four bits clear
 +    static constexpr uint16_t PrecisionAndRoundingMask = 0x0f00;
 +
 +    if (!s_x87Thread || ::GetCurrentThreadId() != s_x87Thread)
@@ -1373,7 +1358,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_mxo_fastmath.h b/src/d3d9/d3d9_mxo_fastmath.h
 --- a/src/d3d9/d3d9_mxo_fastmath.h	2026-11-19 00:00:00
 +++ b/src/d3d9/d3d9_mxo_fastmath.h	2026-11-19 00:00:00
-@@ -0,0 +1,62 @@
+@@ -0,0 +1,51 @@
 +#pragma once
 +
 +#include <cstdint>
@@ -1384,22 +1369,17 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +  /**
 +   * \brief Faster math routines for The Matrix Online
 +   *
-+   * The game's client.dll does its vector and matrix math on the x87 FPU, which
-+   * Rosetta 2 emulates in software. If the loaded client.dll contains two specific,
-+   * byte-identical hot routines (4x4 matrix multiply, quaternion to matrix), they
-+   * are redirected in memory to SSE implementations. Nothing on disk is changed
-+   * and other programs are not affected. Set DXVK_MXO_FASTMATH=0 to disable.
-+   *
-+   * A further set of the client's hot x87 routines is replaced by SSE2 code that
-+   * xlat.py generated from them (d3d9_mxo_x87.inc); each is installed only if the
-+   * loaded client.dll holds exactly the code it was generated from. Set
-+   * DXVK_MXO_X87=0 to disable just those.
++   * client.dll does its math on the x87 FPU, which Rosetta 2 emulates in software. Hot routines
++   * are redirected in memory to SSE code: two hand-written ones (4x4 matrix multiply, quaternion
++   * to matrix) and those xlat.py translated (d3d9_mxo_x87.inc), each only if client.dll holds
++   * exactly the code it replaces. Nothing on disk changes. DXVK_MXO_FASTMATH=0 disables this,
++   * DXVK_MXO_X87=0 just the translated routines. It also points the sqrt import at an SSE version
++   * and puts the light filter in front of the light loop. The switches are in docs/building.md.
 +   */
 +  void ApplyMxoFastMath();
 +
 +  /**
-+   * \brief Checks once per frame that the FPU is still set up the way the
-+   *        translated routines assume, and switches them off otherwise
++   * \brief Per frame: switches the translated routines off while the FPU is not set up as they assume
 +   */
 +  void CheckMxoFastMathFpu();
 +
@@ -1409,9 +1389,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +  float GetMxoRenderThrottle();
 +
 +  /**
-+   * \brief How many projector lights the light filter looked at, how many it passed
-+   *        on to the game and how long the longest list of lights was, since the
-+   *        last call. All three are set back to 0
++   * \brief Projector lights the filter looked at and passed on, and the longest list, since the last call
 +   */
 +  void TakeMxoLightCounts(uint32_t& seen, uint32_t& kept, uint32_t& longest);
 +
@@ -1427,11 +1405,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +  uint32_t GetModuleImageSize(const void* module);
 +
 +  /**
-+   * \brief Path of a file in the folder of the diagnostic files
-+   *
-+   * The flag files that switch the diagnostics on are looked for there,
-+   * and what the diagnostics write goes there.
-+   * \param [in] fileName Name of the file
++   * \brief Path of a file in the diagnostics folder, which holds the flag files and the output
 +   */
 +  std::string GetMxoDiagnosticsPath(const char* fileName);
 +
@@ -1439,13 +1413,13 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_mxo_fastmath_asm.inc b/src/d3d9/d3d9_mxo_fastmath_asm.inc
 --- a/src/d3d9/d3d9_mxo_fastmath_asm.inc	2026-11-19 00:00:00
 +++ b/src/d3d9/d3d9_mxo_fastmath_asm.inc	2026-11-19 00:00:00
-@@ -0,0 +1,147 @@
+@@ -0,0 +1,144 @@
 +// SSE replacements for two x87 math routines of The Matrix Online client (see d3d9_mxo_fastmath.cpp).
 +//
 +// MxoMatMulSSE      thiscall  Matrix4* Matrix4::Multiply(Matrix4* out, const Matrix4* b)   out = this * b
 +// MxoQuatToMatSSE   thiscall  void     Matrix::FromQuaternion(const float q[4])            rotation part of this
 +//
-+// Both compute everything before writing the result, like the originals, so out may alias the inputs.
++// Like the originals, both compute everything before writing, so out may alias the inputs.
 +#define MXO_ROW(off) \
 +  "movss  xmm0, dword ptr [ecx+" #off "]\n"      "shufps xmm0, xmm0, 0\n" "mulps xmm0, xmm4\n" \
 +  "movss  xmm1, dword ptr [ecx+" #off "+4]\n"    "shufps xmm1, xmm1, 0\n" "mulps xmm1, xmm5\n" "addps xmm0, xmm1\n" \
@@ -1524,17 +1498,14 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +// MxoSqrtSSE        cdecl     double sqrt(double x), result in st0, for the client's import of MSVCR71!sqrt
 +//
-+// The x87 sqrt Rosetta runs is slow, SSE2's is not. The result must equal what fsqrt gives under the
-+// calling thread's FPU control word, so only two cases are computed here, everything else goes to the
-+// original (MxoSqrtOriginal):
-+// - 24-bit precision, round to nearest (the game's render thread): sqrtsd, then rounding to float. Taken
-+//   only if the result is a normal float (the x87 keeps its wider exponent range, a float does not) and
-+//   the double result is not exactly halfway between two floats (there, rounding twice could differ
-+//   from rounding once. Anywhere else it cannot, because no halfway point lies between the exact root
-+//   and its nearest double).
++// Rosetta's x87 sqrt is slow, SSE2's is not. The result must equal fsqrt under the caller's FPU control
++// word, so two cases are computed here and the rest goes to the original (MxoSqrtOriginal):
++// - 24-bit precision, round to nearest (the game's render thread): sqrtsd rounded to float, if that is a
++//   normal float (the x87 has a wider exponent range) and the double is not exactly halfway between two
++//   floats. Only there can rounding twice differ from rounding once: no halfway point lies between the
++//   exact root and its nearest double.
 +// - 53-bit precision, round to nearest: sqrtsd is exactly fsqrt.
-+// x must be positive and finite. Zero, negative, infinite and NaN inputs take the original, which also
-+// handles their error reporting.
++// Zero, negative, infinite and NaN inputs take the original, which also reports their errors.
 +__asm__(
 +  ".intel_syntax noprefix\n"
 +  ".section .rdata\n"
@@ -1590,7 +1561,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_mxo_lights.h b/src/d3d9/d3d9_mxo_lights.h
 --- a/src/d3d9/d3d9_mxo_lights.h	2026-11-19 00:00:00
 +++ b/src/d3d9/d3d9_mxo_lights.h	2026-11-19 00:00:00
-@@ -0,0 +1,185 @@
+@@ -0,0 +1,177 @@
 +#pragma once
 +
 +#include <cstddef>
@@ -1599,14 +1570,10 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +// Include after mxo_x87_apply.h: the game code is recognised with its MxoXCodeHash.
 +//
-+// The client's routine at MxoLightLoopRva chooses the projector lights that light one object. It
-+// walks every light of the scene, and for each one makes three calls through the light's table of
-+// functions and one to a distance routine before it knows whether the light reaches the object's
-+// box. Among many characters at night that was 27 to 31% of the main thread.
-+//
-+// What is here runs in front of that routine: it leaves out the lights that are clearly out of
-+// reach, so that the routine itself only sees the others. The routine still decides every light it
-+// is given, and every close case is given to it.
++// The client's routine at MxoLightLoopRva chooses the projector lights for one object, with four
++// calls per light of the scene: 27 to 31% of the main thread among many characters at night
++// (docs/translator.md). This runs in front of it and leaves out the lights clearly out of reach.
++// The routine still decides every light it is given, and every close case is given to it.
 +
 +const uint32_t MxoLightLoopRva      = 0x48fa40;
 +const uint32_t MxoLightBoxScaleAt[] = { 142, 162, 196 };   // in the loop's code: the addresses of the factor it scales the box by
@@ -1634,7 +1601,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +const float    MxoLightMargin       = 1.01f;      // a light this close to reaching the box is left to the routine
 +const size_t   MxoMaxKeptLights     = 256;        // with more lights in reach than this the routine gets the whole list
 +
-+// The list the routine is handed: where the pointers to the lights begin and end
++// The list the routine is handed: pointers to the lights
 +struct MxoLightList {
 +  const uint8_t* const* begin;
 +  const uint8_t* const* end;
@@ -1643,7 +1610,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +// The routine, as the game calls it and as its translation is called. Returns how many lights it took.
 +typedef uint32_t (__stdcall* MxoLightLoop)(const uint8_t* object, const MxoLightList* lights, void* entries, uint32_t first);
 +
-+// What the filter did in one call: the length of the list, and how many lights of it the routine got
++// One call of the filter: the length of the list, and how many of its lights the routine got
 +struct MxoLightCount {
 +  uint32_t seen;
 +  uint32_t kept;
@@ -1677,10 +1644,9 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +  return box;
 +}
 +
-+// Whether the light is out of the box's reach by more than the margin. A light of another kind
-+// than the known one is never out of reach here, and neither is one whose reach is not a number.
-+// An axis on which the position or the box is not a number adds nothing to the distance, as in
-+// the routine. clientBase is where client.dll is loaded.
++// Whether the light is out of the box's reach by more than the margin: never for another kind of
++// light than the known one, or for a reach that is not a number. An axis on which the position or
++// the box is not a number adds nothing to the distance, as in the routine.
 +static inline bool MxoLightOutOfReach(const MxoLightBox& box, const uint8_t* light, uint32_t clientBase) {
 +  const uint8_t* functions = reinterpret_cast<const uint8_t*>(uintptr_t(MxoWordAt(light)));
 +  if (MxoWordAt(functions + MxoLightReachSlot) != clientBase + MxoLightReachRva)
@@ -1707,10 +1673,9 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +  return reach * reach * MxoLightMargin < distance;
 +}
 +
-+// Copies the lights that can reach the object into kept, which has room for MxoMaxKeptLights, in
-+// their order, and returns how many. The list can be of any length. Returns MxoMaxKeptLights + 1
-+// when more lights than that are in reach, or the list ends before it begins: the routine then
-+// has to get the list as it is.
++// Copies the lights that can reach the object into kept (room for MxoMaxKeptLights), in their
++// order, and returns how many. The list can have any length. Returns MxoMaxKeptLights + 1 when more
++// are in reach or the list ends before it begins: the routine then has to get the list as it is.
 +static inline size_t MxoLightsInReach(const uint8_t* object, const MxoLightList* lights,
 +    const uint8_t** kept, uint32_t clientBase) {
 +  if (lights->end < lights->begin)
@@ -1730,8 +1695,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +  return keptCount;
 +}
 +
-+// Runs the routine on the lights that can reach the object and returns what it returns. This is
-+// the whole of what stands in front of the routine: the DLL and the tests both call it.
++// Runs the routine on the lights that can reach the object. This is all that stands in front of
++// the routine: the DLL and the tests both call it.
 +static inline uint32_t MxoRunLightLoop(MxoLightLoop loop, uint32_t clientBase, const uint8_t* object,
 +    const MxoLightList* lights, void* entries, uint32_t first, MxoLightCount* count) {
 +  const uint8_t* kept[MxoMaxKeptLights];
@@ -1748,7 +1713,6 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +  return loop(object, &inReach, entries, first);
 +}
 +
-+// Whether the float at an address inside the image has the given bits
 +static inline bool MxoImageFloatIs(const uint8_t* base, uint32_t imageSize, uint32_t address, float value) {
 +  const uint32_t rva = address - uint32_t(uintptr_t(base));
 +  return imageSize >= sizeof(float) && rva <= imageSize - sizeof(float)
@@ -1757,8 +1721,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +// Whether the filter fits this client.dll: the two functions that give a light's reach are the
 +// known ones, the reach without a part is 0, and the routine scales the box by MxoBoxScale. That
-+// the routine itself is the known one is for the caller to check, as for any translated routine.
-+// base is where client.dll is loaded, imageSize its size in memory.
++// the routine itself is the known one is for the caller to check. imageSize is the size in memory.
 +static inline bool MxoLightFilterFits(const uint8_t* base, uint32_t imageSize) {
 +  if (imageSize < MxoLightReachRva + MxoLightReachSize || imageSize < MxoLightLoopRva + MxoLightBoxScaleAt[2] + sizeof(uint32_t))
 +    return false;
@@ -1825,9 +1788,9 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +  uint32_t callee;
 +};
 +
-+// FNV-1a over the bytes of [code, code + size), the hash xlat.py prints for a routine. The four
-+// bytes at each of the offsets in skips hold an address and are left out, so the hash stands for
-+// the routine wherever its image is loaded, and no code of it has to be carried along.
++// FNV-1a over [code, code + size), the hash xlat.py prints for a routine. The four bytes at each
++// offset in skips hold an address and are left out, so the hash stands for the routine wherever
++// its image is loaded, and no copy of its code has to be carried along.
 +static inline uint64_t MxoXCodeHash(const uint8_t* code, uint32_t size, const uint32_t* skips, uint32_t skipCount) {
 +  uint64_t hash = 0xcbf29ce484222325ull;
 +
@@ -2022,15 +1985,14 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
  #include "d3d9_resource.h"
  #include "../dxso/dxso_module.h"
  #include "d3d9_shader_permutations.h"
-@@ -37,6 +39,18 @@
+@@ -37,6 +39,17 @@
        return m_shaders[Permutation];
      }
  
 +    /**
-+     * \brief Shader compiled for a fixed set of sampler image types
++     * \brief Shader compiled for a fixed set of sampler image types, on first use
 +     *
-+     * Types and Depth use the layout of DxsoOptions::staticSamplerTypes
-+     * and staticSamplerDepth. Variants are compiled on first use.
++     * Types and Depth use the layout of DxsoOptions::staticSamplerTypes and staticSamplerDepth.
 +     */
 +    Rc<DxvkShader> GetStaticSamplerVariant(
 +            D3D9DeviceEx*         pDevice,
@@ -2041,7 +2003,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      std::string GetName() const {
        return m_shaders[D3D9ShaderPermutations::None]->debugName();
      }
-@@ -72,6 +86,16 @@
+@@ -72,6 +85,16 @@
      DxsoPermutations      m_shaders;
  
      std::vector<uint8_t>  m_bytecode;
@@ -2066,7 +2028,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      float pointScaleB  = 0.0f;
      float pointScaleC  = 0.0f;
 +
-+    // number of software vertex processing float constants in the bound buffer (see DxsoOptions::swvpDynamicConstCount)
++    // number of SWVP float constants in the bound buffer (see DxsoOptions::swvpDynamicConstCount)
 +    float swvpFloatCount = 0.0f;
    };
  
@@ -2099,14 +2061,13 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
  #include "d3d9_surface.h"
  #include "d3d9_monitor.h"
  
-@@ -156,6 +167,24 @@
+@@ -156,6 +167,23 @@
          }
        }
      }
 +    else if (message == WM_DISPLAYCHANGE && !IsIconic(window)) {
-+      // MxO: under Wine the display mode can change after the window was already sized to the
-+      // monitor (the switch completes asynchronously). Size the window to the new mode, otherwise
-+      // a 3440x1440 window on an 800x600 display shows only its top left corner.
++      // MxO: under Wine a display mode switch can complete after the window was sized to the monitor.
++      // Size it again, or a 3440x1440 window on an 800x600 display shows only its top left corner.
 +      D3DDEVICE_CREATION_PARAMETERS create_parms;
 +      windowData.swapchain->GetDevice()->GetCreationParameters(&create_parms);
 +
@@ -2124,21 +2085,18 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      else if (message == WM_SIZE)
      {
        D3DDEVICE_CREATION_PARAMETERS create_parms;
-@@ -184,6 +213,668 @@
+@@ -184,6 +212,659 @@
    };
  
  
-+  // Optional sampling profiler, enabled by creating the file sample.flag in the diagnostics folder
-+  // (GetMxoDiagnosticsPath) before the game starts. A helper thread looks at every thread of the process
-+  // every few milliseconds: where it is executing, and the nearest return addresses on its stack that lie
-+  // in this DLL, in the game's client.dll and in winevulkan.dll (so that time spent waiting or inside Vulkan
-+  // can be attributed to its caller). Samples are appended to samples.bin in that folder every ten seconds.
-+  // translator/profile2.py reads the file, so this is its record format.
++  // Sampling profiler, on if sample.flag is in the diagnostics folder before the game
++  // starts. This is the record format of samples.bin, which translator/profile2.py
++  // reads. The return addresses let waits and Vulkan time be given to their caller.
 +  struct SampleRecord {
 +    uint32_t tid, eip, retSelf[3], retClient[3], retVulkan;
 +  };
 +
-+  // A stack value is taken for a return address only if a call instruction ends right before it
++  // Only a stack value right after a call instruction counts as a return address
 +  static bool FollowsCall(uint32_t address) {
 +    auto p = reinterpret_cast<const uint8_t*>(uintptr_t(address));
 +    return p[-5] == 0xE8
@@ -2150,8 +2108,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +  static DWORD s_presentThreadId = 0;
 +
-+  // The DXVK_HUD overlay starts hidden. Ctrl+Shift+F shows or hides it. The keys are looked at ten times a
-+  // second, not on every frame: each look is a call into Wine's input handling.
++  // The DXVK_HUD overlay starts hidden, Ctrl+Shift+F toggles it. The keys are read ten
++  // times a second, not per frame: each read is a call into Wine's input handling.
 +  static std::atomic<bool> s_hudHidden = { true };
 +
 +  static void UpdateHudToggle() {
@@ -2173,16 +2131,15 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +    s_wasDown = down;
 +  }
 +
-+  // Stall recorder (with debug.flag): while the thread that presents has not presented for some time,
-+  // record where it is at short intervals, and log the most common places when the frame finally ends.
++  // Stall recorder (with debug.flag): samples the presenting thread while it has not
++  // presented for some time, and logs the most common places when the frame ends
 +  static constexpr uint32_t StallAfterMs           = 200;
 +  static constexpr uint32_t StallSampleIntervalMs  = 20;
 +  static constexpr uint32_t StallOtherThreadsEvery = 5;     // in samples: the other threads are looked at less often
 +  static constexpr size_t   StallListedPlaces      = 3;
 +  static constexpr size_t   StallListedOtherPlaces = 4;
 +
-+  // A stall lasts as long as the game does not draw, and it does not draw in the background.
-+  // So the sampling of one stall ends after some time, and the recorder after some logged stalls.
++  // The game does not draw in the background, so a stall can last long: sampling and logging are capped
 +  static constexpr uint32_t MaxStallSampledMs      = 30000;
 +  static constexpr size_t   MaxStallSamples        = MaxStallSampledMs / StallSampleIntervalMs;
 +  static constexpr uint32_t MaxLoggedStalls        = 300;
@@ -2214,12 +2171,12 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +    struct Sample { uint32_t eip; uint32_t ret[8]; };
 +    std::vector<Sample> samples;
-+    std::vector<std::pair<DWORD, Sample>> others;   // other threads of the game
++    std::vector<std::pair<DWORD, Sample>> others;
 +    uint32_t logged = 0;
 +    uint64_t stallBegan = 0;
 +
 +    auto takeSample = [] (HANDLE t, Sample& sample) {
-+      static constexpr uint32_t StackWords        = 256;       // how far up the stack return addresses are looked for
++      static constexpr uint32_t StackWords        = 256;       // stack words searched for return addresses
 +      static constexpr uint32_t LowestCodeAddress = 0x10000;   // nothing is ever mapped below it
 +
 +      sample = { };
@@ -2248,7 +2205,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +    uint32_t stallTicks = 0;
 +    std::string focusAtStart;
 +
-+    // which window has the focus: the game skips drawing while it thinks it is in the background
++    // the game skips drawing while it thinks it is in the background
 +    auto describeFocus = [] () {
 +      auto name = [] (HWND w) -> std::string {
 +        if (!w)
@@ -2307,7 +2264,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +          }
 +        }
 +      } else if (!samples.empty()) {
-+        // the stall is over: names are resolved now, with the game thread running again
++        // names are resolved only now, with the game thread running again
 +        std::unordered_map<std::string, uint32_t> counts;
 +        for (const auto& s : samples) {
 +          std::string key = DescribeAddress(s.eip);
@@ -2326,7 +2283,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +          focusAtStart, "; at the end: ", describeFocus());
 +        for (size_t i = 0; i < sorted.size() && i < StallListedPlaces; i++)
 +          text += str::format("\n    ", sorted[i].first, "x  ", sorted[i].second);
-+        // other threads that were not simply waiting in ntdll
++        // other threads that were not simply waiting in a system DLL
 +        std::unordered_map<std::string, uint32_t> otherCounts;
 +        for (const auto& o : others) {
 +          const std::string at = DescribeAddress(o.second.eip);
@@ -2360,12 +2317,11 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +
 +  static void SamplerMarker() { }
 +
-+  // True if the diagnostics folder holds a file of this name
 +  static bool HasDiagnosticsFile(const char* fileName) {
 +    return ::GetFileAttributesA(GetMxoDiagnosticsPath(fileName).c_str()) != INVALID_FILE_ATTRIBUTES;
 +  }
 +
-+  // A request file asks for something once: true if it is there, and then it is deleted
++  // A request file asks for something once: it is deleted when found
 +  static bool TakeDiagnosticsRequest(const char* fileName) {
 +    const std::string path = GetMxoDiagnosticsPath(fileName);
 +
@@ -2383,7 +2339,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +    static constexpr DWORD    LightIntervalMs  = 20;
 +    static constexpr DWORD    ScanIntervalMs   = 2000;    // for new threads and modules
 +    static constexpr DWORD    WriteIntervalMs  = 10000;
-+    static constexpr uint32_t StackWords       = 192;     // how far up the stack return addresses are looked for
++    static constexpr uint32_t StackWords       = 192;     // stack words searched for return addresses
 +
 +    static SampleRecord samples[MaxSamples];
 +    struct Thread { DWORD tid; HANDLE handle; };
@@ -2402,8 +2358,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +    range[0][0] = uint32_t(uintptr_t(self));
 +    range[0][1] = range[0][0] + GetModuleImageSize(self);
 +
-+    // Light mode (sample-light.flag): only the thread that presents and DXVK's own, at the longer interval.
-+    // Pausing every thread at the short one makes the game's own memory writes far slower than they are.
++    // Light mode (sample-light.flag): only the presenting thread and DXVK's own, and less often. Pausing
++    // every thread at the short interval makes the game's memory writes far slower than they are.
 +    const bool light = HasDiagnosticsFile("sample-light.flag");
 +
 +    const std::string modulesPath = GetMxoDiagnosticsPath("modules.txt");
@@ -2446,8 +2402,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +          ::CloseHandle(snapshot);
 +        }
 +
-+        // Where every module sits (modules.txt, rewritten when the list changes), so that
-+        // samples outside this DLL and client.dll can be named: "base size name", hex.
++        // modules.txt ("base size name", hex) lets samples outside this
++        // DLL and client.dll be named. Rewritten when the list changes.
 +        static uint32_t s_moduleSum = 0;
 +        snapshot = ::CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, 0);
 +
@@ -2478,7 +2434,6 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +        }
 +      }
 +
-+      // light mode: the presenting thread plus DXVK's own threads (render, submit, queue)
 +      const env::ThreadNameEntry* lightNames = nullptr;
 +      const uint32_t lightNameCount = light ? env::getThreadNames(&lightNames) : 0;
 +
@@ -2567,12 +2522,11 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +  }
 +
 +
-+  // Optional diagnostics, enabled by creating the file debug.flag in the diagnostics folder before the game starts:
-+  //  - logs the number of presented frames at regular intervals, and every slow frame
-+  //  - saves the back buffer to shot.bmp in that folder whenever shot.req appears there
++  // Diagnostics, on if debug.flag is in the diagnostics folder before the game starts: the frame
++  // log with its slow frames and stalls, shot.req and drawlog.req (docs/development.md)
 +  static void DebugFrameTools(D3D9DeviceEx* device, IDirect3DSurface9* backBuffer) {
 +    static constexpr uint64_t LogIntervalSeconds = 5;
-+    static constexpr uint64_t RequestChecksPerSecond = 2;   // how often the request files are looked for
++    static constexpr uint64_t RequestChecksPerSecond = 2;
 +    static constexpr uint64_t SpikeUs = 40000;              // a frame this slow gets a SPIKE line
 +    static constexpr uint32_t MaxSpikeLines = 400;
 +
@@ -2606,7 +2560,6 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +    if (!s_lastLog)
 +      s_lastLog = now;
 +
-+    // Spike lines: any slow frame, with what happened during it
 +    {
 +      static uint64_t s_prevPresent = 0;
 +      static uint32_t s_spikes = 0;
@@ -2639,7 +2592,6 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +    }
 +
 +    if (now - s_lastLog >= LogIntervalSeconds * second) {
-+      // what the graphics layer did per frame, and how long this thread sat waiting for it
 +      static DxvkStatCounters s_lastCounters;
 +      const DxvkStatCounters counters = device->GetDXVKDevice()->getStatCounters();
 +      auto delta = [&] (DxvkStatCounter c) { return counters.getCtr(c) - s_lastCounters.getCtr(c); };
@@ -2793,7 +2745,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
    D3D9SwapChainEx::D3D9SwapChainEx(
            D3D9DeviceEx*          pDevice,
            D3DPRESENT_PARAMETERS* pPresentParams,
-@@ -255,6 +946,12 @@
+@@ -255,6 +936,12 @@
            HWND     hDestWindowOverride,
      const RGNDATA* pDirtyRegion,
            DWORD    dwFlags) {
@@ -2806,14 +2758,13 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      D3D9DeviceLock lock = m_parent->LockDevice();
  
      uint32_t presentInterval = m_presentParams.PresentationInterval;
-@@ -852,11 +1549,105 @@
+@@ -852,11 +1539,101 @@
          {  int32_t(m_dstRect.left),                    int32_t(m_dstRect.top)                    },
          { uint32_t(m_dstRect.right - m_dstRect.left), uint32_t(m_dstRect.bottom - m_dstRect.top) } };
  
-+      // The destination is in window client coordinates, and the swap chain was asked to have that
-+      // size. The surface can insist on another one: under CrossOver a fullscreen 800x600 mode may
-+      // come with a surface of the display's native size. Scale the destination to the swap chain
-+      // then, otherwise the picture sits unscaled in the top left corner.
++      // The destination is in window client coordinates, the size asked of the swap chain. The surface
++      // can differ: under CrossOver a fullscreen 800x600 mode may come with a surface of the display's
++      // native size. Scale the destination then, or the picture sits unscaled in the top left corner.
 +      const VkExtent2D asked = GetPresentExtent();
 +
 +      if (info.imageExtent.width != asked.width || info.imageExtent.height != asked.height) {
@@ -2826,10 +2777,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +        dstRect.extent.height = uint32_t(float(dstRect.extent.height) * sy + 0.5f);
 +      }
 +
-+      // Log every size involved in placing the picture whenever one of them changes, so that a
-+      // picture in the wrong place can be explained from the log alone. The cheap sizes are compared
-+      // every frame, the window and monitor rectangles every few frames, the client size and display
-+      // mode are read only when something changed. All of this is kept per swap chain.
++      // Log every size involved in placing the picture when one changes, so that a misplaced
++      // picture can be explained from the log alone. The costlier sizes are read less often.
 +      static constexpr uint32_t WindowCheckFrames = 60;
 +
 +      const int32_t cheap[] = {
@@ -2875,11 +2824,10 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +              ", display mode ", dm.dmPelsWidth, "x", dm.dmPelsHeight));
 +          }
 +
-+          // Safety net for the WM_DISPLAYCHANGE handler in D3D9WindowProc, which normally does this: a fullscreen
-+          // window that does not cover exactly the monitor (the display mode changed after the window was sized,
-+          // and the message did not arrive) is sized to it again. Same rule as the handler (not for devices
-+          // created with D3DCREATE_NOWINDOWCHANGES), and at most MaxWindowFixes times per display mode and back
-+          // buffer size, so a window that cannot take the monitor's size is not fought over for the whole session.
++          // Safety net for the WM_DISPLAYCHANGE handler in D3D9WindowProc, in case its message
++          // did not arrive: a fullscreen window that does not cover the monitor exactly is sized
++          // to it, by the handler's rule. At most MaxWindowFixes times per display mode and back
++          // buffer size, so a window that cannot take that size is not fought over all session.
 +          static const uint32_t MaxWindowFixes = 3;
 +
 +          if (cheapChanged || monitorChanged)
@@ -2916,12 +2864,11 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/d3d9/d3d9_swapchain.h b/src/d3d9/d3d9_swapchain.h
 --- a/src/d3d9/d3d9_swapchain.h	2026-11-19 00:00:00
 +++ b/src/d3d9/d3d9_swapchain.h	2026-11-19 00:00:00
-@@ -108,6 +108,13 @@
+@@ -108,6 +108,12 @@
      RECT                      m_srcRect;
      RECT                      m_dstRect;
  
-+    // MxO: what PresentImage last logged about the picture's placement, and how often it re-sized the
-+    // fullscreen window for the current display mode (see the safety net there)
++    // MxO: sizes PresentImage last logged, and its re-sizes of the fullscreen window in this display mode
 +    int32_t                   m_mxoLoggedSizes[6] = { };
 +    RECT                      m_mxoLoggedWindow   = { };
 +    RECT                      m_mxoLoggedMonitor  = { };
@@ -2988,13 +2935,12 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      resource.access = VK_ACCESS_SHADER_READ_BIT;
      m_resourceSlots.push_back(resource);
    }
-@@ -1019,6 +1036,26 @@
+@@ -1019,6 +1036,25 @@
          }
        }
  
-+      // Software vertex processing without robustness2: the buffer holds only the constants
-+      // the application set (count in the render state push constant block). Read index 0
-+      // instead of going past the end, and return zero for anything at or above the count.
++      // DxsoOptions::swvpDynamicConstCount: a read at or above the pushed count
++      // must not go past the end of the buffer. It reads index 0 and returns zero.
 +      const bool dynamicCount = reg.id.type == DxsoRegisterType::Const && isSwvp()
 +                             && m_moduleInfo.options.swvpDynamicConstCount;
 +      uint32_t inBounds = 0;
@@ -3015,7 +2961,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
        std::array<uint32_t, 2> indices = { structIdx, relativeIdx };
  
        uint32_t typeId = getVectorTypeId(result.type);
-@@ -1028,7 +1065,16 @@
+@@ -1028,7 +1064,16 @@
  
        result.id = m_module.opLoad(typeId, ptrId);
  
@@ -3033,7 +2979,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
          uint32_t constCount = m_module.constu32(m_layout->floatCount);
  
          // Expand condition to bvec4 since the result has four components
-@@ -2885,7 +2931,7 @@
+@@ -2885,7 +2930,7 @@
      }
  
      // SM < 1.x does not have dcl sampler type.
@@ -3042,7 +2988,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
        emitDclSampler(samplerIdx, DxsoTextureType::Texture2D);
  
      DxsoSampler sampler = m_samplers.at(samplerIdx);
-@@ -3084,7 +3130,27 @@
+@@ -3084,7 +3129,27 @@
          SampleImage(texcoordVar, sampler.color[samplerType], false, samplerType, sampler.boundConst);
      };
  
@@ -3071,7 +3017,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
        DxsoSamplerType samplerType =
          SamplerTypeFromTextureType(sampler.type);
  
-@@ -3725,6 +3791,11 @@
+@@ -3725,6 +3790,11 @@
        // Point scale never triggers on programmable
        m_pushConstSize   = sizeof(float) * 3;
        count = 8;
@@ -3100,20 +3046,18 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/dxso/dxso_options.h b/src/dxso/dxso_options.h
 --- a/src/dxso/dxso_options.h	2026-11-19 00:00:00
 +++ b/src/dxso/dxso_options.h	2026-11-19 00:00:00
-@@ -57,6 +57,19 @@
+@@ -57,6 +57,17 @@
  
      /// Whether or not we can rely on robustness2 to handle oob constant access
      bool robustness2Supported;
 +
-+    /// Software vertex processing without robustness2: vertex shaders read the number of
-+    /// float constants actually uploaded from a push constant, clamp the index to it and
-+    /// return zero beyond it. Lets the device upload only the constants the application
-+    /// set instead of all 8192 per draw. DXVK_MXO_SWVP_COUNT=0 turns this off.
++    /// Software vertex processing without robustness2: vertex shaders get the count of uploaded
++    /// float constants as a push constant and return zero beyond it, so the device uploads only the
++    /// constants the application set, not all 8192 per draw. DXVK_MXO_SWVP_COUNT=0 turns this off.
 +    bool swvpDynamicConstCount;
 +
-+    /// Fix sampler image types and depth-compare modes at compile time instead of
-+    /// declaring several image variables on one binding and picking one through
-+    /// specialization constants. Needed for MoltenVK, which cannot alias bindings.
++    /// Fix sampler image types and depth-compare modes at compile time, not by specialization
++    /// constants over several image variables on one binding: MoltenVK cannot alias bindings.
 +    bool     staticSamplers     = false;
 +    uint32_t staticSamplerTypes = 0;   ///< 2 bits per pixel shader sampler (DxsoSamplerType)
 +    uint32_t staticSamplerDepth = 0;   ///< 1 bit per sampler (PS: index, VS: index + 17)
@@ -3162,14 +3106,13 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
  
  namespace dxvk {
    
-@@ -34,7 +38,20 @@
+@@ -34,7 +38,19 @@
    }
    
    
-+  // Uploads to resources that nothing recorded so far touches can run in the init command buffer,
-+  // ahead of everything else in the submission, instead of interrupting the render pass. On a
-+  // tile-based GPU every interrupted pass costs a full store and reload of the render targets.
-+  // DXVK_HOIST_UPLOADS=0 turns this off.
++  // Uploads to resources that nothing recorded so far touches go into the init command buffer,
++  // which runs first, and do not interrupt the render pass. On a tile-based GPU an interrupted
++  // pass costs a full store and reload of the render targets. DXVK_HOIST_UPLOADS=0 turns this off.
 +  static bool earlyUploadsEnabled() {
 +    static const bool s_enabled = env::isFixEnabled("DXVK_HOIST_UPLOADS");
 +    return s_enabled;
@@ -3183,7 +3126,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      m_cmd = cmdList;
      m_cmd->beginRecording();
  
-@@ -535,6 +552,21 @@
+@@ -535,6 +551,21 @@
      auto srcSlice = srcBuffer->getSliceHandle(srcOffset, numBytes);
      auto dstSlice = dstBuffer->getSliceHandle(dstOffset, numBytes);
  
@@ -3205,7 +3148,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      if (!replaceBuffer) {
        this->spillRenderPass(true);
  
-@@ -615,6 +647,66 @@
+@@ -615,6 +646,65 @@
            VkDeviceSize          srcOffset,
            VkDeviceSize          rowAlignment,
            VkDeviceSize          sliceAlignment) {
@@ -3214,9 +3157,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +     && !(dstImage->info().usage & (VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT))
 +     && dstImage->isIdleForEarlyUpload(m_earlyUploadEpoch)
 +     && !srcBuffer->isInUse(DxvkAccess::Write)) {
-+      // Texture upload to an image that nothing recorded so far uses (a texture that was just
-+      // streamed in or changed, uploaded right before its first draw): record it in the init
-+      // command buffer and leave the render pass alone.
++      // Early upload (see earlyUploadsEnabled): typically a texture just
++      // streamed in or changed, uploaded right before its first draw
 +      auto earlySrcSlice = srcBuffer->getSliceHandle(srcOffset, 0);
 +
 +      auto earlyRange = vk::makeSubresourceRange(dstSubresource);
@@ -3272,7 +3214,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      this->spillRenderPass(true);
      this->prepareImage(m_execBarriers, dstImage, vk::makeSubresourceRange(dstSubresource));
  
-@@ -3863,8 +3955,10 @@
+@@ -3863,8 +3953,10 @@
    }
    
    
@@ -3301,8 +3243,8 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 @@ -0,0 +1,91 @@
 +#pragma once
 +
-+// Diagnostic counters read by the D3D9 front end's optional frame log (debug.flag).
-+// Written from the rendering threads without locking. The values are statistics, not state.
++// Counters for the D3D9 front end's frame log (debug.flag). Written from
++// the rendering threads without locking: they are statistics, not state.
 +
 +#include <atomic>
 +#include <chrono>
@@ -3421,21 +3363,19 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
  
  namespace dxvk {
    
-@@ -389,6 +390,46 @@
+@@ -389,6 +390,44 @@
    }
    
    
-+  // Executables that are not marked NX-compatible (most games from before ~2008) make Wine
-+  // map all readable memory as executable. Under CrossOver on Apple Silicon the first write
-+  // to each fresh page of such memory, once it is shared with Metal as a mapped Vulkan
-+  // allocation, takes about 1.2 seconds. Having the kernel fault the pages in up front
-+  // (lock, then unlock) avoids that. It costs a few milliseconds per allocation.
-+  // Set DXVK_PREFAULT_MAPPED_MEMORY=0 to disable.
++  // An executable not marked NX-compatible (most games from before ~2008) makes Wine map
++  // all readable memory as executable. Under CrossOver on Apple Silicon the first write
++  // to each fresh page of it, once shared with Metal as a mapped Vulkan allocation,
++  // takes about 1.2 seconds. Locking has the kernel fault the pages in up front, at a
++  // few milliseconds per allocation. DXVK_PREFAULT_MAPPED_MEMORY=0 disables this.
 +  //
-+  // The pages also stay locked: when macOS is short of memory it compresses or swaps out pages
-+  // the game is not writing to at the moment, and the next write to such a page of GPU-shared
-+  // memory again takes about a second. Locked pages are never compressed or swapped. They are
-+  // released when the memory is freed. DXVK_LOCK_MAPPED_MEMORY=0 unlocks them right away instead.
++  // The pages stay locked until the memory is freed. Otherwise macOS compresses
++  // or swaps out idle pages when memory is short, and the next write to one again
++  // takes about a second. DXVK_LOCK_MAPPED_MEMORY=0 unlocks them right away.
 +  static void PrefaultMappedMemory(void* ptr, VkDeviceSize size) {
 +    // enough to see that locking fails, without a line for every allocation
 +    static constexpr uint32_t MaxWarnings = 4;
@@ -3468,7 +3408,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
    DxvkDeviceMemory DxvkMemoryAllocator::tryAllocDeviceMemory(
            DxvkMemoryType*                   type,
            VkMemoryPropertyFlags             flags,
-@@ -435,6 +476,9 @@
+@@ -435,6 +474,9 @@
          m_vkd->vkFreeMemory(m_vkd->device(), result.memHandle, nullptr);
          return DxvkDeviceMemory();
        }
@@ -3478,15 +3418,14 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      }
  
      type->heap->stats.memoryAllocated += size;
-@@ -524,6 +568,29 @@
+@@ -524,6 +566,28 @@
      // Under memory pressure, we should start freeing everything.
      if (this->shouldFreeEmptyChunks(type->heap, 0))
        return true;
 +
-+    // Wine maps all memory of a game whose executable is not NX-compatible as executable, and
-+    // under Rosetta the first write to each page of new memory is slow. Keep emptied
-+    // host-visible chunks for reuse instead of handing them back, up to
-+    // DXVK_KEEP_EMPTY_CHUNKS_MB (default 256) per memory type. 0 keeps one, as DXVK does.
++    // Wine maps the memory of a game that is not NX-compatible as executable, and under Rosetta the
++    // first write to each new page of it is slow. So emptied host-visible chunks are kept for reuse,
++    // up to DXVK_KEEP_EMPTY_CHUNKS_MB (default 256) per memory type. 0 keeps one, as DXVK does.
 +    if (type->memType.propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) {
 +      static constexpr uint32_t DefaultKeptMB = 256;
 +      // a 32-bit game has 4 GB of address space for everything it maps
@@ -3511,13 +3450,12 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/dxvk/dxvk_memory.h b/src/dxvk/dxvk_memory.h
 --- a/src/dxvk/dxvk_memory.h	2026-11-19 00:00:00
 +++ b/src/dxvk/dxvk_memory.h	2026-11-19 00:00:00
-@@ -257,6 +257,12 @@
+@@ -257,6 +257,11 @@
       */
      bool isCompatible(const Rc<DxvkMemoryChunk>& other) const;
  
 +    /**
-+     * \brief Size of the chunk
-+     * \returns Size of the chunk's memory, in bytes
++     * \brief Size of the chunk's memory, in bytes
 +     */
 +    VkDeviceSize size() const { return m_memory.memSize; }
 +
@@ -3527,7 +3465,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude=d3d9_mxo_x87.inc --exclude=*.inc.tests --exclude=.DS_Store --exclude=*.rej a/src/dxvk/dxvk_resource.h b/src/dxvk/dxvk_resource.h
 --- a/src/dxvk/dxvk_resource.h	2026-11-19 00:00:00
 +++ b/src/dxvk/dxvk_resource.h	2026-11-19 00:00:00
-@@ -41,6 +41,29 @@
+@@ -41,6 +41,27 @@
          result |= m_useCountR.load() != 0;
        return result;
      }
@@ -3535,11 +3473,9 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +    /**
 +     * \brief Checks whether the only pending accesses are early uploads of one command list
 +     *
-+     * Uploads that the context moved into the init command buffer of the command list it
-+     * is recording are counted per resource. As long as nothing else uses the resource,
-+     * further uploads to it can go the same way.
++     * The context counts per resource the uploads it moved into the init command buffer.
++     * While nothing else uses the resource, further uploads to it can go the same way.
 +     * \param [in] epoch Identifies the command list being recorded
-+     * \returns \c true if the resource is idle apart from such uploads
 +     */
 +    bool isIdleForEarlyUpload(uint64_t epoch) const {
 +      const uint32_t early = m_earlyUploadEpoch == epoch ? m_earlyUploadCount : 0u;
@@ -3557,7 +3493,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
      
      /**
       * \brief Acquires resource
-@@ -87,6 +110,8 @@
+@@ -87,6 +108,8 @@
      
      std::atomic<uint32_t> m_useCountR = { 0u };
      std::atomic<uint32_t> m_useCountW = { 0u };
@@ -3702,7 +3638,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
  #include "util_string.h"
  
  namespace dxvk::env {
-@@ -27,6 +29,48 @@
+@@ -27,6 +29,33 @@
     * \returns Value of the variable
     */
    std::string getEnvVar(const char* name);
@@ -3717,41 +3653,26 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +  };
 +
 +  /**
-+   * \brief Reads a switch
-+   *
-+   * Warns once per variable if it holds something
-+   * other than "0" or "1", which has no effect.
-+   * \param [in] name Name of the variable
-+   * \returns What the variable is set to
++   * \brief Reads a switch. A value other than "0" or "1" has no effect and gets one warning
 +   */
 +  EnvSwitch getEnvSwitch(const char* name);
 +
 +  /**
-+   * \brief Checks whether a fix is switched on
-+   *
-+   * A fix is on unless its variable is set to \c off.
-+   * Logs one line per variable if the fix is off.
-+   * \param [in] name Name of the variable
-+   * \param [in] off The setting that switches the fix off
-+   * \returns \c true if the fix is on
++   * \brief Checks whether a fix is on, and logs once per variable if it is off
++   * \param [in] off The only setting that switches the fix off
 +   */
 +  bool isFixEnabled(const char* name, EnvSwitch off = EnvSwitch::Zero);
 +
 +  /**
-+   * \brief Reads a size in megabytes
-+   *
-+   * Logs one line per variable if it changes the size. A value
-+   * that is not a number is ignored with a warning.
-+   * \param [in] name Name of the variable
-+   * \param [in] defaultMB Size if the variable is not set
++   * \brief Reads a size in megabytes, and logs once per variable if it is not the default
++   * \param [in] defaultMB Size if the variable is unset or not a number (which gets a warning)
 +   * \param [in] maxMB Largest size to return
-+   * \returns Size in megabytes
 +   */
 +  uint32_t getEnvSizeMB(const char* name, uint32_t defaultMB, uint32_t maxMB);
    
    /**
     * \brief Checks whether a file name has a given extension
-@@ -67,6 +111,25 @@
+@@ -67,6 +96,24 @@
     * \param [in] name Thread name
     */
    void setThreadName(const std::string& name);
@@ -3759,8 +3680,7 @@ diff --color -ruN --exclude=build.w32 --exclude=*.orig --exclude=*.log --exclude
 +  /**
 +   * \brief Name given to a thread with setThreadName
 +   *
-+   * The sampling profiler writes these entries to its
-+   * file as they are, so their size is part of the format.
++   * The sampling profiler writes these to its file as they are, so their size is part of the format.
 +   */
 +  struct ThreadNameEntry {
 +    uint32_t tid;

@@ -4,9 +4,9 @@
 Maps the code section of a PE file with a linear-sweep disassembly, for the profiler and the translator.
 
 The map is a pickle of a dict:
-  entries   sorted list of function entry RVAs (direct call targets, pointers into code, exports)
-  branches  list of (source rva, target rva) for every direct call/jmp/jcc
-  x87       sorted list of RVAs of x87 instructions
+  entries   sorted RVAs of function entries (direct call targets, pointers into code, exports)
+  branches  (source rva, target rva) of every direct call/jmp/jcc
+  x87       sorted RVAs of the x87 instructions
   text      (start, end) of the code section as RVAs
   size      size of the image in memory, in bytes
 """
@@ -63,8 +63,8 @@ def build(path, out):
     entries = {target for target in calls if starts_instruction(starts, target)}
     from_data = 0
     for value, location in img.pointers:
-        # pointers stored in data (vtables, callbacks) name functions. The linear sweep can be out of step right
-        # after a jump table, so the pointer alone decides. A pointer held in code is an operand and names nothing
+        # pointers stored in data (vtables, callbacks) name functions. The sweep can be out of step after a jump
+        # table, so the pointer alone decides. A pointer held in code is an operand and names nothing
         if lo <= value < hi and not (lo <= location < hi):
             entries.add(value)
             from_data += 1

@@ -1,36 +1,5 @@
 // d3d9bench: a single-file Direct3D 9 draw-call benchmark and smoke test (no standard library, 32-bit Windows).
-//
-// usage: d3d9bench.exe [vp] [width] [height] [draws] [seconds] [texture] [flags] [mode]
-//
-//   vp       vertex processing: 0 hardware (default), 1 software, 2 mixed
-//   width    back buffer width, default 1280
-//   height   back buffer height, default 720
-//   draws    world draw calls per frame, default 2000
-//   seconds  length of the timed run, default 4
-//   texture  0 A8R8G8B8 (default), 1 DXT1
-//   flags    a sum of: 1 topmost window, brought to the front
-//                      2 UI quads through a dynamic vertex buffer instead of DrawPrimitiveUP
-//                      4 no UI quads
-//                      8 fullscreen
-//   mode     what each world draw does, default 0:
-//             0 fixed function, the mesh from a static vertex buffer
-//             1 vertex shader, the transform passed as shader constants
-//             2 a quad rewritten through Lock without flags on a dynamic buffer
-//             3 a quad appended to a dynamic buffer: NOOVERWRITE, DISCARD when it wraps
-//             4 a quad rewritten through Lock with DISCARD on a dynamic buffer
-//             5 a quad rewritten through Lock on a managed buffer
-//             6 a managed texture locked and written before the draw
-//             7 a quad through DrawIndexedPrimitiveUP
-//             8 as 1, with a ps_1_1 pixel shader
-//             9 as 1, with a ps_2_0 pixel shader
-//            10 texture streaming: every 8 draws a managed texture with 3 mip levels is filled
-//            11 as 10, and the draws use the filled texture
-//
-// The arguments are numbers in this order. A RESULT line gives the timings and a PIXELS line a check of
-// the back buffer. For that check the back buffer has to be at least 830 x 100.
-//
-// Exit code: 0, or 1 bad arguments, 2 no window, 3 no Direct3D, 4 no device, 6 a call the run depends on
-// failed, 99 a panic. 5 is left out: it is what Wine reports when a program crashes.
+// Arguments, modes, output and exit codes: docs/development.md, section "The benchmark".
 #![no_std]
 #![no_main]
 
@@ -47,7 +16,7 @@ fn panic(_: &core::panic::PanicInfo) -> ! {
     unsafe { ExitProcess(EXIT_PANIC) }
 }
 
-// The MSVC target refers to these wherever floats are used and unwind tables are emitted.
+// The MSVC target refers to these for floats and for unwind tables.
 #[unsafe(no_mangle)]
 pub static _fltused: i32 = 0;
 #[unsafe(no_mangle)]
@@ -87,8 +56,8 @@ core::arch::global_asm!(
     r = sym aullrem,
 );
 
-// Byte loops through volatile accesses, so the compiler cannot turn a loop back into a call to the function
-// it is in. The copies in the timed loop (modes 2 to 5 and the UI vertex buffer) run through memcpy as well.
+// Volatile byte loops, so the compiler cannot turn a loop back into a call to the function it is in.
+// The timed copies (modes 2 to 5, the UI vertex buffer) run through this memcpy too.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn memset(d: *mut u8, c: i32, n: usize) -> *mut u8 {
     for i in 0..n {
@@ -256,7 +225,7 @@ struct Material {
     emissive: [f32; 4],
     power: f32,
 }
-/// A UI vertex: transformed position, colour, texture coordinate (FVF_UI).
+/// A UI vertex, laid out as FVF_UI.
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct UiVert {
@@ -334,8 +303,8 @@ const PT_TRIANGLELIST: u32 = 4;
 const PT_TRIANGLESTRIP: u32 = 5;
 const LIGHT_DIRECTIONAL: u32 = 3;
 
-/// The Direct3D methods the benchmark calls. Each is named once here with its vtable slot (the order of
-/// d3d9.h) and its signature, so a call site cannot pair a slot with the wrong arguments.
+/// Each Direct3D method the benchmark calls, once, with its vtable slot (the order of d3d9.h) and its
+/// signature, so a call site cannot pair a slot with the wrong arguments.
 mod d3d {
     use super::{transmute, Light, LockedRect, Material, PresentParams, UiVert, P};
 
@@ -450,21 +419,20 @@ const WARM_UP_MS: u32 = 1500;
 /// Larger back buffers are refused: a backend that accepts one anyway hands back memory that is not there.
 const MAX_SIZE: u32 = 16384;
 
-/// The UI row: UI_QUADS squares along the bottom edge. draw_ui places them and check_pixels reads the
-/// middle of each, so both take the row from here.
+/// The UI row: UI_QUADS squares along the bottom edge. draw_ui places them, check_pixels reads their middles.
 const UI_LEFT: u32 = 10;
 const UI_PITCH: u32 = 34;
 const UI_QUAD_SIZE: u32 = 28;
 /// From the top of the UI quads to the bottom edge of the picture.
 const UI_ROW_HEIGHT: u32 = 44;
-/// What check_pixels leaves to the UI at the bottom of the picture: the row and some room above it.
+/// What check_pixels leaves to the UI at the bottom: the row and some room above it.
 const UI_AREA_HEIGHT: u32 = 60;
 /// check_pixels reads the world at the middles of a grid of this many cells each way.
 const WORLD_GRID: u32 = 16;
 /// Smaller back buffers are refused: check_pixels would read past a row, or past the picture.
 const MIN_WIDTH: u32 = 2 * UI_LEFT + (UI_QUADS - 1) * UI_PITCH + UI_QUAD_SIZE;
 const MIN_HEIGHT: u32 = 100;
-// The usage text at the top names this size.
+// docs/development.md names this size.
 const _: () = assert!(MIN_WIDTH == 830 && MIN_HEIGHT > UI_AREA_HEIGHT);
 
 /// The world is walls of WALL_COLUMNS x WALL_ROWS meshes, one wall behind the other.
@@ -541,7 +509,7 @@ static PS20_CODE: [u32; 15] = [
     0x800F0000, 0xB0E40000, 0xA0E40800, 0x02000001, 0x800F0800, 0x80E40000, 0x0000FFFF,
 ];
 
-/// Performance-counter ticks spent in each part of the frames, summed over the timed run.
+/// Performance-counter ticks per part of a frame, summed over the timed run.
 struct Timing {
     clear: u64,
     begin: u64,
@@ -588,8 +556,7 @@ struct Bench {
     time: Timing,
 }
 
-// A static, because it is too large for the stack without the C runtime's stack probe. main makes the one
-// reference to it.
+// A static: too large for the stack without the C runtime's stack probe. main makes the one reference to it.
 static mut BENCH: Bench = Bench {
     mode: 0,
     ui: Ui::UserPointer,
@@ -687,8 +654,7 @@ unsafe fn require_pointer(name: &[u8], p: *const u8) {
 
 // ---- setup -----------------------------------------------------------------------------------------------
 
-/// Reads up to eight numbers from the command line into `out`, after the program's name. Whatever follows
-/// the digits of an argument is skipped.
+/// Up to eight numbers after the program's name. Whatever follows the digits of an argument is skipped.
 unsafe fn numbers_from_command_line(out: &mut [u32; 8]) {
     let mut p = GetCommandLineA();
     if *p == b'"' {
@@ -839,7 +805,7 @@ unsafe fn create_device(o: &Options, window: P) -> P {
     dev
 }
 
-/// Fills a locked A8R8G8B8 image of `size` x `size` pixels with squares of `cell` pixels in two colours.
+/// Expects a locked A8R8G8B8 image.
 unsafe fn checkerboard(r: &LockedRect, size: usize, cell: usize, light: u32, dark: u32) {
     for y in 0..size {
         for x in 0..size {
@@ -864,8 +830,7 @@ unsafe fn checkerboard_dxt1(r: &LockedRect, dark: u16) {
     }
 }
 
-/// Creates the textures, vertex buffers and shaders. One that the chosen mode draws with must exist, the
-/// others are only reported.
+/// What the chosen mode draws with must exist. The failure of anything else is only reported.
 unsafe fn create_resources(b: &mut Bench, dev: P, o: &Options) {
     let format = if o.dxt1 { FMT_DXT1 } else { FMT_A8R8G8B8 };
     for t in 0..2 {
@@ -934,7 +899,7 @@ unsafe fn create_resources(b: &mut Bench, dev: P, o: &Options) {
     );
 }
 
-/// Camera, light, material and the sampler and texture stage states, which stay as they are for the whole run.
+/// The state that stays as it is for the whole run.
 unsafe fn set_fixed_state(b: &mut Bench, dev: P, o: &Options) {
     let ys = 1.7320508f32; // 60 degrees of vertical field of view
     let xs = ys * o.height as f32 / o.width as f32;
@@ -983,7 +948,6 @@ unsafe fn ticks() -> u64 {
     v as u64
 }
 
-/// Copies QUAD into a locked vertex buffer, if the lock gave memory, and unlocks it.
 unsafe fn write_quad(buffer: P, offset: u32, flags: u32) {
     let mut dst: *mut u8 = null_mut();
     d3d::vb_lock(buffer, offset, QUAD_BYTES, &mut dst, flags);
@@ -993,7 +957,7 @@ unsafe fn write_quad(buffer: P, offset: u32, flags: u32) {
     d3d::vb_unlock(buffer);
 }
 
-/// The "world": lit meshes or quads, one draw call each, in the way the mode says.
+/// The "world": lit meshes or quads, one draw call each, as the mode says.
 unsafe fn draw_world(b: &mut Bench, dev: P, readback: bool) {
     d3d::set_fvf(dev, FVF_WORLD);
     d3d::set_stream_source(dev, 0, b.mesh_vb, 0, WORLD_STRIDE);
@@ -1055,9 +1019,8 @@ unsafe fn draw_world(b: &mut Bench, dev: P, readback: bool) {
             }
             mode::STREAM | mode::STREAM_DRAW => {
                 if i % TEXTURE_RUN == 0 {
-                    // The next texture of the pool, so one comes round again only after a few frames. Its
-                    // contents alternate: the checkerboard on the frame that is read back, magenta on the
-                    // others, so an upload that runs at the wrong time shows in the pixel check.
+                    // The next texture of the pool, so one comes round again only after a few frames. Magenta on
+                    // every frame but the one read back, so an upload at the wrong time shows in the pixel check.
                     b.spare_next = (b.spare_next + 1) % SPARE_TEXTURES;
                     let texture = b.spare[b.spare_next];
                     let dark = DARK[((i / TEXTURE_RUN) % 2) as usize];
@@ -1107,8 +1070,8 @@ unsafe fn draw_world(b: &mut Bench, dev: P, readback: bool) {
     }
 }
 
-/// The "UI": a row of pre-transformed, alpha-blended quads in the vertex layout the game's UI uses.
-/// `start` is the time the world was finished.
+/// The "UI": a row of pre-transformed, alpha-blended quads in the vertex layout of the game's UI.
+/// `start`: when the world was finished.
 unsafe fn draw_ui(b: &mut Bench, dev: P, start: u64) {
     d3d::set_fvf(dev, FVF_UI);
     d3d::set_render_state(dev, RS_LIGHTING, 0);
@@ -1155,8 +1118,7 @@ unsafe fn draw_ui(b: &mut Bench, dev: P, start: u64) {
     }
 }
 
-/// Draws one frame and adds its timings to `b.time`. The frame whose back buffer is read afterwards is
-/// not presented. Returns the result of Present.
+/// The frame that is read back is not presented. Returns the result of Present.
 unsafe fn frame(b: &mut Bench, dev: P, readback: bool) -> i32 {
     let t0 = ticks();
     d3d::clear(dev, 0, null_mut(), CLEAR_TARGET | CLEAR_ZBUFFER, CLEAR_COLOR, 1.0, 0);
@@ -1185,7 +1147,7 @@ unsafe fn frame(b: &mut Bench, dev: P, readback: bool) -> i32 {
 
 // ---- the run ---------------------------------------------------------------------------------------------
 
-/// Warms up, then draws frames for `seconds`. Returns the number of frames and the milliseconds they took.
+/// Returns the timed frames and the milliseconds they took.
 unsafe fn run(b: &mut Bench, dev: P, seconds: u32) -> (u32, u32) {
     let start = GetTickCount();
     let mut hr = 0;
@@ -1237,7 +1199,7 @@ unsafe fn print_result(b: &Bench, frames: u32, ms: u32) {
     print(b"\n");
 }
 
-/// Draws one more frame and reads the back buffer: did anything other than the clear colour get drawn?
+/// Draws one more frame and reads the back buffer: was anything but the clear colour drawn?
 unsafe fn check_pixels(b: &mut Bench, dev: P, o: &Options) {
     frame(b, dev, true);
     let mut target: P = null_mut();

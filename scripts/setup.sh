@@ -8,31 +8,31 @@
 #   scripts/setup.sh --fps 120 install    another frame-rate limit (default 90, 0 for none)
 #
 # Options:
-#   --yes, -y      no questions: each one gets its default, and the bottle is the first that has a game
+#   --yes, -y      no questions: every default is taken, in the first bottle that has a game
 #   --bottle NAME  the bottle to work in
-#   --fps NUMBER   the frame-rate limit to set, 0 for none
-#   --exe NAME     the game executable of another project's client, when it is neither matrix.exe
-#                  nor mxorev.exe. Can be given more than once
+#   --fps NUMBER   the frame-rate limit, 0 for none
+#   --exe NAME     another client's game executable, if not matrix.exe or mxorev.exe. Repeatable
 #   --dll FILE     install this d3d9.dll and build none
 #
 # Steps:
-#   game       the game and the launchers, when the bottle has no game: makes the bottle if it is
-#              missing, gets the game from the MxOEmu project, a folder, an archive or a direct
-#              link, offers CrossOver's icon for the MxOEmu launcher when it came with the game,
-#              downloads the Rejacked and Revived installers from the projects' sites and checks
-#              them against the checksums on those sites. Rejacked's installs without its window,
-#              Revived's is shown for you to click through
-#   bottle     what the game needs to start: Microsoft's shader compiler, DirectMusic and DirectSound
-#   build      build d3d9.dll from this bottle's own client.dll, after asking whether to install the
-#              build tools that are missing (docs/building.md)
+#   game       the game and the launchers. A run of every step takes it only for a bottle without
+#              a game. It makes a missing bottle, gets the game from the MxOEmu project, a folder,
+#              an archive or a direct link, offers CrossOver's icon for an MxOEmu launcher that
+#              came with it, and downloads the Rejacked and Revived installers from the projects'
+#              sites, checked against the checksums there. Rejacked's runs without its window,
+#              Revived's needs your clicks
+#   bottle     what the game needs to start: Microsoft's shader compiler, DirectMusic and DirectSound,
+#              the music sound bank and a larger memory limit
+#   build      build d3d9.dll from this bottle's client.dll. Asks before it installs missing
+#              build tools (docs/building.md)
 #   install    install that d3d9.dll for the game executables, with the bottle settings it needs
-#   detail     every graphics option of the game at its maximum, the main display's resolution,
-#              and 16x anisotropic filtering
+#   detail     every graphics option at its maximum, the main display's resolution and 16x
+#              anisotropic filtering
 #   intro      the game starts without its logo movies
 #   icons      CrossOver's icons for the launchers: CrossOver reads the bottle's shortcuts again,
 #              and the Rejacked launcher's shortcut is made when the bottle has none
 #   music      Revived only: keep its starter from switching the game's music off
-#   video      Revived only: switch off the video behind its launcher, which keeps a processor core busy
+#   video      Revived only: switch off the video behind its launcher, which keeps a core busy
 #   uninstall  the game executables go back to Wine's Direct3D 9 (DirectMusic stays, the game needs it)
 #
 # The script never reads passwords, launcher logins or credential stores, and never prints command
@@ -41,9 +41,9 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-HELPERS="$ROOT/scripts/setup-helpers.py"   # the file edits and the page readings
+HELPERS="$ROOT/scripts/setup-helpers.py"   # file edits and page readings
 # shellcheck source=build-tools.sh
-. "$ROOT/scripts/build-tools.sh"           # BREW_PACKAGES and missing_build_tools
+. "$ROOT/scripts/build-tools.sh"           # the build tools and their Homebrew packages
 CX=/Applications/CrossOver.app/Contents/SharedSupport/CrossOver
 WINE="$CX/bin/wine"
 BOTTLES=${CX_BOTTLE_PATH:-$HOME/Library/Application Support/CrossOver/Bottles}   # CrossOver's own variable
@@ -52,46 +52,45 @@ NEW_BOTTLE=MatrixOnline
 CACHE="$HOME/Library/Caches/mxo-apple-silicon"
 LOG="$CACHE/setup.log"   # what the spinners hide
 MIN_MACOS=26
-TESTED_MACOS=27          # what all of this was made and tried on
+TESTED_MACOS=27          # the only version this was tried on
 
 # folders on the bottle's drive C, and what counts as the game there
 CLIENT_FOLDER=Games/MxO       # where the game step puts the game
-DXVK_FOLDER=Games/dxvk        # the DLL's log, its pipeline caches and its settings file
+DXVK_FOLDER=Games/dxvk        # the DLL's log, pipeline caches and settings file
 CLIENT_VERSION=7.6005
 CLIENT_ARCHIVE_SIZE="1.3 GB"  # the full client as the projects offer it
 CLIENT_MIN_KB=5000            # a client.dll is larger than this
-CLIENT_DEPTH=4                # how many folders below drive C a client.dll is looked for
-UNPACK_NAME=.setup-unpack     # the folder the game step unpacks in, inside the bottle's folder
+CLIENT_DEPTH=4                # levels below drive C searched for a client.dll
+UNPACK_NAME=.setup-unpack     # where the game step unpacks, inside the bottle's folder
 MUSIC_GUARD=MxORevived-audio.txt
 
-# Microsoft's DirectX redistributables, as used by winetricks for the same files
+# Microsoft's DirectX redistributables, the same files winetricks uses
 DX2010_URL="https://web.archive.org/web/20100205000000id_/https://download.microsoft.com/download/E/E/1/EE17FF74-6C45-4575-9CF4-7FC2597ACD18/directx_feb2010_redist.exe"
 DX2010_SHA=f6d191e89a963d7cca34f169d30f49eab99c1ed3bb92da73ec43617caaa1e93f
 DX2006_URL="https://web.archive.org/web/20100920035904/https://download.microsoft.com/download/3/9/7/3972f80c-5711-4e14-9483-959d48a2d03b/directx_apr2006_redist.exe"
 DX2006_SHA=dd8c3d401efe4561b67bd88475201b2f62f43cd23e4acc947bb34a659fa74952
 DM_DLLS=(dmband dmcompos dmime dmloader dmscript dmstyle dmsynth dmusic dswave dsound)
 
-# where the projects publish their installers, each with its SHA-256, and Microsoft its .NET releases
+# the projects' installer pages, each with a SHA-256, and Microsoft's .NET release list
 REJACKED_PAGE=https://mxo-rejacked.com/download
 REVIVED_PAGE=https://mxorevived.com/download.html
-DOTNET_MAJOR=10   # the .NET that Revived's launcher asks for
+DOTNET_MAJOR=10   # the .NET Revived's launcher asks for
 DOTNET_RELEASES=https://builds.dotnet.microsoft.com/dotnet/release-metadata/$DOTNET_MAJOR.0/releases.json
-MXOEMU_PAGE=https://mxoemu.info/   # the MxOEmu project offers the full client there
-# the Rejacked launcher is a Qt program: its "game/install_dir" setting is this registry value
+MXOEMU_PAGE=https://mxoemu.info/   # offers the full client
+# the Rejacked launcher's Qt setting "game/install_dir"
 REJACKED_KEY='HKCU\Software\Rejacked\Rejacked Launcher\game'
-# The launchers' shortcuts, by which CrossOver's list of the bottle's icons names them. The Rejacked and
-# Revived installers make theirs, the setup makes the one for the MxOEmu project's launcher.
+# Shortcut names as CrossOver lists them. The installers make Rejacked's and Revived's, the setup
+# MxOEmu's, and Rejacked's when it is missing.
 REJACKED_ICON="Rejacked Launcher"
 REVIVED_ICON="MxO Revived"
 MXOEMU_ICON="MxOEmu Launcher"
 
-# The bottle's environment for the speed-up. The install step sets the first list and, by the answers
-# and the detail step, the names in the second. Uninstall removes them all.
+# The install step sets the first list, the answers and the detail step the second. Uninstall removes both.
 SPEEDUP_ENV=(
   MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS=1
   "DXVK_LOG_PATH=C:/$DXVK_FOLDER"
   "DXVK_STATE_CACHE_PATH=C:/$DXVK_FOLDER"
-  "DXVK_HUD=fps,frametimes,gpuload"   # the overlay stays hidden until Ctrl+Shift+F
+  "DXVK_HUD=fps,frametimes,gpuload"   # hidden until Ctrl+Shift+F
 )
 SPEEDUP_ENV_BY_CHOICE=(DXVK_FRAME_RATE DXVK_MXO_RESPECT_ADDONS DXVK_CONFIG_FILE)
 LARGE_ADDRESS_ENV=WINE_LARGE_ADDRESS_AWARE=1   # the game crashed after a minute without it. Stays after uninstall
@@ -127,9 +126,8 @@ done
 case "$FPS" in ''|*[!0-9]*) usage_error "--fps takes a number, 0 for no limit" ;; esac
 
 # --- look ---------------------------------------------------------------------------------------
-# On a terminal: green frames with lit corners, as on whoisjackedin.com, opening words that come out of
-# falling code, spinners and progress bars. Piped, or with NO_COLOR set: plain lines without control
-# codes. MXO_THEME=light or dark overrides the guess about the terminal's background.
+# Piped, or with NO_COLOR set: plain lines without control codes. MXO_THEME=light or dark overrides the
+# guess at the terminal's background.
 
 FANCY=0; GLYPHS=0; COLS=80; WIDTH=76; IN_FRAME=0
 ACC="" GRN="" DIM="" RED="" YEL="" OFF=""
@@ -138,15 +136,15 @@ M_OK=" " M_NOTE=" " M_ASK=" " M_BAD=" " M_PICK=">"
 SPIN=('|' / - "\\")
 RULE="" BAR_FULL="" BAR_EMPTY=""
 WRAPPED=()
-ROW_INK=""   # the colour of a row's text, which a note sets for its own row
-ROW_LINES=1  # how many lines of the terminal the last row took
+ROW_INK=""   # a row's text colour, which a note sets for its own row
+ROW_LINES=1  # terminal lines the last row took
 CHOICE=0
 ANSWER=""
-JOB=""        # the background job a spinner is waiting for
+JOB=""        # the background job a spinner waits for
 LEFTOVERS=()  # temporary folders, removed however the setup ends
 TMP=""
 
-end_job() {   # end_job PID: ends a job and the programs it started. A background job ignores Ctrl-C
+end_job() {   # end_job PID: ends the job and what it started. A background job ignores Ctrl-C
   local pid=$1 table child parent
   table=$(ps -axo pid=,ppid=) || table=""
   while read -r child parent; do
@@ -155,9 +153,9 @@ end_job() {   # end_job PID: ends a job and the programs it started. A backgroun
   kill "$pid" 2>/dev/null || true
 }
 
-on_exit() {   # however the setup ends: no job left running, no temporary folder, the frame closed, the cursor back
+on_exit() {   # however the setup ends: no job, no temporary folder, frame closed, cursor back
   local item job=$JOB
-  set +e   # the clearing up goes on past a step of it that fails, such as writing to a terminal that is gone
+  set +e   # go on past a failing step, such as writing to a terminal that is gone
   if [ -n "$job" ]; then end_job "$job"; fi
   for item in "${LEFTOVERS[@]+"${LEFTOVERS[@]}"}"; do rm -rf "${item:?}"; done
   if [ $FANCY = 1 ]; then
@@ -171,7 +169,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
 
-light_background() {   # asks the terminal for its background colour, and no answer counts as dark
+light_background() {   # asks the terminal. No answer counts as dark
   local old reply rgb r g b
   ( : < /dev/tty ) 2>/dev/null || return 1
   old=$(stty -g < /dev/tty 2>/dev/null) || return 1
@@ -213,7 +211,7 @@ if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-dumb}" != dumb ]; then
   esac
 fi
 
-frame_open() {   # the top edge with the title in it
+frame_open() {
   local title rest
   title=$(printf '%s' "$1" | tr '[:lower:]' '[:upper:]')
   rest=$((WIDTH - 5 - ${#title}))
@@ -251,8 +249,7 @@ wrap() {   # wrap WIDTH TEXT: sets WRAPPED to the lines
   [ ${#WRAPPED[@]} -gt 0 ] || WRAPPED=("")
 }
 
-# row MARK COLOUR TEXT [TAIL]: a line in the frame. Long text wraps, TAIL sits at the right. Sets
-# ROW_LINES to the lines it took on the terminal, for what is drawn again in place.
+# row MARK COLOUR TEXT [TAIL]: a line in the frame, TAIL at the right. Sets ROW_LINES for redraws in place.
 row() {
   local mark=$1 colour=$2 text=$3 tail=${4:-} inner line first=1 width
   if [ $GLYPHS = 0 ]; then
@@ -277,7 +274,7 @@ row() {
   done
 }
 
-say() {   # say TITLE: a new frame, or a heading when plain
+say() {
   if [ $GLYPHS = 1 ]; then
     frame_close
     echo
@@ -302,7 +299,7 @@ field() {   # field LABEL VALUE
   printf '%s│%s %s%-9s%s %s%*s %s│%s\n' "$DIM" "$OFF" "$GRN" "$1" "$OFF" "$value" $((inner - ${#value})) "" "$DIM" "$OFF"
 }
 
-die() {   # inside a job the words go to its output, plain: the frame belongs to the setup itself
+die() {   # a job prints its error plain: the frame belongs to the setup itself
   if [ $IN_FRAME = 1 ] && [ "$BASH_SUBSHELL" = 0 ]; then
     bad "error: $*"
   elif [ "$BASH_SUBSHELL" = 0 ]; then
@@ -313,20 +310,20 @@ die() {   # inside a job the words go to its output, plain: the frame belongs to
   exit 1
 }
 
-lower() { printf '%s' "$1" | LC_ALL=C tr '[:upper:]' '[:lower:]'; }   # the plain letters only, so any bytes pass through
+lower() { printf '%s' "$1" | LC_ALL=C tr '[:upper:]' '[:lower:]'; }   # plain letters only, so any bytes pass through
 
-job_output() {   # where the output of a failed job is: a spinner hides it in the log, a piped run prints it
+job_output() {   # where a failed job's output is: in the log behind a spinner, above when piped
   if [ $FANCY = 1 ]; then echo "Its output is in $LOG"; else echo "Its output is above"; fi
 }
 
-temp_dir() {   # sets TMP to a new temporary folder
+temp_dir() {   # sets TMP
   TMP=$(mktemp -d) || die "could not make a temporary folder"
   LEFTOVERS+=("$TMP")
 }
 
 CODE=(ｦ ｱ ｳ ｴ ｵ ｶ ｷ ｹ ｺ ｻ ｼ ｽ ｾ ｿ ﾀ ﾂ ﾃ ﾅ ﾆ ﾇ ﾈ ﾊ ﾋ ﾎ ﾏ ﾐ ﾑ ﾒ ﾓ ﾔ ﾕ ﾗ ﾘ ﾜ 0 1 2 3 4 5 6 7 8 9)   # the game's falling code
 
-rain() {   # rain WIDTH DENSITY: one row of falling code, DENSITY cells in ten filled
+rain() {   # rain WIDTH DENSITY: a row of falling code, DENSITY cells in ten filled
   local row="" i
   for ((i = 0; i < $1; i++)); do
     if [ $((RANDOM % 10)) -lt "$2" ]; then row="$row${CODE[RANDOM % ${#CODE[@]}]}"; else row="$row "; fi
@@ -334,9 +331,8 @@ rain() {   # rain WIDTH DENSITY: one row of falling code, DENSITY cells in ten f
   printf '%s' "$row"
 }
 
-# The big letters are in the shapes of Miltown, a free typeface by Apostrophic Labs, traced into
-# block characters: blocks for the strokes, thin lines for the streaks.
-reveal() {   # reveal ROW…: rows of block letters, 72 columns, that come out of falling code a few columns at a time
+# Letters traced from Miltown, a free typeface by Apostrophic Labs: blocks are strokes, thin lines streaks.
+reveal() {   # reveal ROW…: block letters, 72 columns wide, come out of falling code
   local art=("$@") rows=$# code=() lit=() r i ch row mask colour last pos
   for ((r = 0; r < rows; r++)); do   # every row twice: as code, and in its final colours
     row="" mask="" last=""
@@ -369,7 +365,7 @@ reveal() {   # reveal ROW…: rows of block letters, 72 columns, that come out o
   printf '\033[?25h'
 }
 
-banner() {   # the opening words: one of them in big letters, as a title would be, over the name of what this is
+banner() {   # the opening words, one of them in big letters
   [ $FANCY = 1 ] || return 0
   echo
   if [ $GLYPHS = 1 ] && [ $WIDTH -ge 76 ]; then
@@ -390,11 +386,11 @@ banner() {   # the opening words: one of them in big letters, as a title would b
 }
 
 SITE_SHOWN=0
-site_frame() {   # the stats site under its own logo and in its blue. Its first line is typed the first time
+site_frame() {   # the stats site under its logo, in its blue. The first line is typed only once
   local blink=$'\033[5m' knock="Knock, knock." i ch
   [ -z "${MXO_NO_ANIMATION:-}" ] || blink=""
   if [ $GLYPHS = 1 ]; then frame_close; fi
-  local ACC=$SITE DIM=$SITE_DIM   # for this frame only: everything called from here draws in them
+  local ACC=$SITE DIM=$SITE_DIM   # for this frame only: what is called from here draws in them
   if [ $GLYPHS = 1 ]; then
     echo
     printf '%s┌%s─ %sMXO%s//%sSERVER STATS%s_%s %s%s┐%s\n' "$ACC" "$DIM" "$ACC" "$DIM" "$ACC" "$blink" "$OFF" \
@@ -405,7 +401,7 @@ site_frame() {   # the stats site under its own logo and in its blue. Its first 
   fi
   if [ $FANCY = 1 ]; then
     if [ $GLYPHS = 1 ] && [ $SITE_SHOWN = 0 ] && [ -z "${MXO_NO_ANIMATION:-}" ]; then
-      # the empty row with its right edge first, then back to where the text starts
+      # the row's right edge first, then back to where the text starts
       printf '%s│%s%*s%s│%s\r\033[4C%s' "$DIM" "$OFF" $((WIDTH - 2)) "" "$DIM" "$OFF" "$ACC"
       sleep 0.3
       for ((i = 0; i < ${#knock}; i++)); do
@@ -441,7 +437,7 @@ moving() {   # moving TICK TEXT TAIL: the line a spinner redraws in place
   fi
 }
 
-spin() {   # spin TITLE COMMAND…: a spinner while the command works. What it prints goes to the log
+spin() {   # spin TITLE COMMAND…: a spinner while the command works, its output in the log
   local title=$1 start=$SECONDS rc=0 i=0 from stage="" line
   shift
   if [ $FANCY = 0 ]; then
@@ -476,7 +472,7 @@ spin() {   # spin TITLE COMMAND…: a spinner while the command works. What it p
   return $rc
 }
 
-fetch_file() {   # fetch_file URL OUT TITLE [resume]: a download with a progress bar, returns curl's status
+fetch_file() {   # fetch_file URL OUT TITLE [resume]: with a progress bar, returns curl's status
   local url=$1 out=$2 title=$3 resume=${4:-} rc=0 total have pct fill width tail i=0 rows=0
   if [ $FANCY = 0 ]; then
     info "$title"
@@ -511,12 +507,12 @@ fetch_file() {   # fetch_file URL OUT TITLE [resume]: a download with a progress
   wait "$JOB" || rc=$?
   JOB=""
   printf '\r\033[K\033[?25h'
-  if [ "$rows" -gt 0 ]; then printf '\033[%dA\033[J' "$rows"; fi   # the title line goes and the result takes its place
+  if [ "$rows" -gt 0 ]; then printf '\033[%dA\033[J' "$rows"; fi   # the result takes the title line's place
   if [ $rc = 0 ]; then ok "$title" "$(mb "$(stat -f %z "$out")") MB"; else bad "$title"; fi
   return $rc
 }
 
-choose_by_number() {   # the menu as plain lines. Enter takes the first item, as on a terminal
+choose_by_number() {   # the menu as plain lines. Enter takes the first item
   local n=$# i key
   for ((i = 1; i <= n; i++)); do printf '  %d) %s\n' "$i" "${!i}"; done
   while :; do
@@ -529,7 +525,7 @@ choose_by_number() {   # the menu as plain lines. Enter takes the first item, as
   done
 }
 
-choose() {   # choose ITEM…: sets CHOICE to the index of the picked item. Enter takes the first, any other answer asks again
+choose() {   # choose ITEM…: sets CHOICE to the picked item's index
   local n=$# i key rest lines
   local items=("$@")
   CHOICE=0
@@ -562,7 +558,7 @@ choose() {   # choose ITEM…: sets CHOICE to the index of the picked item. Ente
   printf '\033[%dA\033[J\033[?25h' "$lines"   # the list goes and the caller says what was picked
 }
 
-ask_in_frame() {   # ask_in_frame QUESTION HINT: the question in the frame, the cursor left where the answer goes
+ask_in_frame() {   # ask_in_frame QUESTION HINT: leaves the cursor where the answer goes
   local hint=$2 i n last
   wrap $((WIDTH - 18)) "$1"
   n=${#WRAPPED[@]}
@@ -576,8 +572,7 @@ ask_in_frame() {   # ask_in_frame QUESTION HINT: the question in the frame, the 
     "$last" "$DIM" "$hint" "$OFF" $((WIDTH - 11 - ${#last})) "" "$DIM" "$OFF" $((${#last} + 11))
 }
 
-# ask QUESTION [yes|no]: 0 for yes. Enter and --yes take the default, which is yes unless "no" is
-# given. y, yes, n and no count in any case, and any other answer asks again.
+# ask QUESTION [yes|no]: 0 for yes. Enter and --yes take the default, yes unless "no" is given.
 ask() {
   local default=${2:-yes} hint="[Y/n]" answer
   [ "$default" = yes ] || hint="[y/N]"
@@ -612,7 +607,6 @@ banner
 site_frame
 
 # --- the Mac ------------------------------------------------------------------------------------
-# An Apple Silicon Mac with CrossOver, and a macOS no older than MIN_MACOS.
 
 say "System"
 [ "$(uname -s)" = Darwin ] || die "this is for macOS"
@@ -627,7 +621,7 @@ ok "macOS $MACOS"
 [ -x "$WINE" ] || die "CrossOver not found in /Applications. Install it first: https://www.codeweavers.com/crossover"
 ok "CrossOver $(defaults read "${CX%/SharedSupport/*}/Info" CFBundleShortVersionString 2>/dev/null || true)"
 
-named() {   # named STEP: the step was named on the command line
+named() {   # named STEP: it was named on the command line
   local step
   for step in "${STEPS[@]+"${STEPS[@]}"}"; do
     if [ "$step" = "$1" ]; then return 0; fi
@@ -635,7 +629,7 @@ named() {   # named STEP: the step was named on the command line
   return 1
 }
 
-# Said before anything is installed: with the whole setup and with the game step.
+# Said before anything is installed: in a full run and with the game step.
 if [ ${#STEPS[@]} = 0 ] || named game; then
   say "Advice"
   note "Our advice: install and play under a separate, standard (non-admin) user account on your computer, with your main account behind its own password."
@@ -652,12 +646,11 @@ fi
 
 # --- bottle -------------------------------------------------------------------------------------
 
-wants_game() {   # only the game step may make a bottle, and --yes leaves that step out unless it is named
+wants_game() {   # only the game step may make a bottle, and --yes leaves it out unless named
   named game || { [ ${#STEPS[@]} = 0 ] && [ $YES = 0 ]; }
 }
 
-# find_clients FOLDER DEPTH: the folders up to DEPTH levels below FOLDER that hold the game's
-# client.dll, sorted. Temporary copies do not count, and a folder that cannot be read is passed over.
+# find_clients FOLDER DEPTH: sorted folders with the game's client.dll. Skips temporary and unreadable ones
 find_clients() {
   local file dir
   while IFS= read -r file; do
@@ -676,7 +669,7 @@ first_client() {   # first_client FOLDER DEPTH: the first of those folders, or n
 has_game() { [ -n "$(first_client "$1/drive_c" "$CLIENT_DEPTH")" ]; }
 
 create_bottle() {
-  # as the CrossOver app makes one: MSync on, and installed programs get their icons in CrossOver
+  # as the CrossOver app makes one: MSync on, and icons for installed programs
   spin "Creating the bottle $1 (Windows 10 64-bit)" \
     "$CX/bin/cxbottle" --bottle "$1" --create --template win10_64 --description "The Matrix Online" \
     --param "EnvironmentVariables:WINEMSYNC=1" --param "Bottle:MenuMode=install" \
@@ -685,7 +678,7 @@ create_bottle() {
   BOTTLE=$1
 }
 
-first_with_game() {   # first_with_game BOTTLE…: sets BOTTLE to the first of them that has a game
+first_with_game() {   # first_with_game BOTTLE…: sets BOTTLE to the first that has a game
   local name
   for name in "$@"; do
     if has_game "$BOTTLES/$name"; then BOTTLE=$name; return 0; fi
@@ -710,7 +703,7 @@ pick_bottle() {
     create_bottle "$NEW_BOTTLE"
     return
   fi
-  if [ $YES = 1 ]; then   # nothing is asked: the first bottle that has a game, or the first bottle for the game step
+  if [ $YES = 1 ]; then   # no question: the first bottle with a game, or the first bottle for the game step
     if first_with_game "${list[@]}"; then return; fi
     wants_game || die "no bottle has a game in it. Name the bottle to work in: --bottle NAME"
     BOTTLE=${list[0]}
@@ -739,24 +732,24 @@ DRIVE="$BOTTLE_DIR/drive_c"
 SYS="$DRIVE/windows/syswow64"
 DXVK_DIR="$DRIVE/$DXVK_FOLDER"
 temp_dir
-WINE_SAID="$TMP/wine-said.txt"     # what Wine printed during the last registry write
+WINE_SAID="$TMP/wine-said.txt"     # Wine's output from the last registry write
 field bottle "$BOTTLE"
 
-win_path() {   # win_path FILE: a file on the bottle's drive C the way Windows writes it
+win_path() {   # win_path FILE: a file on drive C the way Windows writes it
   local path=${1#"$DRIVE"}
   printf 'C:%s' "${path//\//\\}"
 }
 
 helper() { python3 -I "$HELPERS" "$@"; }
 
-edit() {   # edit WHAT COMMAND…: a file edit by the helper. What the helper says about a failure is part of the error
+edit() {   # edit WHAT COMMAND…: a file edit by the helper, whose own words go into the error
   local what=$1 said
   shift
   said=$(helper "$@" 2>&1) || die "could not change $what: $said"
 }
 
-# reg_write KEY NAME VALUE: what Wine prints is shown only when the write fails. It goes to a file: a
-# pipe would stay open, and the setup waiting at it, for as long as Wine's own services run on.
+# reg_write KEY NAME VALUE: Wine's output goes to a file and is shown on failure. A pipe would keep the
+# setup waiting for as long as Wine's services run.
 reg_write() {
   if "$WINE" --bottle "$BOTTLE" -- reg add "$1" /v "$2" /d "$3" /f > "$WINE_SAID" 2>&1; then return 0; fi
   cat "$WINE_SAID"
@@ -766,8 +759,8 @@ reg_write() {
 reg_add() { reg_write "$@" || die "registry write failed: $1 $2"; }
 reg_del() { "$WINE" --bottle "$BOTTLE" -- reg delete "$1" /v "$2" /f >/dev/null 2>&1 || true; }   # the value may not be there
 
-# running PROGRAM…: one of these Windows programs is running, in any bottle. The list of programs is
-# read whole before it is searched: grep -q on a pipe can end ps early, which pipefail takes for a failure.
+# running PROGRAM…: one of these Windows programs runs, in any bottle. ps is read whole first: grep -q
+# on a pipe can end it early, which pipefail takes for a failure.
 running() {
   local programs name
   programs=$(ps -axo comm= | LC_ALL=C tr '[:upper:]' '[:lower:]') || die "could not list the running programs"
@@ -783,7 +776,7 @@ running() {
 
 game_running() { running "${EXES[@]}"; }
 
-need_game_closed() {   # need_game_closed [WHY]: for a step that replaces files the game has open or writes itself
+need_game_closed() {   # need_game_closed [WHY]: before replacing files the game has open or writes itself
   if game_running; then die "close the game first${1:+. $1}"; fi
 }
 
@@ -800,16 +793,16 @@ copy_whole() {   # copy_whole SOURCE TARGET: the target is there whole or not at
   mv "$2.new" "$2" || die "could not put $2 in place"
 }
 
-backup_once() {   # the first copy stays: it is the file as it was before the setup
+backup_once() {   # the first copy stays: the file as it was before the setup
   if [ -f "$1" ] && [ ! -f "$1.setup-backup" ]; then copy_whole "$1" "$1.setup-backup"; fi
 }
 
-put_file() {   # put_file SOURCE TARGET: replaces a file of the bottle and keeps the one that was there
+put_file() {   # put_file SOURCE TARGET: keeps the bottle file it replaces
   backup_once "$2"
   copy_whole "$1" "$2"
 }
 
-bottle_env() {   # bottle_env NAME: the value the bottle's settings give a variable, or nothing
+bottle_env() {   # bottle_env NAME: its value in the bottle's settings, or nothing
   helper get-env "$CONF" "$1" 2>/dev/null || true
 }
 
@@ -866,8 +859,7 @@ client_dir() {   # the first game folder that is not Revived's own copy
 find_installs
 show_installs
 
-# The install step leaves DXVK_LOG_PATH in the bottle. Where it has been before, the bottle's settings
-# are the defaults of the questions: they are what the player chose.
+# The install step leaves DXVK_LOG_PATH. The player chose that bottle's settings, so they are the defaults.
 SPEEDUP_BEFORE=0
 if [ -n "$(bottle_env DXVK_LOG_PATH)" ]; then SPEEDUP_BEFORE=1; fi
 
@@ -889,15 +881,15 @@ download() {   # download URL CHECKSUM FILE FROM: into the cache, unless it is t
   ok "$3: checksum matches the published one"
 }
 
-page_link() {   # page_link PAGE NAME-PATTERN: "URL SHA256" of the installer a project's download page offers
+page_link() {   # page_link PAGE NAME-PATTERN: "URL SHA256" of the installer on a project's download page
   curl -fsSL --max-time 60 "$1" 2>/dev/null | helper page-link - "$1" "$2"
 }
 
-dotnet_link() {   # "URL SHA512" of the newest .NET Desktop Runtime installer (x64), from Microsoft's release list
+dotnet_link() {   # "URL SHA512" of the newest .NET Desktop Runtime installer (x64) on Microsoft's release list
   curl -fsSL --max-time 120 "$DOTNET_RELEASES" 2>/dev/null | helper dotnet-link -
 }
 
-fetch_installer() {   # fetch_installer "URL CHECKSUM" FROM: downloads the installer into the cache and sets INSTALLER to the file
+fetch_installer() {   # fetch_installer "URL CHECKSUM" FROM: into the cache. Sets INSTALLER
   local url=${1%% *} name
   name=${url##*/}
   case "$name" in ''|*[!A-Za-z0-9._-]*) die "unexpected file name in $url" ;; esac
@@ -911,7 +903,7 @@ run_installer() {   # the installer's own window: nothing is answered for the us
   spin "$(basename "$1") is open: click through its window" wine_run "$1" || true
 }
 
-wait_for_install() {   # wait_for_install WHAT TEST: after an installer, until its result is there or the user moves on
+wait_for_install() {   # wait_for_install WHAT TEST: until the installer's result is there or the user moves on
   local what=$1
   shift
   until "$@"; do
@@ -930,8 +922,8 @@ rejacked_exe() {   # the Rejacked launcher's program, or nothing
 
 has_rejacked() { [ -n "$(rejacked_exe)" ]; }
 
-# The MxOEmu project's launcher is the game's own launcher.exe, changed to load that project's
-# mxowrap.dll. Both come with its game files, and nothing makes a shortcut to them.
+# MxOEmu's launcher: the game's launcher.exe changed to load mxowrap.dll. Both come with its game files,
+# without a shortcut.
 mxoemu_exe() {   # that launcher, or nothing
   local d
   d=$(client_dir)
@@ -939,7 +931,7 @@ mxoemu_exe() {   # that launcher, or nothing
 }
 has_dotnet() { ls -d "$DRIVE/Program Files/dotnet/shared/Microsoft.WindowsDesktop.App/$DOTNET_MAJOR".* >/dev/null 2>&1; }
 
-has_revived() {   # looks at the bottle afresh: Revived's installer may just have finished
+has_revived() {   # looks afresh: Revived's installer may just have finished
   local d
   while IFS= read -r d; do
     if [ -f "$d/MxORevived-Launcher.exe" ]; then return 0; fi
@@ -947,7 +939,7 @@ has_revived() {   # looks at the bottle afresh: Revived's installer may just hav
   return 1
 }
 
-mxoemu_link() {   # the "Full Client" link on the MxOEmu project's page: an https link to one of that project's own hosts
+mxoemu_link() {   # the "Full Client" link on the MxOEmu page: https, on that project's own hosts only
   local page link="" version=${CLIENT_VERSION//./\\.}
   page=$(curl -fsSL --max-time 60 "$MXOEMU_PAGE" 2>/dev/null) || return 1
   IFS= read -r link < <(grep -oE "https://([A-Za-z0-9-]+\\.)*mxoemu\\.info/[A-Za-z0-9./_-]*${version}[A-Za-z0-9._-]*\\.7z" <<< "$page") || true
@@ -955,7 +947,7 @@ mxoemu_link() {   # the "Full Client" link on the MxOEmu project's page: an http
   printf '%s\n' "$link"
 }
 
-client_source() {   # asks where the game comes from. Sets CLIENT_SOURCE to a link, a folder or a file, or to nothing for "not now"
+client_source() {   # asks where the game comes from. Sets CLIENT_SOURCE to a link, a folder, a file or nothing
   CLIENT_SOURCE=""
   if [ $YES = 1 ]; then
     note "the game itself: skipped, because --yes cannot ask where it comes from"
@@ -979,7 +971,7 @@ client_source() {   # asks where the game comes from. Sets CLIENT_SOURCE to a li
   esac
 }
 
-download_client() {   # download_client LINK: into the cache, going on with an earlier download. Sets CLIENT_ARCHIVE to the file
+download_client() {   # download_client LINK: into the cache, resuming an earlier download. Sets CLIENT_ARCHIVE
   local link=$1 part=0 rc=0
   mkdir -p "$CACHE" || die "could not make $CACHE"
   CLIENT_ARCHIVE="$CACHE/client-$(printf %s "$link" | shasum | cut -c1-12).part"
@@ -993,9 +985,8 @@ download_client() {   # download_client LINK: into the cache, going on with an e
   [ $rc = 0 ] || die "download failed"
 }
 
-# stage_client FROM STAGING [DOWNLOAD]: a folder is copied and an archive unpacked into STAGING, a
-# folder of the bottle outside drive C. From there the game gets into drive C with one rename, so it
-# is there whole or not at all. Sets STAGED_CLIENT to the folder that holds client.dll.
+# stage_client FROM STAGING [DOWNLOAD]: copies a folder or unpacks an archive to STAGING, outside drive C.
+# One rename then puts the game in drive C whole or not at all. Sets STAGED_CLIENT to client.dll's folder.
 stage_client() {
   local from=$1 staging=$2 download=${3:-} src
   rm -rf "${staging:?}" || die "could not clear $staging"
@@ -1009,14 +1000,14 @@ stage_client() {
     return 0
   fi
   if ! spin "Unpacking the game (some minutes)" tar -xf "$from" -C "$staging/game"; then
-    if [ -n "$download" ]; then rm -f "${download:?}" || true; fi   # so that the next run does not continue a broken download
+    if [ -n "$download" ]; then rm -f "${download:?}" || true; fi   # or the next run would continue a broken download
     die "could not unpack it (zip, 7z and tar archives work, and a link has to lead to the file itself, not to a web page)"
   fi
   STAGED_CLIENT=$(first_client "$staging/game" "$CLIENT_DEPTH")
   [ -n "$STAGED_CLIENT" ] || die "no client.dll in that archive"
 }
 
-get_client() {   # the game itself, into the bottle: from MxOEmu, a folder, an archive or a direct link
+get_client() {
   local target="$DRIVE/$CLIENT_FOLDER" staging="$BOTTLE_DIR/$UNPACK_NAME" from download=""
   client_source
   from=$CLIENT_SOURCE
@@ -1032,7 +1023,7 @@ get_client() {   # the game itself, into the bottle: from MxOEmu, a folder, an a
     http://*)
       die "a link has to start with https://" ;;
     *)
-      [ -e "$from" ] || from=${from//\\/}   # and has its spaces escaped
+      [ -e "$from" ] || from=${from//\\/}   # a dragged-in path also has its spaces escaped
       [ -e "$from" ] || die "not found: $from" ;;
   esac
   stage_client "$from" "$staging" "$download"
@@ -1045,7 +1036,7 @@ get_client() {   # the game itself, into the bottle: from MxOEmu, a folder, an a
   ok "game files in place: $(win_path "$target")"
 }
 
-rejacked_folder() {   # so that the launcher does not have to be told where the game is
+rejacked_folder() {   # so that the launcher need not be told where the game is
   local d
   d=$(client_dir)
   if [ -z "$d" ] || ! has_rejacked; then return 0; fi
@@ -1057,7 +1048,7 @@ rejacked_folder() {   # so that the launcher does not have to be told where the 
   fi
 }
 
-install_rejacked() {   # the launcher from its site
+install_rejacked() {
   local link
   if has_rejacked; then ok "Rejacked launcher: already installed"; return 0; fi
   ask "Install the MxO Rejacked launcher (downloaded from mxo-rejacked.com)?" || return 0
@@ -1066,8 +1057,7 @@ install_rejacked() {   # the launcher from its site
     return 0
   fi
   fetch_installer "$link" mxo-rejacked.com
-  # The installer's last page offers to start the launcher, and the box is ticked. It is made with
-  # NSIS: started with /S it shows no pages, installs with its defaults and starts nothing.
+  # NSIS installer: with /S it shows no pages and starts nothing at the end
   info "The installer runs without its window. Should one open after all, do not start the launcher on its last page."
   spin "Installing the Rejacked launcher" wine_run "$INSTALLER" /S || true
   if ! has_rejacked; then
@@ -1078,7 +1068,7 @@ install_rejacked() {   # the launcher from its site
   wait_for_install "Rejacked launcher" has_rejacked
 }
 
-add_mxoemu() {   # CrossOver's icon for the MxOEmu launcher, when it came with the game
+add_mxoemu() {   # CrossOver's icon for an MxOEmu launcher that came with the game
   local exe
   exe=$(mxoemu_exe)
   if [ -z "$exe" ]; then return 0; fi
@@ -1100,7 +1090,7 @@ install_dotnet() {   # Revived's launcher needs it
   wait_for_install ".NET $DOTNET_MAJOR Desktop Runtime" has_dotnet
 }
 
-install_revived() {   # its setup copies the game that is in the bottle, or its installer downloads one
+install_revived() {   # its Setup copies the game in the bottle, its Installer downloads one
   local link kind=Installer d folder='C:\Games\MxO Revived'
   if [ -n "$REVIVED" ]; then ok "Revived: already installed"; return 0; fi
   ask "Install MxO Revived (downloaded from mxorevived.com)?" || return 0
@@ -1170,7 +1160,7 @@ put_shader_compiler() {   # the game ships Microsoft's, and Wine's cannot handle
   fi
 }
 
-dm_dlls_in_place() {   # every one of them is Microsoft's: a run that was cut short can leave some of Wine's
+dm_dlls_in_place() {   # all of them Microsoft's: a run cut short can leave some of Wine's
   local name
   for name in "${DM_DLLS[@]}"; do
     if [ ! -f "$SYS/$name.dll" ] || is_wine_builtin "$SYS/$name.dll"; then return 1; fi
@@ -1198,7 +1188,7 @@ put_sound_bank() {   # the instruments DirectMusic plays with
   tar -xf "$TMP/DirectX.cab" -C "$TMP" gm16.dls || die "no gm16.dls in Microsoft's DirectX package"
   mkdir -p "$SYS/drivers" "$DRIVE/windows/system32/drivers" || die "could not make the drivers folders"
   copy_whole "$TMP/gm16.dls" "$DRIVE/windows/system32/drivers/gm.dls"
-  copy_whole "$TMP/gm16.dls" "$SYS/drivers/gm.dls"   # last: this is the one the check above looks at
+  copy_whole "$TMP/gm16.dls" "$SYS/drivers/gm.dls"   # last: the check above looks at this one
   ok "music sound bank: gm.dls installed"
 }
 
@@ -1215,9 +1205,8 @@ step_bottle() {
   ok "large address space for 32-bit programs (the game crashed after a minute without it)"
 }
 
-# The client.dll the DLL is built from. One DLL serves every install: each routine is checked against
-# the client in memory at start. A client that is not Revived's comes first: in Revived's, one routine
-# cannot be translated.
+# The client.dll to build from. One DLL serves every install: each routine is checked against the client
+# in memory at start. Revived's comes last: one of its routines cannot be translated.
 build_client() {
   local d
   d=$(client_dir)
@@ -1267,7 +1256,7 @@ step_build() {
 }
 
 FPS_LIMIT=""   # yes or no, once asked
-choose_fps() {   # without a limit the game draws up to 200 fps in light scenes, which only makes heat and fan noise
+choose_fps() {   # unlimited, the game draws up to 200 fps in light scenes: only heat and fan noise
   [ -z "$FPS_LIMIT" ] || return 0
   local default=yes current
   if [ $SPEEDUP_BEFORE = 1 ] && [ $FPS_GIVEN = 0 ]; then   # the bottle's own limit, or that it has none
@@ -1281,7 +1270,7 @@ choose_fps() {   # without a limit the game draws up to 200 fps in light scenes,
 }
 
 ADDONS=""   # replace or keep, once asked
-choose_addons() {   # add-on files next to the game (mx*.dll) hook some of the routines the speed-up replaces
+choose_addons() {   # add-on files next to the game (mx*.dll) hook some routines the speed-up replaces
   [ -z "$ADDONS" ] || return 0
   local default=yes
   if [ $SPEEDUP_BEFORE = 1 ] && [ "$(bottle_env DXVK_MXO_RESPECT_ADDONS)" != 0 ]; then default=no; fi   # as the bottle has it
@@ -1300,7 +1289,7 @@ write_d3d9_overrides() {
   done
 }
 
-merge_caches() {   # every executable starts with the pipelines the others have already built
+merge_caches() {   # each executable starts with the pipelines the others built
   local caches=() cache said newline=$'\n'
   for cache in "$DXVK_DIR"/*.dxvk-cache; do
     if [ -f "$cache" ]; then caches+=("$cache"); fi
@@ -1343,9 +1332,8 @@ step_install() {
   info "Leave the bottle's Graphics setting in CrossOver on Auto. The log is in $(win_path "$DXVK_DIR")."
 }
 
-# What the game writes into options.cfg with every Video Options control at its highest, the detail and
-# memory presets on Custom, and "Scale LOD with Frame Rate" off (Client_RenderThrottle_Override = 1:
-# the draw distance no longer shrinks when the frame rate drops).
+# Written by the game with every Video Options control at its highest, detail and memory presets on Custom.
+# Client_RenderThrottle_Override = 1 ("Scale LOD with Frame Rate" off) keeps the draw distance at low fps.
 MAX_DETAIL="
 DetailCfg_Detail = 0
 DetailCfg_Memory = 0
@@ -1407,17 +1395,17 @@ set_options() {   # set_options FILE "KEY = VALUE lines": changes those keys (an
   edit "$(win_path "$1")" set-options "$1" "$2"
 }
 
-get_option() {   # get_option FILE KEY: the value a settings file gives a key, or nothing
+get_option() {   # get_option FILE KEY: the key's value in a settings file, or nothing
   helper get-option "$1" "$2" 2>/dev/null || true
 }
 
-options_files() {   # the options.cfg of every game in the bottle: Revived's is in its folder, the others share one
+options_files() {   # every game's options.cfg: Revived's is in its folder, the others share one
   [ -z "$(client_dir)" ] || echo "$DRIVE/users/crossover/AppData/Roaming/The Matrix Online/options.cfg"
   [ -z "$REVIVED" ] || echo "$REVIVED/options.cfg"
 }
 
 SCREEN_W="" SCREEN_H="" SCREEN_READ=0
-screen_size() {   # SCREEN_W and SCREEN_H: the main display as the bottle sees it, empty when it cannot be read
+screen_size() {   # SCREEN_W and SCREEN_H: the main display as the bottle sees it, empty when unreadable
   [ $SCREEN_READ = 0 ] || return 0
   SCREEN_READ=1
   local out width height scale
@@ -1460,7 +1448,7 @@ ScreenHeight = $SCREEN_H"
   info "The window mode stays as the launchers set it."
 }
 
-useropts_files() {   # the useropts.cfg next to each of those
+useropts_files() {
   local f
   while IFS= read -r f; do echo "$(dirname "$f")/useropts.cfg"; done < <(options_files)
 }
@@ -1477,14 +1465,14 @@ step_intro() {
   need_game
   need_game_closed
   local f
-  while IFS= read -r f; do   # the game does not keep this one in options.cfg, and a launcher leaves the line alone
+  while IFS= read -r f; do   # the game does not keep this in options.cfg, and a launcher leaves the line alone
     set_options "$f" "EnableSplash = 0"
     ok "$(win_path "$f"): the logo movies are off"
   done < <(useropts_files)
   info "The game starts without the logo movies."
 }
 
-music_guard_off() {   # the guard file of Revived's starter says "music = off"
+music_guard_off() {
   [ "$(lower "$(get_option "$REVIVED/$MUSIC_GUARD" music)")" = off ]
 }
 
@@ -1492,9 +1480,8 @@ step_music() {
   say "Revived: music"
   if [ -z "$REVIVED" ]; then note "MxO Revived is not in this bottle"; return 0; fi
   need_game_closed "It writes its options when it closes"
-  # Revived's starter checks the music system outside the game, on Wine's DirectSound, where the check
-  # fails. It then switches the music off, unless its guard file says "music = on". Written before the
-  # first start too, so that it never gets that far.
+  # Revived's starter checks the music outside the game, on Wine's DirectSound, where that fails. It then
+  # switches the music off, unless its guard file says "music = on". Written before the first start too.
   set_options "$REVIVED/$MUSIC_GUARD" "music = on"
   # what the starter already switched off. options.cfg wins over useropts.cfg
   if [ -f "$REVIVED/options.cfg" ]; then set_options "$REVIVED/options.cfg" "MusicSystemEnable = 1"; fi
@@ -1505,9 +1492,8 @@ step_music() {
   ok "music on: in the starter's guard file and in Revived's settings"
 }
 
-# In a full run the music step is not asked about. A guard file that says "music = off" in a bottle the
-# setup has been through is left alone: the setup wrote "on" there, the starter leaves "on" alone, so
-# "off" is the player's. In a bottle that is new to the setup, "off" is the starter's own doing.
+# For a full run, which does not ask. "music = off" where the setup has been before is the player's: the
+# setup wrote "on" and the starter leaves "on" alone. In a bottle new to the setup it is the starter's.
 keep_or_fix_music() {
   if [ $SPEEDUP_BEFORE = 1 ] && music_guard_off; then
     say "Revived: music"
@@ -1535,12 +1521,11 @@ step_video() {
   ok "the video behind the launcher's window is off"
 }
 
-# CrossOver shows an icon for each shortcut in the bottle's Start Menu and on its Desktop. It keeps its
-# own list of them (cxmenu.conf), which "cxmenu --sync" brings up to date. A launcher in that list can
-# still be without its icon after an installer has run: the sync is what puts the icon there.
+# cxmenu.conf is CrossOver's list of the bottle's shortcuts. A launcher in it can still lack its icon after
+# an installer has run: "cxmenu --sync" puts the icon there.
 has_icon() { grep -qiF "/$1.lnk]" "$BOTTLE_DIR/cxmenu.conf" 2>/dev/null; }
 
-make_shortcut() {   # make_shortcut NAME EXE: a shortcut to a program in the bottle, made with CrossOver's own tool. Fails when CrossOver does not list it afterwards
+make_shortcut() {   # make_shortcut NAME EXE: with CrossOver's own tool. Fails unless CrossOver then lists it
   local win
   win=$(win_path "$2")
   "$WINE" --bottle "$BOTTLE" -- cxmklnk --programs "$1.lnk" --target "$win" --workdir "${win%\\*}" || true
@@ -1548,8 +1533,8 @@ make_shortcut() {   # make_shortcut NAME EXE: a shortcut to a program in the bot
   has_icon "$1"
 }
 
-# launcher_icon WHAT ICON EXE [make]: says whether CrossOver lists the shortcut of a launcher that is in
-# the bottle. With "make", a missing shortcut is made first. Sets ICON_LISTED=1 when CrossOver lists it.
+# launcher_icon WHAT ICON EXE [make]: says whether CrossOver lists a launcher's shortcut. With "make", a
+# missing one is made first. Sets ICON_LISTED=1 when it is listed.
 ICON_LISTED=0
 launcher_icon() {
   local what=$1 icon=$2 exe=$3
@@ -1581,13 +1566,13 @@ step_icons() {
   exe=$(mxoemu_exe)
   if has_icon "$MXOEMU_ICON"; then
     launcher_icon "MxOEmu launcher" "$MXOEMU_ICON" "$exe"
-  elif [ -n "$exe" ] && named icons; then   # the game step asks before it makes this one, so only a run of this step alone says so
+  elif [ -n "$exe" ] && named icons; then   # the game step asks before it makes this one, so only this step run alone says so
     info "The MxOEmu launcher has no shortcut. To get one: scripts/setup.sh game"
   fi
   if [ $ICON_LISTED = 1 ]; then info "If CrossOver does not show an icon yet, close CrossOver and open it again."; fi
 }
 
-refresh_icons() {   # with a launcher in the bottle that has or should have an icon. Whether CrossOver shows it cannot be read from the bottle
+refresh_icons() {   # only when a launcher has or should have an icon. The bottle does not say whether CrossOver shows it
   if has_rejacked || [ -n "$REVIVED" ] || has_icon "$MXOEMU_ICON"; then step_icons; fi
 }
 
@@ -1609,7 +1594,7 @@ step_uninstall() {
 # --- run ----------------------------------------------------------------------------------------
 
 if [ ${#STEPS[@]} = 0 ]; then
-  # the installers need clicks, so --yes leaves the game step out
+  # Revived's installer needs clicks, so --yes leaves the game step out
   if [ $YES = 0 ] && [ ${#INSTALLS[@]} = 0 ]; then step_game; fi
   if [ ${#INSTALLS[@]} = 0 ]; then
     say "No game in this bottle yet"
@@ -1618,15 +1603,13 @@ if [ ${#STEPS[@]} = 0 ]; then
   fi
   need_game_closed "The setup replaces files it has open"
 
-  # The questions come first. After them the setup works by itself. The start fixes, the speed-up and
-  # Revived's music are not asked about: without them the game shows a black screen, runs at about
-  # 15 fps or stays silent.
+  # Questions first, then the setup works by itself. No question about the start fixes, the speed-up and
+  # Revived's music: without them the game shows a black screen, runs at about 15 fps or stays silent.
   if [ $YES = 0 ]; then say "Options"; fi
   choose_fps
   choose_addons
   if [ -z "$DLL" ] && needs_build; then choose_tools; fi
-  # Maximum detail replaces the detail settings a game has: once a game has settings, the answer
-  # defaults to no, and --yes leaves them alone.
+  # Maximum detail replaces a game's settings: once it has some, the default is no and --yes keeps them.
   screen_size
   q="Set every graphics option to its maximum"
   [ -z "$SCREEN_W" ] || q="$q, at this display's resolution (${SCREEN_W}x$SCREEN_H)"
@@ -1643,7 +1626,7 @@ if [ ${#STEPS[@]} = 0 ]; then
   fi
   NO_INTRO=0
   if ! intro_off && ask "Skip the logo movies when the game starts?"; then NO_INTRO=1; fi
-  VIDEO_OFF=0   # the launcher writes its settings file at its first start, and before that there is nothing to change
+  VIDEO_OFF=0   # before its first start the launcher has no settings file to change
   if [ -n "$REVIVED" ] && [ -f "$REVIVED/launcher-settings.json" ] \
     && ask "Switch off the video behind Revived's launcher (it keeps a processor core busy)?"; then
     VIDEO_OFF=1

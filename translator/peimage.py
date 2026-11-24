@@ -1,6 +1,4 @@
-"""The one reader of 32-bit PE files in this repo: sections, relocations, imports and exports.
-
-xlat.py, discover.py, profile2.py and dis.py all load their images through Image."""
+"""The one reader of 32-bit PE files in this repo: sections, relocations, imports and exports."""
 import bisect
 import functools
 import struct
@@ -16,8 +14,8 @@ DIRECTORY_EXPORT, DIRECTORY_IMPORT, DIRECTORY_RELOCATION = 0, 1, 5
 
 
 class Fail(Exception):
-    """Something a tool cannot work with: a file that is not what it expects, an address outside the
-    image, a routine the translator refuses."""
+    """Something a tool cannot work with: an unexpected file, an address outside the image, a routine the
+    translator refuses."""
 
 
 class Image:
@@ -48,7 +46,7 @@ class Image:
             self.text = [(0, len(self.data))]
 
     def pe_header(self):
-        """File offset of the PE header, after a check that this is a 32-bit PE file at all."""
+        """File offset of the PE header, after a check that this is a 32-bit PE file."""
         data = self.data
         if len(data) >= 0x40 and data[:2] == DOS_SIGNATURE:
             header = struct.unpack_from('<I', data, 0x3c)[0]

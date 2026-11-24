@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """profile2.py <samples.bin> <client.map> <d3d9.dll with symbols> <wine i386 dll dir> [skip-records]
 
-Reads the samples written by the DLL's profiler (sample.flag or sample-light.flag) and prints, per thread,
-where the time goes: game code, translated routines, graphics layer, Vulkan calls, and waits with their
-callers. skip-records leaves out that many ten-second records from the start of the file.
+Reads the samples of the DLL's profiler (sample.flag or sample-light.flag) and prints per thread where the
+time goes: game code, translated routines, graphics layer, Vulkan calls, and waits with their callers.
+skip-records leaves out that many ten-second records from the start of the file.
 
-Writes <samples.bin>.hot next to the samples: the game routines containing x87 code that the presenting
-thread was sampled in, as "start limit samples" lines that xlat.py reads as a routine list. Only that
-thread counts, because the translations run on no other.
+Writes <samples.bin>.hot: the game routines with x87 code that the presenting thread was sampled in, as
+"start limit samples" lines, a routine list for xlat.py. Only that thread counts, because the translations
+run on no other.
 
 Environment:
   THREADS  how many threads to report, busiest first (default 6)
@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mingw
 from peimage import Fail, Image
 
-SMP4 = 0x34504d53                   # the magic number of a record, "SMP4"
+SMP4 = 0x34504d53                   # a record's magic number, "SMP4"
 HEADER_BYTES = 40
 NAME_BYTES = 32                     # a thread id and its name
 SAMPLE_WORDS = 9                    # tid, eip, three return addresses in the DLL, three in the game, one in winevulkan
@@ -38,12 +38,11 @@ BASE_GUESSES = 5                    # the most common system addresses are tried
 WAITS = ('WaitForAlertByThreadId', 'WaitForSingleObject', 'WaitForMultipleObjects', 'DelayExecution',
          'WaitForKeyedEvent', 'RemoveIoCompletion', 'NotifyChangeKey', 'SignalAndWaitForSingleObject', 'YieldExecution')
 
-# Symbols of the DLL that are game math and not the graphics layer: the hand-written replacements (MxoMatMulSSE,
-# MxoQuatToMatSSE, MxoSqrtSSE) and the translated routines with their local labels. scripts/build.sh passes
-# the prefix MxoX to xlat.py.
+# DLL symbols that are game math, not the graphics layer: the hand-written MxoMatMulSSE, MxoQuatToMatSSE and
+# MxoSqrtSSE, and the translated routines with their local labels (scripts/build.sh passes xlat.py the prefix MxoX).
 GAME_MATH_SYMBOLS = ('Mxo', 'LMxoX')
 
-MIN_BUSY_SHARE = 0.02               # a thread that is busy for less of the time is left out
+MIN_BUSY_SHARE = 0.02               # a thread busy for less of the time is left out
 UNKNOWN = '?'
 
 
@@ -51,8 +50,8 @@ def read_samples(data, skip):
     """(samples, thread names, presenting thread id, record count) of a samples file.
 
     A sample is (the nine words of the DLL's SampleRecord, client base, DLL base, DLL size, winevulkan base).
-    The profiler appends a record every ten seconds, so a file can end in the middle of one: that record is
-    left out and said so."""
+    The profiler appends a record every ten seconds, so a file can end inside one: that record is left out
+    with a message."""
     samples, names, present, records = [], {}, 0, 0
     position = 0
     while position + HEADER_BYTES <= len(data):
@@ -229,8 +228,7 @@ def main(args):
         if found['xl']:
             print('   translated: ' + ', '.join('%s %.1f%%' % (name, 100.0 * count / total) for name, count in found['xl'].most_common(6)))
 
-    # routines worth translating: what the presenting thread ran that contains x87 code. The translations run
-    # on that thread only, so time other threads spend in a routine is no reason to translate it
+    # routines worth translating: those with x87 code that the presenting thread ran. The translations run on no other
     hot = collections.Counter()
     for (start, limit, x87_count), count in detail[present]['game'].items():
         if x87_count:

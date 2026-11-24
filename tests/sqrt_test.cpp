@@ -31,7 +31,7 @@ int main(int argc, char** argv) {
       else if (kind < 5) { float f; uint32_t b = uint32_t(rnd()) & 0x7fffffff; memcpy(&f, &b, 4); x = f; }
       else if (kind < 8) {                                                                 // around squares of 24-bit midpoints
         uint64_t mm = (uint64_t(1) << 23) | (rnd() & 0x7fffff); mm = mm * 2 + 1;           // 25-bit odd: halfway between two 24-bit values
-        double sq = double(mm) * double(mm);                                                // exact (52 bits)
+        double sq = double(mm) * double(mm);                                                // exact (at most 50 bits)
         int64_t k = int64_t(rnd() % 7) - 3;
         x = fromBits(bits(sq) + k);
         int e = int(rnd() % 200) - 100; x = x * fromBits(uint64_t(1023 + 2 * e) << 52);    // even power of two keeps it a midpoint square

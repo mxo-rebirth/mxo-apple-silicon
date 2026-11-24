@@ -6,14 +6,10 @@
 
 // Include after mxo_x87_apply.h: the game code is recognised with its MxoXCodeHash.
 //
-// The client's routine at MxoLightLoopRva chooses the projector lights that light one object. It
-// walks every light of the scene, and for each one makes three calls through the light's table of
-// functions and one to a distance routine before it knows whether the light reaches the object's
-// box. Among many characters at night that was 27 to 31% of the main thread.
-//
-// What is here runs in front of that routine: it leaves out the lights that are clearly out of
-// reach, so that the routine itself only sees the others. The routine still decides every light it
-// is given, and every close case is given to it.
+// The client's routine at MxoLightLoopRva chooses the projector lights for one object, with four
+// calls per light of the scene: 27 to 31% of the main thread among many characters at night
+// (docs/translator.md). This runs in front of it and leaves out the lights clearly out of reach.
+// The routine still decides every light it is given, and every close case is given to it.
 
 const uint32_t MxoLightLoopRva      = 0x48fa40;
 const uint32_t MxoLightBoxScaleAt[] = { 142, 162, 196 };   // in the loop's code: the addresses of the factor it scales the box by
@@ -41,7 +37,7 @@ const uint64_t MxoPartReachHash     = 0xdabfbd814307a612ull;
 const float    MxoLightMargin       = 1.01f;      // a light this close to reaching the box is left to the routine
 const size_t   MxoMaxKeptLights     = 256;        // with more lights in reach than this the routine gets the whole list
 
-// The list the routine is handed: where the pointers to the lights begin and end
+// The list the routine is handed: pointers to the lights
 struct MxoLightList {
   const uint8_t* const* begin;
   const uint8_t* const* end;
@@ -50,7 +46,7 @@ struct MxoLightList {
 // The routine, as the game calls it and as its translation is called. Returns how many lights it took.
 typedef uint32_t (__stdcall* MxoLightLoop)(const uint8_t* object, const MxoLightList* lights, void* entries, uint32_t first);
 
-// What the filter did in one call: the length of the list, and how many lights of it the routine got
+// One call of the filter: the length of the list, and how many of its lights the routine got
 struct MxoLightCount {
   uint32_t seen;
   uint32_t kept;
@@ -84,10 +80,9 @@ static inline MxoLightBox MxoLightBoxOf(const uint8_t* object) {
   return box;
 }
 
-// Whether the light is out of the box's reach by more than the margin. A light of another kind
-// than the known one is never out of reach here, and neither is one whose reach is not a number.
-// An axis on which the position or the box is not a number adds nothing to the distance, as in
-// the routine. clientBase is where client.dll is loaded.
+// Whether the light is out of the box's reach by more than the margin: never for another kind of
+// light than the known one, or for a reach that is not a number. An axis on which the position or
+// the box is not a number adds nothing to the distance, as in the routine.
 static inline bool MxoLightOutOfReach(const MxoLightBox& box, const uint8_t* light, uint32_t clientBase) {
   const uint8_t* functions = reinterpret_cast<const uint8_t*>(uintptr_t(MxoWordAt(light)));
   if (MxoWordAt(functions + MxoLightReachSlot) != clientBase + MxoLightReachRva)
@@ -114,10 +109,9 @@ static inline bool MxoLightOutOfReach(const MxoLightBox& box, const uint8_t* lig
   return reach * reach * MxoLightMargin < distance;
 }
 
-// Copies the lights that can reach the object into kept, which has room for MxoMaxKeptLights, in
-// their order, and returns how many. The list can be of any length. Returns MxoMaxKeptLights + 1
-// when more lights than that are in reach, or the list ends before it begins: the routine then
-// has to get the list as it is.
+// Copies the lights that can reach the object into kept (room for MxoMaxKeptLights), in their
+// order, and returns how many. The list can have any length. Returns MxoMaxKeptLights + 1 when more
+// are in reach or the list ends before it begins: the routine then has to get the list as it is.
 static inline size_t MxoLightsInReach(const uint8_t* object, const MxoLightList* lights,
     const uint8_t** kept, uint32_t clientBase) {
   if (lights->end < lights->begin)
@@ -137,8 +131,8 @@ static inline size_t MxoLightsInReach(const uint8_t* object, const MxoLightList*
   return keptCount;
 }
 
-// Runs the routine on the lights that can reach the object and returns what it returns. This is
-// the whole of what stands in front of the routine: the DLL and the tests both call it.
+// Runs the routine on the lights that can reach the object. This is all that stands in front of
+// the routine: the DLL and the tests both call it.
 static inline uint32_t MxoRunLightLoop(MxoLightLoop loop, uint32_t clientBase, const uint8_t* object,
     const MxoLightList* lights, void* entries, uint32_t first, MxoLightCount* count) {
   const uint8_t* kept[MxoMaxKeptLights];
@@ -155,7 +149,6 @@ static inline uint32_t MxoRunLightLoop(MxoLightLoop loop, uint32_t clientBase, c
   return loop(object, &inReach, entries, first);
 }
 
-// Whether the float at an address inside the image has the given bits
 static inline bool MxoImageFloatIs(const uint8_t* base, uint32_t imageSize, uint32_t address, float value) {
   const uint32_t rva = address - uint32_t(uintptr_t(base));
   return imageSize >= sizeof(float) && rva <= imageSize - sizeof(float)
@@ -164,8 +157,7 @@ static inline bool MxoImageFloatIs(const uint8_t* base, uint32_t imageSize, uint
 
 // Whether the filter fits this client.dll: the two functions that give a light's reach are the
 // known ones, the reach without a part is 0, and the routine scales the box by MxoBoxScale. That
-// the routine itself is the known one is for the caller to check, as for any translated routine.
-// base is where client.dll is loaded, imageSize its size in memory.
+// the routine itself is the known one is for the caller to check. imageSize is the size in memory.
 static inline bool MxoLightFilterFits(const uint8_t* base, uint32_t imageSize) {
   if (imageSize < MxoLightReachRva + MxoLightReachSize || imageSize < MxoLightLoopRva + MxoLightBoxScaleAt[2] + sizeof(uint32_t))
     return false;

@@ -1,6 +1,6 @@
-// Compares SSE4.1 roundsd (what the translator emits in place of msvcr71's floor and ceil) with the floor and
-// ceil of Wine's msvcr71.dll, bit for bit, as the translated caller sees them: the original result travels
-// through the x87 stack (fld in the runtime, fstp QWORD in the caller), roundsd's stays in an SSE register.
+// Compares SSE4.1 roundsd, which the translator emits in place of msvcr71's floor and ceil, with Wine's two
+// functions, bit for bit. The original result travels through the x87 stack (fld in the runtime, fstp QWORD in
+// the caller), roundsd's stays in an SSE register.
 //   i686-w64-mingw32-g++ -O2 -msse4.1 -mfpmath=sse -static -o floor_test.exe tests/floor_test.cpp
 // Run it in a bottle: wine --bottle <bottle> -- floor_test.exe 2000000
 #include <windows.h>

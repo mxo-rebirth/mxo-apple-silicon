@@ -3,16 +3,15 @@
 #
 #   scripts/build.sh /path/to/client.dll [crossover-sources-<version>.tar.gz]
 #
-# client.dll is the game's own file (from your Rejacked or Revived install). The translated math
-# routines are generated from it on your machine. No game file is stored in this repository.
-# Without a tarball argument, CodeWeavers' source for the CrossOver version in $CROSSOVER_VERSION
-# (default: SOURCE_VERSION below) is downloaded once into build/. The default version is checked
-# against a fixed checksum.
+# client.dll is the game's own file, from a Rejacked or Revived install. The translated math routines
+# are generated from it on this machine: the repository stores no game file.
+# Without a tarball, CodeWeavers' source for the CrossOver in $CROSSOVER_VERSION (default:
+# SOURCE_VERSION below) is downloaded once into build/. The default version has a fixed checksum.
 #
-# Needs the programs listed in scripts/build-tools.sh, which also names their Homebrew packages.
+# Needs the programs in scripts/build-tools.sh, which also names their Homebrew packages.
 # The DLL is compiled with llvm-mingw, downloaded once into build/ (about 125 MB, checksum verified):
-# Homebrew's 32-bit GCC uses setjmp/longjmp exceptions, whose bookkeeping on every function call cost
-# about 5% of the game's main thread. MXO_COMPILER=gcc builds with Homebrew's GCC instead.
+# Homebrew's 32-bit GCC uses setjmp/longjmp exceptions, whose bookkeeping on every call cost about 5%
+# of the game's main thread. MXO_COMPILER=gcc builds with Homebrew's GCC instead.
 set -euo pipefail
 
 if [ $# -lt 1 ] || [ ! -f "$1" ]; then
@@ -47,8 +46,7 @@ if [ "${MXO_COMPILER:-clang}" != gcc ] && [ ! -x "$LLVM_MINGW/bin/i686-w64-mingw
     "https://github.com/mstorsjo/llvm-mingw/releases/download/$LLVM_MINGW_VERSION/llvm-mingw-$LLVM_MINGW_VERSION-ucrt-macos-universal.tar.xz"
   echo "$LLVM_MINGW_SHA256  $archive.part" | shasum -a 256 -c - >/dev/null || die "llvm-mingw checksum mismatch"
   mv "$archive.part" "$archive"
-  # Unpacked next to its final place and renamed when complete, so an interrupted run never leaves a toolchain
-  # folder that looks installed.
+  # Unpacked next to its final place and renamed when complete: an interrupted run leaves no folder that looks installed.
   unpack="$WORK/toolchain/unpacking"
   rm -rf "${unpack:?}" "${LLVM_MINGW:?}"
   mkdir -p "$unpack"
@@ -67,8 +65,7 @@ else
     curl -L --fail -o "$TARBALL.part" "https://media.codeweavers.com/pub/crossover/source/crossover-sources-$VERSION.tar.gz"
     mv "$TARBALL.part" "$TARBALL"
   fi
-  # The checksum is the default version's. Another version from CROSSOVER_VERSION and a tarball given
-  # as the second argument are taken as they are.
+  # The checksum is the default version's. Another CROSSOVER_VERSION and a tarball given as argument are taken as they are.
   if [ "$VERSION" = "$SOURCE_VERSION" ] && ! echo "$SOURCE_SHA256  $TARBALL" | shasum -a 256 -c - >/dev/null 2>&1; then
     rm -f "${TARBALL:?}"
     die "$(basename "$TARBALL") did not match its checksum and was deleted. Run this again to download it afresh"

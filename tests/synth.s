@@ -1,6 +1,5 @@
-# Synthetic x87 routines for the instruction forms the translator handles. Not here, because they need a PE
-# image with relocations and imports: jump tables, the call to the float-to-integer helper and the floor and
-# ceil imports. The game part of the tests covers those.
+# Synthetic x87 routines for the instruction forms the translator handles. Jump tables, the float-to-integer
+# helper and the floor and ceil imports need a PE image: the game part of the tests covers those.
 # void __cdecl tN(const In* in, Out* out)
 #   In : float f[16] @0, int32 i[4] @64, double d[4] @80, int16 w[2] @112, int64 q @116
 #   Out: float o[16] @0, double od[4] @64, int32 oi[4] @96, int16 ow[2] @112, int64 oq @116
@@ -475,8 +474,8 @@ _t10:
   ret
 _t10_end:
 
-# t11: every "test ah, M / jcc" a compare is followed by, with ax dead afterwards, so the translator turns
-# each into a direct branch on the compare (single floats, doubles and register operands, NaN included)
+# t11: every "test ah, M / jcc" that follows a compare, with ax dead afterwards, so the translator turns each
+# into a direct branch on the compare (single floats, doubles and register operands, NaN included)
 .globl _t11
 _t11:
   push ebp

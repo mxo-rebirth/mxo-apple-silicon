@@ -16,10 +16,9 @@ The file edits and page readings of scripts/setup.sh, one subcommand each:
 PAGE and RELEASES are files, or "-" for standard input.
 
 A file is changed by writing a new one next to it and renaming that, so a failure leaves the old file
-whole. A key is found the same way in every file: at the start of a line, after any blanks, before
-"=". The game reads its keys in any case, so they are matched in any case. The names of environment
-variables are matched exactly. Where a key is there more than once, every line gets the new value and
-the last one is the one that is read.
+whole. A key is found at the start of a line, after any blanks, before "=". The game reads its keys in
+any case, so they are matched in any case. Names of environment variables are matched exactly. Where a
+key is there more than once, every line gets the new value and the last one is read.
 
 Standard library only. Started with python3 -I."""
 
@@ -80,7 +79,7 @@ def value_of(line):
 
 def read_settings(path):
     """The lines of a settings file without the empty ones at its end, the carriage return for new
-    lines and the byte order mark the file starts with. A file that is not there has no lines."""
+    lines and the file's byte order mark. A file that is not there has no lines."""
     raw = read_bytes(path) if os.path.exists(path) else b''
     mark = BYTE_ORDER_MARK if raw.startswith(BYTE_ORDER_MARK) else b''
     text = raw[len(mark):].decode('latin-1')   # every byte stays what it is

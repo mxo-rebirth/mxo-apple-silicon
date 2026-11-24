@@ -83,9 +83,7 @@ static bool isnanf(uint32_t u) { return (u & 0x7f800000) == 0x7f800000 && (u & 0
 // The high half of a double infinity has the bits of a float NaN. It is told apart by the zero low half before it
 static bool infHigh(const uint32_t* v, size_t i) { return i > 0 && (v[i] & 0x7fffffff) == 0x7ff00000 && v[i - 1] == 0; }
 
-// Compares two memory images dword by dword. Any NaN equals any NaN, as a float and as the high half of a
-// double. An infinity equals only itself: two NaN patterns do not count as equal where one of them can be
-// the high half of a double infinity.
+// Any NaN equals any NaN, as a float and as the high half of a double. An infinity equals only itself.
 static int diff(const void* a, const void* b, size_t size, size_t* where) {
   const uint32_t* x = (const uint32_t*)a; const uint32_t* y = (const uint32_t*)b;
   for (size_t i = 0; i < size / 4; i++) {
@@ -122,8 +120,8 @@ static int runSynth(const char* name, void (*fn)(), bool fpret, int iterations) 
     double ra = 0, rb = 0;
     uint32_t args[2];
     args[0] = uint32_t(uintptr_t(&in)); args[1] = uint32_t(uintptr_t(&a));
-    // the same FPU state before every call: a routine given a huge value can pop an empty stack (fptan pushes
-    // nothing then), which leaves the stack empty but its pointer moved, and that shows in later status words
+    // the same FPU state before every call: on a huge value a routine can pop an empty stack (fptan pushes
+    // nothing then), which moves the stack pointer, and that shows in later status words
     fpu_setcw(CwGame);
     xcall((void*)fn, 0, args, 2, fpret ? &ra : nullptr);
     uint32_t tagsOriginal = fpu_tags();
@@ -151,7 +149,7 @@ static int runSynth(const char* name, void (*fn)(), bool fpret, int iterations) 
 
 static const int BenchCalls = 1000000;
 
-// Time per call of a routine that returns nothing on the FPU stack, as original and as translation
+// Only for routines that return nothing on the FPU stack
 static void benchSynth(const char* name, void (*fn)(), int calls) {
   fpu_setcw(CwGame);
   MxoXFunc* f = findFunc(XT_funcs, uint32_t((uint8_t*)fn - synth_begin));
@@ -175,8 +173,8 @@ static void benchSynth(const char* name, void (*fn)(), int calls) {
   fpu_setcw(CwGame);
 }
 
-// The light filter against a plain reading of what the game's light loop decides, in double precision:
-// it may leave out no light the loop would keep. Lights and their table of functions are made up here.
+// The light filter against a plain reading, in double precision, of what the game's light loop decides:
+// it may leave out no light the loop would keep.
 static int lightFilterCheck(int cases) {
   const uint32_t base = 0x10000000;   // stands for where client.dll is loaded: the filter only compares with it
   uint32_t known[16] = {}, other[16] = {};
@@ -242,7 +240,7 @@ int main(int argc, char** argv) {
 #ifdef WITH_GAME
   if (argc > 4 && !strcmp(argv[2], "child")) { g_plain = getenv("MXO_PLAIN") && *getenv("MXO_PLAIN"); fpu_setcw(CwGame); return runGameChild(iterations, atoi(argv[3]), atoi(argv[4])); }
 #endif
-  const bool synthOnly = argc > 2 && !strcmp(argv[2], "synth");   // "synth": only the synthetic part
+  const bool synthOnly = argc > 2 && !strcmp(argv[2], "synth");
   if (argc > 2 && !synthOnly) goto game;   // any other second argument: skip the synthetic part
   fpu_setcw(CwGame);
   if (!MxoXFixups(synth_begin, XT_imagebase, XT_absfix, XT_relfix, XT_code_begin, XT_code_end)) { printf("fixups failed\n"); return 2; }
