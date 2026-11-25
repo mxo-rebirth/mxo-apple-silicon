@@ -3,6 +3,9 @@
 From a Mac without CrossOver to the game, without the details. Those are in
 [crossover.md](crossover.md) and [building.md](building.md).
 
+The setup is not connected to any server project. Their game files and launchers are installed
+at your own risk ([README](../README.md)).
+
 1. **Install [CrossOver](https://www.codeweavers.com/crossover)** and open it once.
 2. **Install [Homebrew](https://brew.sh)** with the command on its page, in an administrator
    account. If you will play under another account, also run this now, in the account that

@@ -203,4 +203,5 @@ the same fixes and the same speed-up as Rejacked.
 A CrossOver bottle is not a sandbox. Windows programs in it run as ordinary Mac programs under
 your account, and by default a bottle can see your whole disk through its `Z:` drive, and your
 Documents and Downloads folders. Only run launchers you trust, and give each server a password
-you use nowhere else.
+you use nowhere else. This repository is not connected to any server project and cannot promise
+that their launchers or downloads are safe.
