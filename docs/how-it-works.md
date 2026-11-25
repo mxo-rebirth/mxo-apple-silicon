@@ -4,8 +4,9 @@ The 2009 client of The Matrix Online runs badly in CrossOver on Apple Silicon Ma
 says why, what this repository changes and what it gains. The documents listed at the end have
 the details.
 
-It is experimental: tested on two Macs, an M4 and an M1, with MxO Rejacked, MxO Revived and the MxOEmu launcher. No
-game file is in the repository. The replacement code is generated on the player's Mac from their
+It is experimental, and stable in our tests on two Macs, an M4 and an M1, with MxO Rejacked,
+MxO Revived and the MxOEmu launcher. It is independent of the server projects. No game file is
+in the repository. The replacement code is generated on the player's Mac from their
 own `client.dll`.
 
 ## Why the game is slow

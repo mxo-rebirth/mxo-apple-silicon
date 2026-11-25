@@ -26,7 +26,8 @@ setup stops if a game is running.
 
 1. **game**, in a bottle without a game: makes the bottle, puts the client in `C:\Games\MxO`
    (from the MxOEmu project's page, a folder, an archive or an `https` link) and installs the
-   launchers you choose. Each installer is checked against the checksum its publisher gives.
+   launchers you choose. Each installer is checked against the checksum its publisher gives:
+   that it is the publisher's file, not that it is safe.
    Rejacked's runs without its window. Revived's and Microsoft's .NET 10 runtime need your
    clicks. An MxOEmu launcher that came with the game gets a shortcut on request.
 2. **bottle**: what the game needs to start ([crossover.md](crossover.md), section 2): the

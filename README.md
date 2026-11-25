@@ -1,7 +1,12 @@
 # The Matrix Online on Apple Silicon Macs
 
 > [!WARNING]
-> Experimental. Recommended for advanced users.
+> Experimental but stable in our tests. Recommended for advanced users.
+>
+> This repository is independent. It is not connected to any server project. It cannot promise
+> that their sites, clients, launchers or downloads are safe, or that they keep working with it
+> after an update, and takes no responsibility for any damage they may cause. If you install
+> one, you do so at your own risk.
 
 Makes The Matrix Online run fast in CrossOver on Apple Silicon Macs. It supports MxO Rejacked,
 MxO Revived and MxOEmu.

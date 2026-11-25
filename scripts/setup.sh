@@ -754,7 +754,8 @@ quit_crossover() {   # asks first. With --yes it stays open: an app is not close
 }
 # Said before anything is installed: in a full run and with the game step.
 if [ ${#STEPS[@]} = 0 ] || named game; then
-  say "Advice"
+  say "Before you start"
+  note "This setup is independent: it is not connected to any server project. It cannot promise that their game files, launchers or downloads are safe, and takes no responsibility for damage they cause. You install them at your own risk."
   note "Our advice: install and play under a separate, standard (non-admin) user account on your computer, with your main account behind its own password."
   info "A game client then cannot reach your everyday files and logins."
   case " $(id -Gn 2>/dev/null || true) " in
