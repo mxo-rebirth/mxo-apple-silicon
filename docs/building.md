@@ -57,8 +57,8 @@ setup stops if a game is running.
    its `options.cfg` and `useropts.cfg` back to 1. A later run of every step leaves
    `music = off` alone.
 8. **video**, Revived only, on request: `"BackgroundVideo": false` in its
-   `launcher-settings.json`. That file is there after the launcher's first start, so the first
-   setup cannot ask yet: run the command with `video` at the end later.
+   `launcher-settings.json`, with the launcher closed. Before the launcher's first start that
+   file is made with this key alone, and the launcher takes its defaults for the rest.
 9. **icons**: has CrossOver read the bottle's shortcuts again (`cxmenu --sync`), says for each
    launcher whether it is listed, and makes a missing shortcut for the Rejacked launcher.
 

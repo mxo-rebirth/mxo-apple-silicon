@@ -153,7 +153,7 @@ fixes that, and [how-it-works.md](how-it-works.md) explains why the game is slow
 | The game will not start after an external monitor was unplugged or switched to another input while the launcher was open | CrossOver has lost track of the displays. Quit the launcher and shut the bottle down (`"$WINE" --bottle MatrixOnline -- wineboot.exe --end-session --shutdown`), then start again. |
 | The draw distance changes by itself | That is the game's render throttle. See [client-notes.md](client-notes.md#the-render-throttle). |
 | The game crashes after about a minute in the world | It ran out of address space. Set `WINE_LARGE_ADDRESS_AWARE` as in [section 2](#crash-after-about-a-minute-in-the-world). |
-| Low frame rate with Revived | Check that the rain animation behind the launcher's window (its background video) is off: in the launcher's settings, or with `scripts/setup.sh video` once the launcher has been started once. Left on, it runs while you play. On an M1 the frame-rate counter showed about 40 fps with it and about 70 without. |
+| Low frame rate with Revived | Check that the rain animation behind the launcher's window (its background video) is off: in the launcher's settings, or with `scripts/setup.sh video`. Left on, it runs while you play. On an M1 the frame-rate counter showed about 40 fps with it and about 70 without. |
 | Low frame rate at high resolution with Rejacked | Untick "Use the new glow shader for 'Screen Filter: Over-Bright' (BETA)" in the Rejacked launcher. It halves the frame rate at 3440×1440. |
 
 ## MxO Revived

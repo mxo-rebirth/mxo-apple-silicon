@@ -1710,14 +1710,14 @@ keep_or_fix_music() {
   fi
 }
 
+video_off() {   # the rain animation behind Revived's launcher window is off
+  grep -q -E '"BackgroundVideo"[[:space:]]*:[[:space:]]*false' "$REVIVED/launcher-settings.json" 2>/dev/null
+}
+
 step_video() {
   say "Revived: launcher video"
   if [ -z "$REVIVED" ]; then note "MxO Revived is not in this bottle"; return 0; fi
   local settings="$REVIVED/launcher-settings.json"
-  if [ ! -f "$settings" ]; then
-    note "the launcher has no settings file yet. Start it once, close it and run this step again: scripts/setup.sh video"
-    return 0
-  fi
   # the launcher writes its settings when it closes, which would undo this
   if running MxORevived-Launcher.exe; then
     note "close the Revived launcher first, then run this step again: scripts/setup.sh video"
@@ -1826,8 +1826,8 @@ if [ ${#STEPS[@]} = 0 ]; then
   choose_detail
   NO_INTRO=0
   if ! intro_off && ask "Skip the logo movies when the game starts?"; then NO_INTRO=1; fi
-  VIDEO_OFF=0   # before its first start the launcher has no settings file to change
-  if [ -n "$REVIVED" ] && [ -f "$REVIVED/launcher-settings.json" ] \
+  VIDEO_OFF=0
+  if [ -n "$REVIVED" ] && ! video_off \
     && ask "Switch off the rain animation behind Revived's launcher window (it costs frame rate while you play)?"; then
     VIDEO_OFF=1
   fi
@@ -1867,8 +1867,8 @@ else
 fi
 if ! named uninstall; then
   if [ $CROSSOVER_CLOSED = 1 ]; then info "Open CrossOver again: it shows the launchers' icons."; fi
-  if [ -n "$REVIVED" ] && [ ! -f "$REVIVED/launcher-settings.json" ]; then
-    note "Revived's launcher plays a rain animation behind its window, also while you play, which costs frame rate. Switch it off in the launcher's settings, or after its first start with: scripts/setup.sh video"
+  if [ -n "$REVIVED" ] && ! video_off; then
+    note "Revived's launcher plays a rain animation behind its window, also while you play, which costs frame rate. Switch it off in the launcher's settings, or with: scripts/setup.sh video"
   fi
 fi
 site_frame
