@@ -11,7 +11,8 @@ The file edits and page readings of scripts/setup.sh, one subcommand each:
     get-option FILE KEY                 the value of a "KEY = VALUE" line in a settings file of the game
     set-options FILE LINES              sets "KEY = VALUE" lines and adds the missing ones
     set-options --existing FILE LINES   sets them only where the key is there already
-    video-off SETTINGS                  "BackgroundVideo": false in Revived's launcher-settings.json
+    video-off SETTINGS                  "BackgroundVideo": false in Revived's launcher-settings.json, which
+                                        is made with only that when it is not there yet
 
 PAGE and RELEASES are files, or "-" for standard input.
 
@@ -198,6 +199,11 @@ def unset_env(path, *names):
 # --- Revived's launcher ---
 
 def video_off(path):
+    # The launcher reads the file into a class with System.Text.Json: a key that is missing keeps
+    # its default, so a file with this key alone is a first start with the animation off.
+    if not os.path.lexists(path):
+        write_whole(path, b'{\r\n  "BackgroundVideo": false\r\n}')
+        return
     raw = read_bytes(path)
     mark = BYTE_ORDER_MARK if raw.startswith(BYTE_ORDER_MARK) else b''
     text = raw[len(mark):].decode('utf-8')
