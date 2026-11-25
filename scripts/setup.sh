@@ -1809,6 +1809,55 @@ step_uninstall() {
   info "The game's own settings (detail, logo movies, music) stay as they are. What they were before is next to each file, with a .setup-backup suffix."
 }
 
+# The last thing on the screen, where the eye lands: a heavy frame, all of it in one colour. Its title
+# and colour say how the run ended: the accent colour for done, amber where a run is still owed.
+done_frame() {
+  local title="Done" ink=$ACC upper
+  if ! named uninstall; then
+    if [ ${#INSTALLS[@]} = 0 ]; then title="No game yet"; ink=$YEL
+    elif [ $SETUP_OWED = 1 ]; then title="Not ready yet"; ink=$YEL; fi
+  fi
+  local DIM=$ink SIDE=$SIDE ROW_INK=""
+  if [ $GLYPHS = 1 ]; then
+    frame_close
+    echo
+    SIDE="┃"
+    upper=$(printf '%s' "$title" | tr '[:lower:]' '[:upper:]')
+    printf '%s┏━ %s %s┓%s\n' "$ink" "$upper" "${BAR_FULL:0:WIDTH - 5 - ${#upper}}" "$OFF"
+    IN_FRAME=1
+  else
+    say "$title"
+  fi
+  if named uninstall; then
+    ok "Uninstalled."
+  elif [ ${#INSTALLS[@]} = 0 ]; then
+    note "Run the setup again once a game is in this bottle."
+  elif [ $SETUP_OWED = 1 ]; then
+    note "Run the setup once more, without a step: it gives the game added now its start fixes and the speed-up."
+  else
+    ROW_INK=$ACC
+    ok "Start the game from its launcher."
+    ROW_INK=""
+  fi
+  if ! named uninstall; then
+    if [ $CROSSOVER_CLOSED = 1 ]; then info "Open CrossOver again: it shows the launchers' icons."; fi
+    # a run of every step asks about it. The game step alone does not
+    if named game && [ -n "$REVIVED" ] && ! video_off; then
+      note "Revived's launcher plays a rain animation behind its window, also while you play, which costs frame rate. Switch it off in the launcher's settings, or with: scripts/setup.sh video"
+    fi
+  fi
+  if [ $GLYPHS = 1 ]; then
+    printf '%s┗%s┛%s\n' "$ink" "${BAR_FULL:0:WIDTH - 2}" "$OFF"
+    IN_FRAME=0
+  fi
+}
+
+ending() {   # however a run ends: the stats frame, how it ended, a last row of falling code
+  site_frame
+  done_frame
+  if [ $GLYPHS = 1 ]; then printf ' %s%s%s\n' "$DIM" "$(rain $((WIDTH - 2)) 3)" "$OFF"; fi
+}
+
 # --- run ----------------------------------------------------------------------------------------
 
 SETUP_OWED=0   # 1 when a named game step added a game that the start fixes or the speed-up have not seen
@@ -1817,8 +1866,7 @@ if [ ${#STEPS[@]} = 0 ]; then
   # Revived's installer needs clicks, so --yes leaves the game step out
   if [ $YES = 0 ] && [ ${#INSTALLS[@]} = 0 ]; then step_game; fi
   if [ ${#INSTALLS[@]} = 0 ]; then
-    say "No game in this bottle yet"
-    info "Run the setup again once it is there."
+    ending
     exit 0
   fi
   need_game_closed "The setup replaces files it has open"
@@ -1866,42 +1914,4 @@ else
   if named game && ! { named bottle && named install; } && [ ${#INSTALLS[@]} -gt "$games_before" ]; then SETUP_OWED=1; fi
 fi
 
-site_frame
-
-# The last thing on the screen, where the eye lands: a heavy frame, all of it in the accent colour.
-done_frame() {
-  local DIM=$ACC SIDE=$SIDE ROW_INK=""
-  if [ $GLYPHS = 1 ]; then
-    frame_close
-    echo
-    SIDE="┃"
-    printf '%s┏━ DONE %s┓%s\n' "$ACC" "${BAR_FULL:0:WIDTH - 9}" "$OFF"
-    IN_FRAME=1
-  else
-    say "Done"
-  fi
-  if named uninstall; then
-    ok "Uninstalled."
-  elif [ ${#INSTALLS[@]} = 0 ]; then
-    note "No game in this bottle yet. Run the setup again once it is there."
-  elif [ $SETUP_OWED = 1 ]; then
-    note "Not ready to play yet. Run the setup once more, without a step: it gives the game added now its start fixes and the speed-up."
-  else
-    ROW_INK=$ACC
-    ok "Start the game from its launcher."
-    ROW_INK=""
-  fi
-  if ! named uninstall; then
-    if [ $CROSSOVER_CLOSED = 1 ]; then info "Open CrossOver again: it shows the launchers' icons."; fi
-    # a run of every step asks about it. The game step alone does not
-    if named game && [ -n "$REVIVED" ] && ! video_off; then
-      note "Revived's launcher plays a rain animation behind its window, also while you play, which costs frame rate. Switch it off in the launcher's settings, or with: scripts/setup.sh video"
-    fi
-  fi
-  if [ $GLYPHS = 1 ]; then
-    printf '%s┗%s┛%s\n' "$ACC" "${BAR_FULL:0:WIDTH - 2}" "$OFF"
-    IN_FRAME=0
-  fi
-}
-done_frame
-if [ $GLYPHS = 1 ]; then printf ' %s%s%s\n' "$DIM" "$(rain $((WIDTH - 2)) 3)" "$OFF"; fi
+ending
