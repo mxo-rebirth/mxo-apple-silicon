@@ -115,7 +115,7 @@ scripts/build.sh "/path/to/your/client.dll"
 `brew install` works only in the account that installed Homebrew. The build itself runs in any
 account once the tools are there.
 
-`client.dll` is the one in your game folder. After five to ten minutes the result is
+`client.dll` is the one in your game folder. After a few minutes the result is
 `build/d3d9.dll`. The script
 
 1. downloads the compiler ([llvm-mingw](https://github.com/mstorsjo/llvm-mingw) 20261104,

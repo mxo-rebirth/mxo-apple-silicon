@@ -1399,7 +1399,7 @@ step_build() {
     die "the build tools are missing:$(missing_build_tools). Install them from the account that installed Homebrew, then run this again: $(brew_command)"
   fi
   client=$(build_client)
-  spin "Building the speed-up from your copy of the game (5 to 10 minutes)" "$ROOT/scripts/build.sh" "$client" \
+  spin "Building the speed-up from your copy of the game (a few minutes)" "$ROOT/scripts/build.sh" "$client" \
     || die "the build failed. $(job_output)"
 }
 
