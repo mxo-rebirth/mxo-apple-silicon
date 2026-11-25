@@ -30,7 +30,8 @@ at your own risk ([README](../README.md)).
 5. **Revived only: click through the two installers that open,** Microsoft's .NET and then
    Revived's. When Revived's asks where The Matrix Online is installed, choose `C:\Games\MxO`.
    Keep the folder it offers for Revived itself, and do not start the game from there.
-6. **Wait for "Done".** The build takes 5 to 10 minutes.
+6. **Wait for "Done".** On the M4 test machine the whole setup took about 4 minutes. The
+   download of the game and the build take most of it.
 7. **Make an account** with the server you want to play on: [MxO Rejacked](https://mxo-rejacked.com),
    [MxO Revived](https://mxorevived.com) or [MxOEmu](https://mxoemu.info).
 8. **Play.** In CrossOver, open the bottle `MatrixOnline`, start the launcher, sign in and press

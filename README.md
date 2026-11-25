@@ -41,6 +41,10 @@ MxO Revived at 63 fps, in a window on a 3440×1440 screen.
 
 The setup checks all of this before it changes anything, and says what is missing.
 
+With these in place the setup does everything else by itself. On the M4 test machine it took
+about 4 minutes from a new bottle to "Done". It downloads the game (1.3 GB) and builds the
+speed-up, so a slower connection or an older Mac takes longer.
+
 Tested on an M4 (macOS 27, CrossOver 26.3) and on an M1, the first Apple Silicon chip, so every
 Apple Silicon Mac should run it. The setup can download the game itself.
 
@@ -67,7 +71,7 @@ Everything can also be done by hand, without the script:
 [docs/crossover.md](docs/crossover.md) sets up the bottle and the game, and
 [docs/building.md](docs/building.md#build) builds and installs the speed-up.
 
-![The setup in a Terminal window: its opening words, the frame of the server stats site, the system check, its advice on a separate account and a new bottle being made](docs/setup.png)
+![The setup in a Terminal window: its opening words, the frame of the server stats site, the system check, its notice and advice before it starts, and the question about a new bottle](docs/setup.png)
 
 The setup asks a few questions and then does the rest:
 
