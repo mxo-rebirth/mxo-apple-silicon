@@ -13,7 +13,7 @@ MxO Revived and MxOEmu.
 
 It is the result of reverse engineering: taking the game's 2009 client apart without its
 source code. The game does its math with x87, an old kind of processor instruction.
-[Why that is slow on these Macs, and the fix](#how-it-works)
+[Why that is slow on these Macs, and the fix](docs/how-it-works.md)
 
 On an M4 the game went from about 15 fps, with the game cutting its draw distance, to 55–89 fps
 at full draw distance and maximum detail, fullscreen at 3440×1440. On an M1 the frame-rate
@@ -129,16 +129,6 @@ The game goes back to CrossOver's normal graphics. What stays is listed in
   built `d3d9.dll`.
 - **It replaces some of the game's math code in memory** with faster code that gives the same
   results. Check that your server allows that.
-
-## How it works
-
-Apple's chips are ARM and have nothing like x87, so Rosetta, which runs Intel programs on these
-Macs, has to imitate it in software, slowly. The newer kind of instruction, SSE2, maps almost
-directly onto the chip. This project rewrites 535 of the game's x87 math routines as SSE2 and
-swaps them in when the game starts. The results stay the same. It also fixes fifteen graphics
-problems between the game and the Mac's graphics chip.
-
-The whole story: [docs/how-it-works.md](docs/how-it-works.md)
 
 ## More
 
