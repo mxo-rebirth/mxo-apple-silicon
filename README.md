@@ -94,7 +94,7 @@ Then start the game from its launcher as usual.
   launcher. It halves the frame rate at high resolutions. If the launcher asks for the game
   folder, choose `C:\Games\MxO`.
 - **Revived:** switch off the rain animation behind the launcher's window. It costs frame rate
-  while you play. Do it in the launcher's settings or, after the launcher's first start, with
+  while you play. The setup offers to. Otherwise do it in the launcher's settings or with
   `video` at the end of the command.
 - **Stutter:** close memory-hungry apps before playing.
 - **Who is online:** <https://whoisjackedin.com>

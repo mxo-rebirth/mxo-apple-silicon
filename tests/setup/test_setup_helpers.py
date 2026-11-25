@@ -208,6 +208,12 @@ class Video(WithFolder):
         helpers.video_off(settings)
         self.assertEqual(json.loads(self.read(settings)), {'Server': 'one', 'BackgroundVideo': False})
 
+    def test_a_missing_file_is_made_with_the_key_alone(self):
+        settings = self.file('launcher-settings.json')
+        helpers.video_off(settings)
+        self.assertEqual(json.loads(self.read(settings)), {'BackgroundVideo': False})
+        self.assert_nothing_left_over()
+
     def test_a_file_that_is_not_json_stays_as_it_is(self):
         settings = self.file('launcher-settings.json', 'not json')
         with self.assertRaises(ValueError):
