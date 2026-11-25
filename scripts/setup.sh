@@ -142,6 +142,7 @@ SPIN=('|' / - "\\")
 RULE="" BAR_FULL="" BAR_EMPTY=""
 WRAPPED=()
 ROW_INK=""   # a row's text colour, which a note sets for its own row
+SIDE="│"     # a frame's side, heavier in the last frame
 ROW_LINES=1  # terminal lines the last row took
 CHOICE=0
 CHOICE_START=0   # the item a menu starts on, which Enter takes. Back to the first after each menu
@@ -271,11 +272,12 @@ row() {
   ROW_LINES=${#WRAPPED[@]}
   for line in "${WRAPPED[@]}"; do
     if [ $first = 1 ]; then
-      printf '%s│%s %s%s%s %s%*s%s %s│%s\n' "$DIM" "$OFF" "$colour" "$mark" "$OFF" "$ROW_INK$line${ROW_INK:+$OFF}" $((inner - ${#line})) "" \
-        "${tail:+ $DIM$tail$OFF}" "$DIM" "$OFF"
+      printf '%s%s%s %s%s%s %s%*s%s %s%s%s\n' "$DIM" "$SIDE" "$OFF" "$colour" "$mark" "$OFF" \
+        "$ROW_INK$line${ROW_INK:+$OFF}" $((inner - ${#line})) "" "${tail:+ $DIM$tail$OFF}" "$DIM" "$SIDE" "$OFF"
       first=0
     else
-      printf '%s│%s   %s%*s%s %s│%s\n' "$DIM" "$OFF" "$ROW_INK$line${ROW_INK:+$OFF}" $((inner - ${#line})) "" "${tail:+ ${tail//?/ }}" "$DIM" "$OFF"
+      printf '%s%s%s   %s%*s%s %s%s%s\n' "$DIM" "$SIDE" "$OFF" "$ROW_INK$line${ROW_INK:+$OFF}" $((inner - ${#line})) "" \
+        "${tail:+ ${tail//?/ }}" "$DIM" "$SIDE" "$OFF"
     fi
   done
 }
@@ -1863,23 +1865,42 @@ else
   if named game && ! { named bottle && named install; } && [ ${#INSTALLS[@]} -gt "$games_before" ]; then SETUP_OWED=1; fi
 fi
 
-say "Done"
-if named uninstall; then
-  :
-elif [ ${#INSTALLS[@]} = 0 ]; then
-  note "No game in this bottle yet. Run the setup again once it is there."
-elif [ $SETUP_OWED = 1 ]; then
-  note "Not ready to play yet. Run the setup once more, without a step: it gives the game added now its start fixes and the speed-up."
-else
-  ok "Start the game from its launcher."
-fi
-if ! named uninstall; then
-  if [ $CROSSOVER_CLOSED = 1 ]; then info "Open CrossOver again: it shows the launchers' icons."; fi
-  # a run of every step asks about it. The game step alone does not
-  if named game && [ -n "$REVIVED" ] && ! video_off; then
-    note "Revived's launcher plays a rain animation behind its window, also while you play, which costs frame rate. Switch it off in the launcher's settings, or with: scripts/setup.sh video"
-  fi
-fi
 site_frame
-frame_close
+
+# The last thing on the screen, where the eye lands: a heavy frame, all of it in the accent colour.
+done_frame() {
+  local DIM=$ACC SIDE=$SIDE ROW_INK=""
+  if [ $GLYPHS = 1 ]; then
+    frame_close
+    echo
+    SIDE="┃"
+    printf '%s┏━ DONE %s┓%s\n' "$ACC" "${BAR_FULL:0:WIDTH - 9}" "$OFF"
+    IN_FRAME=1
+  else
+    say "Done"
+  fi
+  if named uninstall; then
+    ok "Uninstalled."
+  elif [ ${#INSTALLS[@]} = 0 ]; then
+    note "No game in this bottle yet. Run the setup again once it is there."
+  elif [ $SETUP_OWED = 1 ]; then
+    note "Not ready to play yet. Run the setup once more, without a step: it gives the game added now its start fixes and the speed-up."
+  else
+    ROW_INK=$ACC
+    ok "Start the game from its launcher."
+    ROW_INK=""
+  fi
+  if ! named uninstall; then
+    if [ $CROSSOVER_CLOSED = 1 ]; then info "Open CrossOver again: it shows the launchers' icons."; fi
+    # a run of every step asks about it. The game step alone does not
+    if named game && [ -n "$REVIVED" ] && ! video_off; then
+      note "Revived's launcher plays a rain animation behind its window, also while you play, which costs frame rate. Switch it off in the launcher's settings, or with: scripts/setup.sh video"
+    fi
+  fi
+  if [ $GLYPHS = 1 ]; then
+    printf '%s┗%s┛%s\n' "$ACC" "${BAR_FULL:0:WIDTH - 2}" "$OFF"
+    IN_FRAME=0
+  fi
+}
+done_frame
 if [ $GLYPHS = 1 ]; then printf ' %s%s%s\n' "$DIM" "$(rain $((WIDTH - 2)) 3)" "$OFF"; fi
