@@ -1552,7 +1552,8 @@ AntiAlias_Level = 0
 "
 
 # The enhanced set: the maximum, then these, which go past the top of the game's menu. Experimental:
-# tried by eye with Revived on an M4, not measured. The draw distances are the menu's top times 1.4.
+# tried by eye with Revived on an M4, not measured. The draw distances are the menu's top times 1.4,
+# and street life has 35 cars and pedestrians in place of 25, at a density of 2 in place of 1.5.
 ENHANCED_DETAIL="
 DL_Ext_PrefetchRadius = 70000
 DL_Prop_PrefetchRadius = 17500
@@ -1569,21 +1570,9 @@ Richworld_MaxPeddies = 35
 Richworld_CarDensityUser = 2
 Richworld_PedDensityUser = 2
 "
-# Its settings that no menu shows. They go into each game's autoexec.cfg, which the game reads and
-# never writes: options.cfg wins only for the keys it holds.
-# Each line: the setting, its value in the enhanced set, and after the bar its value without it. That
-# is what autoexec.cfg comes with for the two fallbacks and the client's own default for the rest.
-# Read from the client's defaults and not confirmed by eye: a lower fallback keeps a character's real
-# shadow longer, and a lower model scale keeps the finer model longer.
-HIDDEN_DETAIL="
-ModelShadow_Fallback_0 = 0.2 | 0.4
-ModelShadow_Fallback_1 = 0.1 | 0.25
-ModelShadow_Proj_Size = 1024 | 512
-WR_ShadowDistance = 20000 | 10000
-Grass_Draw_Dst = 10000 | 5000
-WR_Reflect_EnvMap_Size = 1024 | 256
-ModelEngObj_LOD_Dst_Scale = 0.5 | 1
-"
+# Only settings the game keeps in options.cfg. The ones no menu shows (shadow resolution, grass and
+# reflection sizes) would have to go into autoexec.cfg, and Revived's launcher puts its own copy of
+# that file back when it starts the game.
 
 chip_generation() {   # 1 for an M1, 4 for an M4 Max, nothing when the name gives no number
   local name
@@ -1665,43 +1654,6 @@ screen_size() {   # SCREEN_W and SCREEN_H: the main display as the bottle sees i
   fi
 }
 
-# hidden_lines FILE enhanced|back: the enhanced set's lines for an autoexec.cfg, or the lines that
-# take it out again. Only a value that is still the enhanced set's goes back: one the player has
-# changed since, or set without this setup, is theirs.
-hidden_lines() {
-  local f=$1 line key enhanced default
-  while IFS= read -r line; do
-    [ -n "$line" ] || continue
-    key=${line%% = *}
-    enhanced=${line#* = }
-    default=${enhanced#* | }
-    enhanced=${enhanced%% | *}
-    if [ "$2" = enhanced ]; then
-      printf '%s = %s\n' "$key" "$enhanced"
-    elif [ "$(get_option "$f" "$key")" = "$enhanced" ]; then
-      printf '%s = %s\n' "$key" "$default"
-    fi
-  done <<< "$HIDDEN_DETAIL"
-}
-
-hidden_settings() {   # the enhanced set's part of each game's autoexec.cfg, or its way back out of one
-  local d f back
-  for d in "${INSTALLS[@]}"; do
-    f="$d/autoexec.cfg"
-    if [ "$DETAIL" = enhanced ]; then
-      if [ ! -f "$f" ]; then note "no $(win_path "$f"), so that game gets the enhanced set without the settings no menu shows"; continue; fi
-      set_options "$f" "$(hidden_lines "$f" enhanced)"
-      ok "$(win_path "$f"): the settings no menu shows"
-    else
-      back=$(hidden_lines "$f" back)
-      [ -n "$back" ] || continue
-      backup_once "$f"
-      edit "$(win_path "$f")" set-options --existing "$f" "$back"
-      ok "$(win_path "$f"): the enhanced set's values are the game's own again"
-    fi
-  done
-}
-
 step_detail() {
   say "Detail: graphics settings"
   need_game
@@ -1726,12 +1678,11 @@ ScreenHeight = $SCREEN_H"
     set_options "$f" "$values"
     ok "$(win_path "$f"): $what"
   done < <(options_files)
-  hidden_settings
   if [ "$DETAIL" = light ]; then
     info "Draw distance held at 70%, no character shadows, no wet streets, no anti-aliasing. Everything else at its highest."
   elif [ "$DETAIL" = enhanced ]; then
-    info "Past the game's menu: draw distance 40% further, sharper character shadows, shadows and grass drawn twice as far, finer models at a distance, a sharper wet-street reflection, more cars and pedestrians."
-    note "Experimental: tried by eye with Revived on an M4, not measured. It costs frame rate, most in busy streets. A launcher update can replace autoexec.cfg: run this step again then."
+    info "Past the game's menu: draw distance 40% further, and more cars and pedestrians. Everything else at its highest."
+    note "Experimental: tried by eye with Revived on an M4, not measured. It costs frame rate, most in busy streets."
   else
     info "Draw distance, shadows, wet streets, weather, grass, traffic, anti-aliasing and both screen filters."
   fi

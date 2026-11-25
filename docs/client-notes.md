@@ -304,6 +304,10 @@ The numbers are in [measurements.md](measurements.md#in-a-crowd). What they come
 - **Background video** in the launcher (`BackgroundVideo` in `launcher-settings.json`) takes more
   than one processor core.
 - Wine's own DirectMusic freezes Revived at start. Microsoft's works.
+- **File repair**: before it starts the game, the launcher's updater can download its own copy of
+  a game file that was changed and keep the changed one next to it. Seen with `autoexec.cfg`
+  (`game files repaired (1)` in `updater.log`). It left the changed file alone on other starts, so
+  a setting written there may or may not last. `options.cfg` and `useropts.cfg` are not repaired.
 
 ## Settings
 
