@@ -22,7 +22,8 @@ From a Mac without CrossOver to the game, without the details. Those are in
    called `MatrixOnline`, the game (a 1.3 GB download), the launchers of all three servers,
    quitting CrossOver if it is open, a limit of 90 fps, speeding up the code that add-ons use
    too (Revived's interface scaling may then stop working), the build tools, the graphics
-   settings for your Mac and no logo movies. Answer `n` to a launcher you do not want.
+   settings for your Mac, no logo movies and, with Revived, no rain animation behind its
+   launcher. Answer `n` to a launcher you do not want.
 5. **Revived only: click through the two installers that open,** Microsoft's .NET and then
    Revived's. When Revived's asks where The Matrix Online is installed, choose `C:\Games\MxO`.
    Keep the folder it offers for Revived itself, and do not start the game from there.
