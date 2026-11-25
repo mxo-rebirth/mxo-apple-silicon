@@ -4,6 +4,13 @@ The 2009 client of The Matrix Online runs badly in CrossOver on Apple Silicon Ma
 says why, what this repository changes and what it gains. The documents listed at the end have
 the details.
 
+In short: the game does its math with x87, an old kind of processor instruction. Apple's chips
+are ARM and have nothing like it, so Rosetta, which runs Intel programs on these Macs, has to
+imitate x87 in software, slowly. The newer kind, SSE2, maps almost directly onto the chip. This
+project rewrites 535 of the game's x87 math routines as SSE2 and swaps them in when the game
+starts. The results stay the same. It also fixes fifteen graphics problems between the game and
+the Mac's graphics chip.
+
 It is experimental, and stable in our tests on two Macs, an M4 and an M1, with MxO Rejacked,
 MxO Revived and the MxOEmu launcher. It is independent of the server projects. No game file is
 in the repository. The replacement code is generated on the player's Mac from their
