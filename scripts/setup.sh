@@ -137,7 +137,7 @@ case "$FPS" in ''|*[!0-9]*) usage_error "--fps takes a number, 0 for no limit" ;
 FANCY=0; GLYPHS=0; COLS=80; WIDTH=76; IN_FRAME=0
 ACC="" GRN="" DIM="" RED="" YEL="" OFF=""
 SITE="" SITE_DIM=""   # the stats site's frame has the site's second colour
-M_OK=" " M_NOTE=" " M_ASK=" " M_BAD=" " M_PICK=">"
+M_OK=" " M_NOTE=" " M_ASK=" " M_BAD=" " M_PICK=">" M_KEYS="up, down"
 SPIN=('|' / - "\\")
 RULE="" BAR_FULL="" BAR_EMPTY=""
 WRAPPED=()
@@ -211,7 +211,7 @@ if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-dumb}" != dumb ]; then
   probe="─"   # glyphs only where the shell counts characters, not bytes
   case "${#probe}${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in 1*[Uu][Tt][Ff]-8*|1*[Uu][Tt][Ff]8*)
     GLYPHS=1
-    M_OK="✓" M_BAD="✗" M_PICK="❯" M_DOWN="↓"
+    M_OK="✓" M_BAD="✗" M_PICK="❯" M_DOWN="↓" M_KEYS="↑ ↓"
     SPIN=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
     while [ ${#RULE} -lt 160 ]; do RULE="${RULE}─"; BAR_FULL="${BAR_FULL}━"; BAR_EMPTY="${BAR_EMPTY}─"; done ;;
   esac
@@ -576,11 +576,16 @@ choose() {   # choose ITEM…: sets CHOICE to the picked item's index. Starts on
   printf '\033[?25l'
   while :; do
     lines=0
+    # numbered, and the picked one in colour: plainly a list to move through
     for ((i = 0; i < n; i++)); do
-      if [ $i = "$CHOICE" ]; then row "$M_PICK" "$ACC" "${items[i]}"; else row " " "" "${items[i]}"; fi
+      if [ $i = "$CHOICE" ]; then
+        ROW_INK=$ACC row "$M_PICK" "$ACC" "$((i + 1)). ${items[i]}"
+      else
+        row " " "" "$((i + 1)). ${items[i]}"
+      fi
       lines=$((lines + ROW_LINES))
     done
-    row " " "" "" "arrow keys, then Enter"
+    row " " "" "" "$M_KEYS or 1-$n to choose, Enter to confirm"
     lines=$((lines + ROW_LINES))
     IFS= read -rsn1 key || { printf '\033[?25h'; die "no answer"; }
     case "$key" in
@@ -1569,20 +1574,26 @@ choose_detail() {   # choose_detail [named]: named when the detail step was aske
     if [ $fresh = yes ] || [ "${1:-}" = named ]; then DETAIL=$recommended; else DETAIL=keep; fi
     return 0
   fi
-  info "Graphics settings$where. They replace the detail settings a game has now."
-  CHOICE_START=2
-  if [ $fresh = yes ] || [ "${1:-}" = named ]; then
-    CHOICE_START=1
-    [ $recommended = max ] || CHOICE_START=0
-  fi
-  local light="Lighter, for an M1 or M2: shorter draw distance, no character shadows, no wet streets, no anti-aliasing"
+  row "$M_ASK" "$ACC" "Which graphics settings$where? They replace the detail settings a game has now."
+  # one short line each, this Mac's set first
+  local light="Lighter, for an M1 or M2: shorter draw distance, fewer effects"
   local max="Maximum, for an M3, M4 or newer: every option at its highest"
-  if [ $recommended = light ]; then light="$light. Recommended for this Mac"; else max="$max. Recommended for this Mac"; fi
-  choose "$light" "$max" "Leave the settings as they are"
-  case $CHOICE in
-    0) DETAIL=light; ok "graphics: the lighter settings" ;;
-    1) DETAIL=max; ok "graphics: everything at maximum" ;;
-    *) DETAIL=keep; ok "graphics: left as they are" ;;
+  local sets=(max light)
+  if [ $recommended = light ]; then
+    sets=(light max)
+    light="Lighter, recommended for this Mac: shorter draw distance, fewer effects"
+  else
+    max="Maximum, recommended for this Mac: every option at its highest"
+  fi
+  CHOICE_START=2
+  if [ $fresh = yes ] || [ "${1:-}" = named ]; then CHOICE_START=0; fi
+  if [ $recommended = light ]; then choose "$light" "$max" "Leave the settings as they are"
+  else choose "$max" "$light" "Leave the settings as they are"; fi
+  DETAIL=${sets[CHOICE]:-keep}
+  case $DETAIL in
+    light) ok "graphics: the lighter settings" ;;
+    max) ok "graphics: everything at maximum" ;;
+    *) ok "graphics: left as they are" ;;
   esac
 }
 
@@ -1622,9 +1633,9 @@ step_detail() {
   need_game
   need_game_closed "It writes its options when it closes"
   choose_detail named
-  if [ $DETAIL = keep ]; then note "nothing changed"; return 0; fi
+  if [ "$DETAIL" = keep ]; then note "nothing changed"; return 0; fi
   local f values=$MAX_DETAIL what="every graphics option at its maximum"
-  if [ $DETAIL = light ]; then
+  if [ "$DETAIL" = light ]; then
     values="$values$LIGHT_DETAIL"
     what="the lighter graphics settings"
   fi
@@ -1638,7 +1649,7 @@ ScreenHeight = $SCREEN_H"
     set_options "$f" "$values"
     ok "$(win_path "$f"): $what"
   done < <(options_files)
-  if [ $DETAIL = light ]; then
+  if [ "$DETAIL" = light ]; then
     info "Draw distance held at 70%, no character shadows, no wet streets, no anti-aliasing. Everything else at its highest."
   else
     info "Draw distance, shadows, wet streets, weather, grass, traffic, anti-aliasing and both screen filters."
@@ -1842,7 +1853,7 @@ if [ ${#STEPS[@]} = 0 ]; then
     fi
   fi
   step_install
-  if [ $DETAIL != keep ]; then step_detail; fi
+  if [ "$DETAIL" != keep ]; then step_detail; fi
   if [ $NO_INTRO = 1 ]; then step_intro; fi
   if [ -n "$REVIVED" ]; then keep_or_fix_music; fi
   if [ $VIDEO_OFF = 1 ]; then step_video; fi

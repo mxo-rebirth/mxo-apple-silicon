@@ -42,8 +42,8 @@ setup stops if a game is running.
    to the limit writes `0`, no limit, and the next run starts from that answer.
 5. **detail**, on request: graphics settings and the main display's size in each game's
    `options.cfg`, and 16× anisotropic filtering in `C:\Games\dxvk\dxvk.conf`. There are two
-   sets, and the question names the one for the Mac it runs on. Return takes that one in a game
-   without settings. Where a game has settings, Return and `--yes` leave them. The step named
+   sets, and the question lists the one for the Mac it runs on first. Return takes that one in a
+   game without settings. Where a game has settings, Return and `--yes` leave them. The step named
    by itself (`detail`) starts on this Mac's set, and `--yes detail` writes it.
    - maximum, for an M3, M4 or newer: the highest Video Options values, with
      `Client_RenderThrottle_Override = 1`
