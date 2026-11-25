@@ -57,11 +57,14 @@ setup stops if a game is running.
    - enhanced, experimental: the maximum, then values past the top of the game's menu. In
      `options.cfg` the draw distances times 1.4 and more cars and pedestrians (35 of each,
      density 2). In each game's `autoexec.cfg`, which the game reads and never writes, settings
-     no menu shows: character shadows at 1024 instead of 512, drawn twice as far and kept real
-     for longer, grass twice as far, finer models at a distance and a 1024 wet-street reflection
-     map instead of 256. Tried by eye with Revived on an M4, not measured: it costs frame rate,
-     most in busy streets. A launcher update can replace `autoexec.cfg`: run the step again
-     then. Choosing another set puts those `autoexec.cfg` values back to the game's own.
+     no menu shows: character shadows at 1024 instead of 512 and kept real for longer, shadows
+     and grass drawn twice as far, finer models at a distance and a 1024 wet-street reflection
+     map instead of 256. Which way the shadow fallback and the model scale work is read from
+     the client's defaults, not confirmed by eye. Tried by eye with Revived on an M4, not
+     measured: it costs frame rate, most in busy streets. A launcher update can replace
+     `autoexec.cfg`: run the step again then. Choosing another set puts the `autoexec.cfg`
+     values that are still the enhanced set's back to the game's own, and leaves a value you
+     changed since.
 6. **intro**, on request: `EnableSplash = 0` in each game's `useropts.cfg`.
 7. **music**, Revived only: `music = on` in its starter's music guard, and the music setting in
    its `options.cfg` and `useropts.cfg` back to 1. A later run of every step leaves
