@@ -81,7 +81,7 @@ The setup asks a few questions and then does the rest:
 | Start fixes | What the game needs to start |
 | Build | Builds the speed-up from your copy of the game |
 | Install | Installs it for every MxO game in the bottle |
-| Detail | On request: graphics settings for your Mac, lighter or maximum |
+| Detail | On request: graphics settings for your Mac, lighter or maximum, or an experimental enhanced set past the game's menu |
 | Intro | On request: no logo movies |
 | Revived | Music on. On request: launcher video off |
 | Icons | Launcher icons in CrossOver |
