@@ -26,7 +26,8 @@
 #   build      build d3d9.dll from this bottle's client.dll. Asks before it installs missing
 #              build tools, which only an administrator account can (docs/building.md)
 #   install    install that d3d9.dll for the game executables, with the bottle settings it needs
-#   detail     graphics settings: a lighter set for an M1 or M2, or every option at its maximum.
+#   detail     graphics settings: a lighter set for an M1 or M2, every option at its maximum, or an
+#              experimental enhanced set past the menu's maximum.
 #              Also the main display's resolution and 16x anisotropic filtering
 #   intro      the game starts without its logo movies
 #   music      Revived only: keep its starter from switching the game's music off
@@ -1550,6 +1551,47 @@ WR_WetExt_Enable = 0
 AntiAlias_Level = 0
 "
 
+# The enhanced set: the maximum, then these, which go past the top of the game's menu. Experimental:
+# tried by eye with Revived on an M4, not measured. The draw distances are the menu's top times 1.4.
+ENHANCED_DETAIL="
+DL_Ext_PrefetchRadius = 70000
+DL_Prop_PrefetchRadius = 17500
+WR_ExtFarDist = 70000
+WR_ExtObjFarDist = 28000
+WR_PropFarDist = 17500
+WR_PropFadeDist = 4200
+WR_FogFarDist = 98000
+WR_SkyBox_FogRim_FogDst = 98000
+ExteriorCameraFarZ = 64400
+CameraFarZ = 64400
+Richworld_MaxCars = 35
+Richworld_MaxPeddies = 35
+Richworld_CarDensityUser = 2
+Richworld_PedDensityUser = 2
+"
+# Its settings that no menu shows. They go into each game's autoexec.cfg, which the game reads and
+# never writes: options.cfg wins only for the keys it holds. A lower fallback keeps a character's
+# real shadow longer, and a lower model scale keeps the finer model longer.
+ENHANCED_HIDDEN="
+ModelShadow_Fallback_0 = 0.2
+ModelShadow_Fallback_1 = 0.1
+ModelShadow_Proj_Size = 1024
+WR_ShadowDistance = 20000
+Grass_Draw_Dst = 10000
+WR_Reflect_EnvMap_Size = 1024
+ModelEngObj_LOD_Dst_Scale = 0.5
+"
+# The same settings without the enhanced set: the two values autoexec.cfg comes with, then the client's own.
+HIDDEN_DEFAULTS="
+ModelShadow_Fallback_0 = 0.4
+ModelShadow_Fallback_1 = 0.25
+ModelShadow_Proj_Size = 512
+WR_ShadowDistance = 10000
+Grass_Draw_Dst = 5000
+WR_Reflect_EnvMap_Size = 256
+ModelEngObj_LOD_Dst_Scale = 1
+"
+
 chip_generation() {   # 1 for an M1, 4 for an M4 Max, nothing when the name gives no number
   local name
   name=$(sysctl -n machdep.cpu.brand_string 2>/dev/null) || return 0
@@ -1558,7 +1600,7 @@ chip_generation() {   # 1 for an M1, 4 for an M4 Max, nothing when the name give
   esac
 }
 
-DETAIL=""   # light, max or keep, once chosen
+DETAIL=""   # light, max, enhanced or keep, once chosen
 # Enter takes the set for this Mac in a game that has no settings yet. Where a game has some, Enter
 # leaves them, and --yes does the same.
 choose_detail() {   # choose_detail [named]: named when the detail step was asked for by name
@@ -1578,21 +1620,23 @@ choose_detail() {   # choose_detail [named]: named when the detail step was aske
   # one short line each, this Mac's set first
   local light="Lighter, for an M1 or M2: shorter draw distance, fewer effects"
   local max="Maximum, for an M3, M4 or newer: every option at its highest"
-  local sets=(max light)
+  local enhanced="Enhanced, experimental: past the menu's maximum, tried on an M4"
+  local sets=(max light enhanced)
   if [ $recommended = light ]; then
-    sets=(light max)
+    sets=(light max enhanced)
     light="Lighter, recommended for this Mac: shorter draw distance, fewer effects"
   else
     max="Maximum, recommended for this Mac: every option at its highest"
   fi
-  CHOICE_START=2
+  CHOICE_START=3
   if [ $fresh = yes ] || [ "${1:-}" = named ]; then CHOICE_START=0; fi
-  if [ $recommended = light ]; then choose "$light" "$max" "Leave the settings as they are"
-  else choose "$max" "$light" "Leave the settings as they are"; fi
+  if [ $recommended = light ]; then choose "$light" "$max" "$enhanced" "Leave the settings as they are"
+  else choose "$max" "$light" "$enhanced" "Leave the settings as they are"; fi
   DETAIL=${sets[CHOICE]:-keep}
   case $DETAIL in
     light) ok "graphics: the lighter settings" ;;
     max) ok "graphics: everything at maximum" ;;
+    enhanced) ok "graphics: the enhanced settings (experimental)" ;;
     *) ok "graphics: left as they are" ;;
   esac
 }
@@ -1628,6 +1672,23 @@ screen_size() {   # SCREEN_W and SCREEN_H: the main display as the bottle sees i
   fi
 }
 
+hidden_settings() {   # the enhanced set's part of each game's autoexec.cfg, or its way back out of one
+  local d f before
+  for d in "${INSTALLS[@]}"; do
+    f="$d/autoexec.cfg"
+    if [ "$DETAIL" = enhanced ]; then
+      if [ ! -f "$f" ]; then note "no $(win_path "$f"), so that game gets the enhanced set without the settings no menu shows"; continue; fi
+      set_options "$f" "$ENHANCED_HIDDEN"
+      ok "$(win_path "$f"): the settings no menu shows"
+    elif grep -qi '^[[:space:]]*ModelShadow_Proj_Size[[:space:]]*=' "$f" 2>/dev/null; then   # the enhanced set was here
+      before=$(cksum < "$f")
+      backup_once "$f"
+      edit "$(win_path "$f")" set-options --existing "$f" "$HIDDEN_DEFAULTS"
+      [ "$(cksum < "$f")" = "$before" ] || ok "$(win_path "$f"): the enhanced set's values are the game's own again"
+    fi
+  done
+}
+
 step_detail() {
   say "Detail: graphics settings"
   need_game
@@ -1638,6 +1699,9 @@ step_detail() {
   if [ "$DETAIL" = light ]; then
     values="$values$LIGHT_DETAIL"
     what="the lighter graphics settings"
+  elif [ "$DETAIL" = enhanced ]; then
+    values="$values$ENHANCED_DETAIL"
+    what="the enhanced graphics settings"
   fi
   screen_size
   if [ -n "$SCREEN_W" ]; then   # options.cfg wins over the size in a launcher's block of useropts.cfg
@@ -1649,8 +1713,12 @@ ScreenHeight = $SCREEN_H"
     set_options "$f" "$values"
     ok "$(win_path "$f"): $what"
   done < <(options_files)
+  hidden_settings
   if [ "$DETAIL" = light ]; then
     info "Draw distance held at 70%, no character shadows, no wet streets, no anti-aliasing. Everything else at its highest."
+  elif [ "$DETAIL" = enhanced ]; then
+    info "Past the game's menu: draw distance 40% further, sharper character shadows drawn further out, grass twice as far, finer models at a distance, a sharper wet-street reflection, more cars and pedestrians."
+    note "Experimental: tried by eye with Revived on an M4, not measured. It costs frame rate, most in busy streets. A launcher update can replace autoexec.cfg: run this step again then."
   else
     info "Draw distance, shadows, wet streets, weather, grass, traffic, anti-aliasing and both screen filters."
   fi

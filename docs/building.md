@@ -42,10 +42,11 @@ setup stops if a game is running.
    working. The frame-rate limit is `DXVK_FRAME_RATE`: 90, or the number after `--fps`. An `n`
    to the limit writes `0`, no limit, and the next run starts from that answer.
 5. **detail**, on request: graphics settings and the main display's size in each game's
-   `options.cfg`, and 16× anisotropic filtering in `C:\Games\dxvk\dxvk.conf`. There are two
+   `options.cfg`, and 16× anisotropic filtering in `C:\Games\dxvk\dxvk.conf`. There are three
    sets, and the question lists the one for the Mac it runs on first. Return takes that one in a
    game without settings. Where a game has settings, Return and `--yes` leave them. The step named
-   by itself (`detail`) starts on this Mac's set, and `--yes detail` writes it.
+   by itself (`detail`) starts on this Mac's set, and `--yes detail` writes it. `--yes` never
+   takes the enhanced set.
    - maximum, for an M3, M4 or newer: the highest Video Options values, with
      `Client_RenderThrottle_Override = 1`
    - lighter, for an M1 or M2: the same with the draw distance held at 70%
@@ -53,6 +54,14 @@ setup stops if a game is running.
      anti-aliasing. It is a first version. On the M4, anti-aliasing cost a few fps and
      character shadows 12 to 13% in a crowd ([measurements.md](measurements.md#in-a-crowd)).
      The 70% draw distance and the wet streets are not measured.
+   - enhanced, experimental: the maximum, then values past the top of the game's menu. In
+     `options.cfg` the draw distances times 1.4 and more cars and pedestrians (35 of each,
+     density 2). In each game's `autoexec.cfg`, which the game reads and never writes, settings
+     no menu shows: character shadows at 1024 instead of 512, drawn twice as far and kept real
+     for longer, grass twice as far, finer models at a distance and a 1024 wet-street reflection
+     map instead of 256. Tried by eye with Revived on an M4, not measured: it costs frame rate,
+     most in busy streets. A launcher update can replace `autoexec.cfg`: run the step again
+     then. Choosing another set puts those `autoexec.cfg` values back to the game's own.
 6. **intro**, on request: `EnableSplash = 0` in each game's `useropts.cfg`.
 7. **music**, Revived only: `music = on` in its starter's music guard, and the music setting in
    its `options.cfg` and `useropts.cfg` back to 1. A later run of every step leaves
