@@ -14,7 +14,9 @@ own `client.dll`.
 1. **Old-style math under Rosetta.** The game does its vector, matrix, culling and animation
    math with x87 instructions, the floating-point unit of older Intel processors. Rosetta 2,
    which runs Intel code on Apple Silicon, emulates x87 in software at about 25 ns per
-   instruction. In the world, 80–90% of the game's main thread was x87 math.
+   instruction: ARM has nothing like x87's 80-bit register stack. SSE2, the newer instructions
+   for the same math, maps almost directly onto ARM's own. In the world, 80–90% of the game's
+   main thread was x87 math.
 2. **CrossOver's graphics.** Wine's own Direct3D 9 is slow at passing draw calls to the GPU.
    CrossOver's DXVK, which runs Direct3D 9 on Vulkan, shows a black screen with this game, and
    once that is fixed it stalls in several ways on Apple GPUs.

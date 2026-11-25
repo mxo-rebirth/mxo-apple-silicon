@@ -61,6 +61,7 @@ The table of files is in [docs/development.md](docs/development.md#layout). A ne
 - An archive with a symbolic link is not used, and a temporary file is never written through a link
 - A page that no longer looks as expected stops that step with a message. The setup never falls back to a guess.
 - The game archive has no published checksum. The setup says where it comes from.
+- Before it installs anything, the setup says that it is not connected to any server project and cannot promise that their files are safe. A matching checksum shows whose file it is, not that it is safe.
 
 ## Tests and Checks
 

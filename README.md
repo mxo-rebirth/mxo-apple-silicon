@@ -13,10 +13,12 @@ MxO Revived and MxOEmu.
 
 It is the result of reverse engineering: taking the game's 2009 client apart without its
 source code.
-The game does its math with an old kind of processor instruction, which Apple's chips can only
-imitate slowly. This project translates 535 of the game's math routines into the modern kind
-and swaps them in when the game starts. The results stay the same. It also fixes fifteen
-graphics problems between the game and the Mac's graphics chip.
+The game does its math with x87, an old kind of processor instruction. Apple's chips are ARM
+and have nothing like it, so Rosetta, which runs Intel programs on these Macs, has to imitate
+x87 in software, slowly. The newer kind, SSE2, maps almost directly onto the chip. This project
+rewrites 535 of the game's x87 math routines as SSE2 and swaps them in when the game starts.
+The results stay the same. It also fixes fifteen graphics problems between the game and the
+Mac's graphics chip.
 [How it works](docs/how-it-works.md)
 
 On an M4 the game went from about 15 fps, with the game cutting its draw distance, to 55–89 fps
@@ -153,4 +155,4 @@ repository contains no game files, and the screenshot shows the game.
 
 The Matrix Online is a trademark of Warner Bros. Entertainment Inc. CrossOver is a trademark of
 CodeWeavers, Inc. This fan project is not affiliated with or endorsed by Warner Bros.,
-CodeWeavers or any of the server teams.
+CodeWeavers or any of the server projects.
