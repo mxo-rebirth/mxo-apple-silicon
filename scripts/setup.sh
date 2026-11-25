@@ -293,6 +293,7 @@ say() {
 info() { row " " "" "$1"; }
 ok()   { row "$M_OK" "$ACC" "$1" "${2:-}"; }
 note() { local ROW_INK=$YEL; row "$M_NOTE" "$YEL" "$1"; }   # the whole line in amber, not only its mark
+picked() { local ROW_INK=$ACC; row "$M_PICK" "$ACC" "$1"; }   # a menu's picked item, the whole line in colour
 bad()  { row "$M_BAD" "$RED" "$1"; }
 
 field() {   # field LABEL VALUE
@@ -578,14 +579,10 @@ choose() {   # choose ITEM…: sets CHOICE to the picked item's index. Starts on
     lines=0
     # numbered, and the picked one in colour: plainly a list to move through
     for ((i = 0; i < n; i++)); do
-      if [ $i = "$CHOICE" ]; then
-        ROW_INK=$ACC row "$M_PICK" "$ACC" "$((i + 1)). ${items[i]}"
-      else
-        row " " "" "$((i + 1)). ${items[i]}"
-      fi
+      if [ $i = "$CHOICE" ]; then picked "$((i + 1)). ${items[i]}"; else row " " "" "$((i + 1)). ${items[i]}"; fi
       lines=$((lines + ROW_LINES))
     done
-    row " " "" "" "$M_KEYS or 1-$n to choose, Enter to confirm"
+    row " " "" "" "$M_KEYS or 1-$((n < 9 ? n : 9)) to choose, Enter to confirm"   # one key each, so up to 9
     lines=$((lines + ROW_LINES))
     IFS= read -rsn1 key || { printf '\033[?25h'; die "no answer"; }
     case "$key" in
@@ -1878,7 +1875,8 @@ else
 fi
 if ! named uninstall; then
   if [ $CROSSOVER_CLOSED = 1 ]; then info "Open CrossOver again: it shows the launchers' icons."; fi
-  if [ -n "$REVIVED" ] && ! video_off; then
+  # a run of every step asks about it. The game step alone does not
+  if named game && [ -n "$REVIVED" ] && ! video_off; then
     note "Revived's launcher plays a rain animation behind its window, also while you play, which costs frame rate. Switch it off in the launcher's settings, or with: scripts/setup.sh video"
   fi
 fi
